@@ -1,0 +1,90 @@
+# Dotfiles Manager Configuration
+# This is an example configuration file.
+# Copy this to ~/.config/dotfiles-manager/config.toml and customize as needed.
+
+[general]
+# Repository path where dotfiles are stored
+repo_path = "~/.dotfiles"
+
+# Current active profile
+current_profile = "default"
+
+# Directory for backups (created automatically on conflicts)
+backup_dir = "~/.dotfiles/.backups"
+
+# Symlink resolution strategy: auto, relative, absolute, follow, replace
+# - auto: Use relative if possible, absolute if needed (recommended)
+# - relative: Always create relative symlinks
+# - absolute: Always create absolute symlinks
+# - follow: Follow existing symlinks, replace target
+# - replace: Replace symlinks with actual files (copy)
+symlink_resolution = "auto"
+
+# Tool configurations
+# Each tool section defines files to track
+# Files can have profile-specific overrides
+
+[tools.sway]
+# Sway window manager configuration
+files = [
+    { repo = "config", dest = ".config/sway/config" },
+    # Profile-specific override example:
+    # { repo = "config.work", dest = ".config/sway/config", profile = "work" }
+]
+
+[tools.waybar]
+# Waybar status bar configuration
+files = [
+    { repo = "config", dest = ".config/waybar/config" },
+    { repo = "style.css", dest = ".config/waybar/style.css" }
+]
+
+[tools.cursor]
+# Cursor editor settings
+files = [
+    { repo = "settings.json", dest = ".config/Cursor/User/settings.json" },
+    { repo = "keybindings.json", dest = ".config/Cursor/User/keybindings.json" }
+]
+
+[tools.vscode]
+# VS Code settings (if using both editors)
+files = [
+    { repo = "settings.json", dest = ".config/Code/User/settings.json" }
+]
+
+[tools.mako]
+# Mako notification daemon
+files = [
+    { repo = "config", dest = ".config/mako/config" }
+]
+
+[tools.rofi]
+# Rofi application launcher
+files = [
+    { repo = "config.rasi", dest = ".config/rofi/config.rasi" }
+]
+
+[tools.firefox]
+# Firefox browser settings
+# Use 'dotfiles-manager add-browser firefox' to auto-detect and add
+# Example manual entry:
+# files = [
+#     { repo = "prefs.js", dest = ".mozilla/firefox/xxxxx.default/prefs.js" },
+#     { repo = "extensions", dest = ".mozilla/firefox/xxxxx.default/extensions" }
+# ]
+
+[tools.zen]
+# Zen browser settings
+# Use 'dotfiles-manager add-browser zen' to auto-detect and add
+# Example manual entry:
+# files = [
+#     { repo = "prefs.js", dest = ".zenbrowser/profiles/default/prefs.js" },
+#     { repo = "extensions", dest = ".zenbrowser/profiles/default/extensions" }
+# ]
+
+# Custom tools can be added with any name
+# [tools.my_custom_tool]
+# files = [
+#     { repo = "custom.conf", dest = ".config/custom/custom.conf" }
+# ]
+
