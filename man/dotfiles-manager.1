@@ -79,6 +79,34 @@ Switch to a profile
 .TP
 \fBlist\fR
 List all profiles
+.SS remote
+Manage git remotes.
+.TP
+\fBadd\fR \fINAME\fR \fIURL\fR [\fB--dry-run\fR]
+Add a remote repository
+.TP
+\fBremove\fR \fINAME\fR [\fB--dry-run\fR]
+Remove a remote repository
+.TP
+\fBset-url\fR \fINAME\fR \fIURL\fR [\fB--dry-run\fR]
+Set or change remote URL
+.TP
+\fBlist\fR
+List all configured remotes
+.SS push
+Push changes to a remote repository.
+.TP
+\fB--remote\fR \fINAME\fR
+Remote name (default: origin or config default_remote)
+.TP
+\fB--branch\fR \fINAME\fR
+Branch name (default: current HEAD or config default_branch)
+.TP
+\fB--set-upstream\fR
+Set upstream branch after push
+.TP
+\fB--dry-run\fR
+Preview push without executing
 .SH CONFIGURATION
 Configuration is stored in \fI~/.config/dotfiles-manager/config.toml\fR.
 
@@ -90,6 +118,8 @@ repo_path = "~/.dotfiles"
 current_profile = "default"
 backup_dir = "~/.dotfiles/.backups"
 symlink_resolution = "auto"
+default_remote = "origin"
+default_branch = "main"
 
 [tools.<tool_name>]
 files = [
@@ -163,6 +193,21 @@ Restore from backup:
 .RS
 .nf
 dotfiles-manager restore latest
+.fi
+.RE
+
+Add a remote and push:
+.RS
+.nf
+dotfiles-manager remote add origin git@github.com:username/dotfiles.git
+dotfiles-manager push --set-upstream
+.fi
+.RE
+
+List remotes:
+.RS
+.nf
+dotfiles-manager remote list
 .fi
 .RE
 .SH FILES

@@ -20,6 +20,12 @@ backup_dir = "~/.dotfiles-backups"
 # - replace: Replace symlinks with actual files (copy)
 symlink_resolution = "auto"
 
+# Default remote for push operations (optional, defaults to "origin")
+# default_remote = "origin"
+
+# Default branch for push operations (optional, defaults to "main" if no HEAD)
+# default_branch = "main"
+
 # Tool configurations
 # Each tool section defines files to track
 # Files can have profile-specific overrides

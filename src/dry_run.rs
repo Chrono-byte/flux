@@ -3,13 +3,46 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum Operation {
-    CreateSymlink { from: PathBuf, to: PathBuf },
-    CreateBackup { file: PathBuf, backup: PathBuf },
-    CreateDirectory { path: PathBuf },
-    CopyFile { from: PathBuf, to: PathBuf },
-    RemoveFile { path: PathBuf },
-    GitCommit { message: String },
-    GitStage { files: Vec<PathBuf> },
+    CreateSymlink {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    CreateBackup {
+        file: PathBuf,
+        backup: PathBuf,
+    },
+    CreateDirectory {
+        path: PathBuf,
+    },
+    CopyFile {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    RemoveFile {
+        path: PathBuf,
+    },
+    GitCommit {
+        message: String,
+    },
+    GitStage {
+        files: Vec<PathBuf>,
+    },
+    GitRemoteAdd {
+        name: String,
+        url: String,
+    },
+    GitRemoteRemove {
+        name: String,
+    },
+    GitRemoteSetUrl {
+        name: String,
+        url: String,
+    },
+    GitPush {
+        remote: String,
+        branch: String,
+        set_upstream: bool,
+    },
 }
 
 pub struct DryRun {
@@ -82,6 +115,46 @@ impl DryRun {
                     for file in files {
                         println!("      - {}", file.display());
                     }
+                }
+                Operation::GitRemoteAdd { name, url } => {
+                    println!(
+                        "   {} Add remote '{}': {}",
+                        "Git remote:".bright_magenta(),
+                        name.cyan(),
+                        url
+                    );
+                }
+                Operation::GitRemoteRemove { name } => {
+                    println!(
+                        "   {} Remove remote '{}'",
+                        "Git remote:".bright_magenta(),
+                        name.cyan()
+                    );
+                }
+                Operation::GitRemoteSetUrl { name, url } => {
+                    println!(
+                        "   {} Set URL for remote '{}': {}",
+                        "Git remote:".bright_magenta(),
+                        name.cyan(),
+                        url
+                    );
+                }
+                Operation::GitPush {
+                    remote,
+                    branch,
+                    set_upstream,
+                } => {
+                    println!(
+                        "   {} Push branch '{}' to remote '{}' (set_upstream: {})",
+                        "Git push:".bright_magenta(),
+                        branch.cyan(),
+                        remote.cyan(),
+                        if *set_upstream {
+                            "yes".green()
+                        } else {
+                            "no".yellow()
+                        }
+                    );
                 }
             }
         }

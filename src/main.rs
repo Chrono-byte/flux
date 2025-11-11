@@ -23,7 +23,10 @@ use config::Config;
 use dry_run::DryRun;
 use error::Result;
 use file_manager::{add_file, backup_all_files, remove_file, sync_files};
-use git::{commit_changes, detect_changes, init_repo, stage_changes};
+use git::{
+    add_remote, commit_changes, detect_changes, init_repo, list_remotes, push_to_remote,
+    remove_remote, set_remote_url, stage_changes,
+};
 use migrate::migrate_files;
 use profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use prompt::{prompt_commit_message, prompt_yes_no};
@@ -78,6 +81,9 @@ enum Commands {
         /// Profile name (default: current profile)
         #[arg(long)]
         profile: Option<String>,
+        /// Commit message (optional, will prompt if not provided)
+        #[arg(long)]
+        message: Option<String>,
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
@@ -132,6 +138,9 @@ enum Commands {
         /// Specific file to restore (optional, restores all if not specified)
         #[arg(long)]
         file: Option<String>,
+        /// Skip confirmation prompts (auto-confirm)
+        #[arg(long)]
+        yes: bool,
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
@@ -168,6 +177,26 @@ enum Commands {
         #[command(subcommand)]
         command: ProfileCommands,
     },
+    /// Manage remote repositories
+    Remote {
+        #[command(subcommand)]
+        command: RemoteCommands,
+    },
+    /// Push changes to remote repository
+    Push {
+        /// Remote name (default: origin or config default_remote)
+        #[arg(long)]
+        remote: Option<String>,
+        /// Branch name (default: current HEAD or config default_branch)
+        #[arg(long)]
+        branch: Option<String>,
+        /// Set upstream after push
+        #[arg(long)]
+        set_upstream: bool,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -183,6 +212,40 @@ enum ProfileCommands {
         name: String,
     },
     /// List all profiles
+    List,
+}
+
+#[derive(Subcommand)]
+enum RemoteCommands {
+    /// Add a remote repository
+    Add {
+        /// Remote name (e.g., origin)
+        name: String,
+        /// Remote URL (git@... or https://...)
+        url: String,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove a remote repository
+    Remove {
+        /// Remote name
+        name: String,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Set or change remote URL
+    SetUrl {
+        /// Remote name
+        name: String,
+        /// New remote URL
+        url: String,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// List all remotes
     List,
 }
 
@@ -373,7 +436,11 @@ fn run(cli: Cli) -> Result<()> {
                 );
             }
         }
-        Commands::Sync { profile, dry_run } => {
+        Commands::Sync {
+            profile,
+            message,
+            dry_run,
+        } => {
             let config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
 
@@ -391,7 +458,11 @@ fn run(cli: Cli) -> Result<()> {
                 let changes = detect_changes(&repo)?;
 
                 if !changes.is_empty() {
-                    let commit_message = prompt_commit_message(&changes)?;
+                    let commit_message = if let Some(msg) = message {
+                        msg
+                    } else {
+                        prompt_commit_message(&changes)?
+                    };
                     stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
                     commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
                 }
@@ -498,6 +569,7 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Restore {
             backup,
             file,
+            yes,
             dry_run,
         } => {
             let config = Config::load()?;
@@ -511,7 +583,7 @@ fn run(cli: Cli) -> Result<()> {
             // If no backup specified, show list and let user choose
             let selected_backup = if backup == "latest" && file.is_none() {
                 display_backups(&backups);
-                if !prompt_yes_no("Restore from latest backup?")? {
+                if !yes && !prompt_yes_no("Restore from latest backup?")? {
                     println!("{}", "Restore cancelled.".yellow());
                     return Ok(());
                 }
@@ -540,7 +612,10 @@ fn run(cli: Cli) -> Result<()> {
 
             if let Some(target_file) = file {
                 let target_path = std::path::Path::new(&target_file);
-                if !dry_run && !prompt_yes_no(&format!("Restore {} from backup?", target_file))? {
+                if !dry_run
+                    && !yes
+                    && !prompt_yes_no(&format!("Restore {} from backup?", target_file))?
+                {
                     println!("{}", "Restore cancelled.".yellow());
                     return Ok(());
                 }
@@ -553,6 +628,7 @@ fn run(cli: Cli) -> Result<()> {
             } else {
                 // Restore all files from backup
                 if !dry_run
+                    && !yes
                     && !prompt_yes_no(&format!(
                         "Restore all {} file(s) from backup {}?",
                         selected_backup.files.len(),
@@ -654,6 +730,71 @@ fn run(cli: Cli) -> Result<()> {
                         );
                     }
                 }
+            }
+        }
+        Commands::Remote { command } => {
+            let config = Config::load()?;
+            let repo_path = config.get_repo_path()?;
+            let repo = init_repo(&repo_path)?;
+            let mut dry_run_tracker = DryRun::new();
+
+            match command {
+                RemoteCommands::Add { name, url, dry_run } => {
+                    add_remote(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
+                    if dry_run {
+                        dry_run_tracker.display_summary();
+                    }
+                }
+                RemoteCommands::Remove { name, dry_run } => {
+                    remove_remote(&repo, &name, &mut dry_run_tracker, dry_run)?;
+                    if dry_run {
+                        dry_run_tracker.display_summary();
+                    }
+                }
+                RemoteCommands::SetUrl { name, url, dry_run } => {
+                    set_remote_url(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
+                    if dry_run {
+                        dry_run_tracker.display_summary();
+                    }
+                }
+                RemoteCommands::List => {
+                    list_remotes(&repo)?;
+                }
+            }
+        }
+        Commands::Push {
+            remote,
+            branch,
+            set_upstream,
+            dry_run,
+        } => {
+            let config = Config::load()?;
+            let repo_path = config.get_repo_path()?;
+            let repo = init_repo(&repo_path)?;
+            let mut dry_run_tracker = DryRun::new();
+
+            // Resolve remote: --remote flag > config default_remote > "origin"
+            let resolved_remote = remote
+                .or_else(|| config.general.default_remote.clone())
+                .unwrap_or_else(|| "origin".to_string());
+
+            // Resolve branch: --branch flag > current HEAD > config default_branch > "main"
+            let resolved_branch = branch
+                .or_else(|| git::get_current_branch(&repo).ok())
+                .or_else(|| config.general.default_branch.clone())
+                .unwrap_or_else(|| "main".to_string());
+
+            push_to_remote(
+                &repo,
+                &resolved_remote,
+                &resolved_branch,
+                set_upstream,
+                &mut dry_run_tracker,
+                dry_run,
+            )?;
+
+            if dry_run {
+                dry_run_tracker.display_summary();
             }
         }
     }

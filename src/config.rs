@@ -11,6 +11,10 @@ pub struct GeneralConfig {
     pub backup_dir: String,
     #[serde(default = "default_symlink_resolution")]
     pub symlink_resolution: String,
+    #[serde(default)]
+    pub default_remote: Option<String>,
+    #[serde(default)]
+    pub default_branch: Option<String>,
 }
 
 fn default_symlink_resolution() -> String {
@@ -196,6 +200,8 @@ impl Default for Config {
                 current_profile: "default".to_string(),
                 backup_dir: "~/.dotfiles-backups".to_string(),
                 symlink_resolution: "auto".to_string(),
+                default_remote: None,
+                default_branch: None,
             },
             tools: HashMap::new(),
         }
