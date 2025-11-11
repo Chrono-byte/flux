@@ -1137,16 +1137,17 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 let diff = compare_states(&config, profile.as_deref(), sudo, !system, pm_type)?;
                 display_preview(&diff);
             } else {
-                apply_config(
-                    &config,
-                    profile.as_deref(),
+                use crate::commands::ApplyOptions;
+                apply_config(ApplyOptions {
+                    config: &config,
+                    profile: profile.as_deref(),
                     dry_run,
                     yes,
-                    sudo,
-                    !system,
-                    description.as_deref(),
-                    pm_type,
-                )?;
+                    use_sudo: sudo,
+                    user_services: !system,
+                    description: description.as_deref(),
+                    package_manager_type: pm_type,
+                })?;
             }
         }
     }

@@ -7,7 +7,7 @@ pub mod status;
 pub mod untracked;
 pub mod validate;
 
-pub use apply::{apply_config, compare_states, display_preview};
+pub use apply::{ApplyOptions, apply_config, compare_states, display_preview};
 pub use migrate::migrate_files;
 pub use packages::{compare_packages, list_packages, show_declared_packages};
 pub use restore::{

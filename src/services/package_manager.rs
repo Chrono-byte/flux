@@ -599,6 +599,7 @@ impl PackageKitPackageManager {
         // Monitor signals until transaction completes
         let tx_clone = tx.clone();
         tokio::spawn(async move {
+            #[allow(clippy::never_loop)]
             loop {
                 tokio::select! {
                     Some(msg) = finished_stream.next() => {

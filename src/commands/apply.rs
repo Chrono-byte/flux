@@ -12,6 +12,27 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+/// Options for applying configuration
+#[derive(Debug, Clone)]
+pub struct ApplyOptions<'a> {
+    /// Configuration to apply
+    pub config: &'a Config,
+    /// Profile name (optional)
+    pub profile: Option<&'a str>,
+    /// Dry run mode - preview changes without applying
+    pub dry_run: bool,
+    /// Auto-confirm without prompting
+    pub yes: bool,
+    /// Use sudo for operations requiring elevated privileges
+    pub use_sudo: bool,
+    /// Use user services instead of system services
+    pub user_services: bool,
+    /// Optional description for this apply operation
+    pub description: Option<&'a str>,
+    /// Package manager type to use
+    pub package_manager_type: PackageManagerType,
+}
+
 /// State comparison result showing what needs to change
 #[derive(Debug, Clone)]
 pub struct StateDiff {
@@ -316,25 +337,16 @@ pub fn display_preview(diff: &StateDiff) {
 }
 
 /// Apply configuration changes using atomic transactions
-pub fn apply_config(
-    config: &Config,
-    profile: Option<&str>,
-    dry_run: bool,
-    yes: bool,
-    use_sudo: bool,
-    user_services: bool,
-    description: Option<&str>,
-    package_manager_type: PackageManagerType,
-) -> Result<()> {
+pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     println!("{} Applying configuration...", "→".cyan().bold());
 
     // Compare states
     let diff = compare_states(
-        config,
-        profile,
-        use_sudo,
-        user_services,
-        package_manager_type,
+        options.config,
+        options.profile,
+        options.use_sudo,
+        options.user_services,
+        options.package_manager_type,
     )?;
 
     if diff.is_empty() {
@@ -349,12 +361,12 @@ pub fn apply_config(
     display_preview(&diff);
 
     // Confirm if not auto-yes
-    if !dry_run && !yes && !prompt_yes_no("Apply these changes?")? {
+    if !options.dry_run && !options.yes && !prompt_yes_no("Apply these changes?")? {
         println!("{} Apply cancelled", "⊘".yellow());
         return Ok(());
     }
 
-    if dry_run {
+    if options.dry_run {
         println!(
             "\n{} DRY RUN MODE - No changes will be applied",
             "⚠".yellow().bold()
@@ -366,18 +378,18 @@ pub fn apply_config(
     let temp_dir = TempDir::new()?.path().to_path_buf();
     let mut transaction = Transaction::begin(
         temp_dir.clone(),
-        use_sudo,
-        user_services,
-        package_manager_type,
+        options.use_sudo,
+        options.user_services,
+        options.package_manager_type,
     )?;
 
     // Add metadata
-    if let Some(desc) = description {
+    if let Some(desc) = options.description {
         transaction
             .metadata
             .insert("description".to_string(), desc.to_string());
     }
-    if let Some(prof) = profile {
+    if let Some(prof) = options.profile {
         transaction
             .metadata
             .insert("profile".to_string(), prof.to_string());
@@ -387,14 +399,14 @@ pub fn apply_config(
         .insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
 
     // Add file operations
-    let symlink_resolution = config.get_symlink_resolution()?;
+    let symlink_resolution = options.config.get_symlink_resolution()?;
     let home = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
 
     for file in &diff.files_to_sync {
         // Check if we need to backup
         if file.dest_path.exists() {
-            let backup_dir = config.get_backup_dir()?;
+            let backup_dir = options.config.get_backup_dir()?;
             let backup_path = backup_dir
                 .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string())
                 .join(
@@ -464,13 +476,13 @@ pub fn apply_config(
     let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, false);
 
     // Validate
-    transaction.validate(config)?;
+    transaction.validate(options.config)?;
 
     // Prepare
-    transaction.prepare(config)?;
+    transaction.prepare(options.config)?;
 
     // Commit
-    transaction.commit(config, &mut fs_manager)?;
+    transaction.commit(options.config, &mut fs_manager)?;
 
     // Verify
     transaction.verify()?;
