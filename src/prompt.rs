@@ -1,6 +1,6 @@
 use crate::error::{DotfilesError, Result};
 use crate::types::FileChange;
-use dialoguer::{theme::ColorfulTheme, Select};
+use dialoguer::{Select, theme::ColorfulTheme};
 use std::path::Path;
 
 pub enum ConflictResolution {
@@ -11,12 +11,7 @@ pub enum ConflictResolution {
 }
 
 pub fn prompt_conflict(file_path: &Path) -> Result<ConflictResolution> {
-    let options = vec![
-        "Backup and replace",
-        "Skip",
-        "View diff",
-        "Cancel",
-    ];
+    let options = vec!["Backup and replace", "Skip", "View diff", "Cancel"];
 
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt(format!(
@@ -26,7 +21,7 @@ pub fn prompt_conflict(file_path: &Path) -> Result<ConflictResolution> {
         .items(&options)
         .default(0)
         .interact()
-        .map_err(|e| DotfilesError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
 
     match selection {
         0 => Ok(ConflictResolution::BackupAndReplace),
@@ -45,7 +40,7 @@ pub fn prompt_yes_no(question: &str) -> Result<bool> {
         .items(&options)
         .default(0)
         .interact()
-        .map_err(|e| DotfilesError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
 
     Ok(selection == 0)
 }
@@ -73,7 +68,7 @@ pub fn prompt_commit_message(changes: &[FileChange]) -> Result<String> {
             ))
             .allow_empty(true)
             .interact_text()
-            .map_err(|e| DotfilesError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
 
         if !message.trim().is_empty() {
             messages.push(message);
@@ -88,4 +83,3 @@ pub fn prompt_commit_message(changes: &[FileChange]) -> Result<String> {
         Ok(format!("Update dotfiles: {}", messages.join("; ")))
     }
 }
-

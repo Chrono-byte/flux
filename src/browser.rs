@@ -29,28 +29,28 @@ pub fn detect_firefox_profiles() -> Result<Vec<BrowserProfile>> {
             for line in content.lines() {
                 let line = line.trim();
                 if line.starts_with("Name=") {
-                    if let Some(name) = current_profile.take() {
-                        if let Some(path) = current_path.take() {
-                            // Only add default profile
-                            if name.contains("default") {
-                                let profile_path = if path.starts_with('/') {
-                                    PathBuf::from(path)
-                                } else {
-                                    firefox_dir.join(path)
-                                };
-                                profiles.push(BrowserProfile {
-                                    name: "firefox-default".to_string(),
-                                    profile_path,
-                                    key_files: vec![
-                                        "prefs.js",
-                                        "user.js",
-                                        "places.sqlite",
-                                        "extensions",
-                                        "storage",
-                                    ],
-                                });
-                                break; // Found default, stop looking
-                            }
+                    if let Some(name) = current_profile.take()
+                        && let Some(path) = current_path.take()
+                    {
+                        // Only add default profile
+                        if name.contains("default") {
+                            let profile_path = if path.starts_with('/') {
+                                PathBuf::from(path)
+                            } else {
+                                firefox_dir.join(path)
+                            };
+                            profiles.push(BrowserProfile {
+                                name: "firefox-default".to_string(),
+                                profile_path,
+                                key_files: vec![
+                                    "prefs.js",
+                                    "user.js",
+                                    "places.sqlite",
+                                    "extensions",
+                                    "storage",
+                                ],
+                            });
+                            break; // Found default, stop looking
                         }
                     }
                     current_profile = Some(line.strip_prefix("Name=").unwrap_or("").to_string());
@@ -58,80 +58,79 @@ pub fn detect_firefox_profiles() -> Result<Vec<BrowserProfile>> {
                     current_path = Some(line.strip_prefix("Path=").unwrap_or("").to_string());
                 } else if line.starts_with("[Profile") {
                     // Reset for new profile section
-                    if let Some(name) = current_profile.take() {
-                        if let Some(path) = current_path.take() {
-                            // Only add default profile
-                            if name.contains("default") {
-                                let profile_path = if path.starts_with('/') {
-                                    PathBuf::from(path)
-                                } else {
-                                    firefox_dir.join(path)
-                                };
-                                profiles.push(BrowserProfile {
-                                    name: "firefox-default".to_string(),
-                                    profile_path,
-                                    key_files: vec![
-                                        "prefs.js",
-                                        "user.js",
-                                        "places.sqlite",
-                                        "extensions",
-                                        "storage",
-                                    ],
-                                });
-                                break; // Found default, stop looking
-                            }
+                    if let Some(name) = current_profile.take()
+                        && let Some(path) = current_path.take()
+                    {
+                        // Only add default profile
+                        if name.contains("default") {
+                            let profile_path = if path.starts_with('/') {
+                                PathBuf::from(path)
+                            } else {
+                                firefox_dir.join(path)
+                            };
+                            profiles.push(BrowserProfile {
+                                name: "firefox-default".to_string(),
+                                profile_path,
+                                key_files: vec![
+                                    "prefs.js",
+                                    "user.js",
+                                    "places.sqlite",
+                                    "extensions",
+                                    "storage",
+                                ],
+                            });
+                            break; // Found default, stop looking
                         }
                     }
                 }
             }
 
             // Handle last profile (if default)
-            if let Some(name) = current_profile {
-                if name.contains("default") {
-                    if let Some(path) = current_path {
-                        let profile_path = if path.starts_with('/') {
-                            PathBuf::from(path)
-                        } else {
-                            firefox_dir.join(path)
-                        };
-                        profiles.push(BrowserProfile {
-                            name: "firefox-default".to_string(),
-                            profile_path,
-                            key_files: vec![
-                                "prefs.js",
-                                "user.js",
-                                "places.sqlite",
-                                "extensions",
-                                "storage",
-                            ],
-                        });
-                    }
-                }
+            if let Some(name) = current_profile
+                && name.contains("default")
+                && let Some(path) = current_path
+            {
+                let profile_path = if path.starts_with('/') {
+                    PathBuf::from(path)
+                } else {
+                    firefox_dir.join(path)
+                };
+                profiles.push(BrowserProfile {
+                    name: "firefox-default".to_string(),
+                    profile_path,
+                    key_files: vec![
+                        "prefs.js",
+                        "user.js",
+                        "places.sqlite",
+                        "extensions",
+                        "storage",
+                    ],
+                });
             }
         }
     }
 
     // Fallback: look for directories matching default profile pattern
-    if profiles.is_empty() {
-        if let Ok(entries) = std::fs::read_dir(&firefox_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let dir_name = path.file_name().unwrap().to_string_lossy();
-                    if dir_name.contains("default") && !dir_name.starts_with('.') {
-                        profiles.push(BrowserProfile {
-                            name: "firefox-default".to_string(),
-                            profile_path: path,
-                            key_files: vec![
-                                "prefs.js",
-                                "user.js",
-                                "places.sqlite",
-                                "extensions",
-                                "storage",
-                            ],
-                        });
-                        break; // Found default, stop
-                    }
+    if profiles.is_empty()
+        && let Ok(entries) = std::fs::read_dir(&firefox_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let dir_name = path.file_name().unwrap().to_string_lossy();
+                if dir_name.contains("default") && !dir_name.starts_with('.') {
+                    profiles.push(BrowserProfile {
+                        name: "firefox-default".to_string(),
+                        profile_path: path,
+                        key_files: vec![
+                            "prefs.js",
+                            "user.js",
+                            "places.sqlite",
+                            "extensions",
+                            "storage",
+                        ],
+                    });
+                    break; // Found default, stop
                 }
             }
         }
@@ -143,7 +142,7 @@ pub fn detect_firefox_profiles() -> Result<Vec<BrowserProfile>> {
 pub fn detect_zen_profiles() -> Result<Vec<BrowserProfile>> {
     let home = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
-    
+
     // Try common Zen browser locations
     let possible_dirs = vec![
         home.join(".zenbrowser"),
@@ -194,7 +193,7 @@ pub fn detect_zen_profiles() -> Result<Vec<BrowserProfile>> {
             break; // Found a directory, stop looking
         }
     }
-    
+
     // Filter to only default profile if multiple found
     profiles.retain(|p| p.name.contains("default"));
 
@@ -213,14 +212,22 @@ pub fn get_browser_profile_files(profile: &BrowserProfile) -> Vec<(PathBuf, Stri
             let dest = if profile.name.starts_with("firefox-") {
                 // Extract actual profile directory from profile_path
                 if let Some(profile_dir_name) = profile.profile_path.file_name() {
-                    format!(".mozilla/firefox/{}/{}", profile_dir_name.to_string_lossy(), key_file)
+                    format!(
+                        ".mozilla/firefox/{}/{}",
+                        profile_dir_name.to_string_lossy(),
+                        key_file
+                    )
                 } else {
                     format!(".mozilla/firefox/default/{}", key_file)
                 }
             } else if profile.name.starts_with("zen-") {
                 // Extract actual profile directory from profile_path
                 if let Some(profile_dir_name) = profile.profile_path.file_name() {
-                    format!(".zenbrowser/profiles/{}/{}", profile_dir_name.to_string_lossy(), key_file)
+                    format!(
+                        ".zenbrowser/profiles/{}/{}",
+                        profile_dir_name.to_string_lossy(),
+                        key_file
+                    )
                 } else {
                     format!(".zenbrowser/default/{}", key_file)
                 }
@@ -235,3 +242,73 @@ pub fn get_browser_profile_files(profile: &BrowserProfile) -> Vec<(PathBuf, Stri
     files
 }
 
+pub fn detect_alacritty_configs() -> Result<Vec<(PathBuf, String)>> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
+
+    let mut configs = Vec::new();
+
+    // Check for config in ~/.config/alacritty/ (most common location)
+    let config_dir = home.join(".config").join("alacritty");
+    let possible_configs = vec![
+        config_dir.join("alacritty.toml"),
+        config_dir.join("alacritty.yml"),
+    ];
+
+    for config_path in possible_configs {
+        if config_path.exists() {
+            // Determine destination path relative to home
+            let dest = if let Ok(relative) = config_path.strip_prefix(&home) {
+                format!(".{}", relative.to_string_lossy().replace('\\', "/"))
+            } else {
+                // Fallback: construct expected path
+                if config_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .ends_with(".toml")
+                {
+                    ".config/alacritty/alacritty.toml".to_string()
+                } else {
+                    ".config/alacritty/alacritty.yml".to_string()
+                }
+            };
+
+            configs.push((config_path, dest));
+            break; // Only use the first found config (prefer toml over yml)
+        }
+    }
+
+    // Fallback: check legacy location ~/.alacritty.yml
+    if configs.is_empty() {
+        let legacy_config = home.join(".alacritty.yml");
+        if legacy_config.exists() {
+            configs.push((legacy_config, ".alacritty.yml".to_string()));
+        }
+    }
+
+    Ok(configs)
+}
+
+pub fn detect_starship_configs() -> Result<Vec<(PathBuf, String)>> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
+
+    let mut configs = Vec::new();
+
+    // Check for config in ~/.config/starship.toml (standard location)
+    let config_path = home.join(".config").join("starship.toml");
+
+    if config_path.exists() {
+        // Determine destination path relative to home
+        let dest = if let Ok(relative) = config_path.strip_prefix(&home) {
+            format!(".{}", relative.to_string_lossy().replace('\\', "/"))
+        } else {
+            ".config/starship.toml".to_string()
+        };
+
+        configs.push((config_path, dest));
+    }
+
+    Ok(configs)
+}

@@ -74,12 +74,8 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
 
         Ok(FileStatus::Synced)
     } else {
-        // Not a symlink, check if files differ
-        if files_differ(&file.repo_path, &file.dest_path)? {
-            Ok(FileStatus::OutOfSync)
-        } else {
-            Ok(FileStatus::Synced)
-        }
+        // Destination exists but is not a symlink - this is always out of sync
+        Ok(FileStatus::OutOfSync)
     }
 }
 
@@ -116,14 +112,20 @@ pub fn display_status(reports: &[StatusReport]) {
         return;
     }
 
-    let synced_count = reports.iter().filter(|r| matches!(r.status, FileStatus::Synced)).count();
+    let synced_count = reports
+        .iter()
+        .filter(|r| matches!(r.status, FileStatus::Synced))
+        .count();
     let issues_count = reports.len() - synced_count;
 
     // Group by tool
     use std::collections::HashMap;
     let mut by_tool: HashMap<String, Vec<&StatusReport>> = HashMap::new();
     for report in reports {
-        by_tool.entry(report.file.tool.clone()).or_insert_with(Vec::new).push(report);
+        by_tool
+            .entry(report.file.tool.clone())
+            .or_default()
+            .push(report);
     }
 
     println!("\n{}", "Dotfiles Status:".bold().cyan());
@@ -134,8 +136,13 @@ pub fn display_status(reports: &[StatusReport]) {
 
     for tool in tool_names {
         let tool_reports = &by_tool[tool];
-        println!("\n{} {} ({} file(s))", "Tool:".bold(), tool.cyan(), tool_reports.len());
-        
+        println!(
+            "\n{} {} ({} file(s))",
+            "Tool:".bold(),
+            tool.cyan(),
+            tool_reports.len()
+        );
+
         for report in tool_reports {
             let icon = match report.status {
                 FileStatus::Synced => "✓".green(),
@@ -164,4 +171,3 @@ pub fn display_status(reports: &[StatusReport]) {
         issues_count.to_string().yellow()
     );
 }
-

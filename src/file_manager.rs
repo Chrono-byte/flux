@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::dry_run::{DryRun, Operation};
 use crate::error::{DotfilesError, Result};
-use crate::prompt::{prompt_conflict, ConflictResolution};
+use crate::prompt::{ConflictResolution, prompt_conflict};
 use crate::types::{SymlinkResolution, TrackedFile};
 use chrono::Local;
 use colored::Colorize;
@@ -10,49 +10,37 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-// Track if we're in dry run mode
-static mut DRY_RUN_MODE: bool = false;
+// #############################################################################
+// ## Public API Functions
+// #############################################################################
 
-pub fn set_dry_run_mode(enabled: bool) {
-    unsafe {
-        DRY_RUN_MODE = enabled;
-    }
-}
-
-pub fn is_dry_run() -> bool {
-    unsafe { DRY_RUN_MODE }
-}
-
-pub fn is_file_locked(file_path: &Path) -> bool {
-    // Try to acquire a lock on the file
-    if let Ok(mut lock) = LockFile::open(file_path) {
-        if lock.try_lock().is_err() {
-            return true; // File is locked
-        }
-        let _ = lock.unlock();
-    }
-    false
-}
-
+/// Add a file to the dotfiles repository.
 pub fn add_file(
     config: &mut Config,
     tool: &str,
     source_path: &Path,
     dest_path: &Path,
     profile: Option<&str>,
+    fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
-    // Check if source file is locked
     if is_file_locked(source_path) {
         return Err(DotfilesError::Path(format!(
             "Source file {} is locked (may be in use), cannot add",
             source_path.display()
         )));
     }
-    
+
+    // BACKUP: Create backup of destination file if it exists BEFORE any changes
+    let home = dirs::home_dir()
+        .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
+    let full_dest_path = home.join(dest_path);
+    if let Some(path_to_backup) = get_path_to_backup(&full_dest_path) {
+        println!("  Creating backup of existing destination...");
+        fs_manager.backup_file(&path_to_backup, config)?;
+    }
+
     let repo_path = config.get_repo_path()?;
     let tool_dir = repo_path.join(tool);
-    fs::create_dir_all(&tool_dir)?;
-
     let repo_file = tool_dir.join(
         source_path
             .file_name()
@@ -60,13 +48,15 @@ pub fn add_file(
     );
 
     // Copy file or directory to repo
+    fs_manager.create_dir_all(&tool_dir)?;
+
     if source_path.is_dir() {
-        copy_dir_all(source_path, &repo_file)?;
+        fs_manager.copy_dir_all(source_path, &repo_file)?;
     } else {
-        fs::copy(source_path, &repo_file)?;
+        fs_manager.copy(source_path, &repo_file)?;
     }
 
-    // Add to config
+    // Add to config (in memory)
     let repo_relative = repo_file
         .strip_prefix(&repo_path)
         .map_err(|_| DotfilesError::Path("Could not compute relative path".to_string()))?
@@ -74,284 +64,190 @@ pub fn add_file(
         .to_string();
     let dest_str = dest_path.to_string_lossy().to_string();
     config.add_file_to_tool(tool, &repo_relative, &dest_str, profile)?;
-    config.save()?;
 
-    println!(
-        "{} Added {} to {} tool",
-        "✓".green(),
-        source_path.display(),
-        tool
-    );
+    // Only save config if not in dry run mode
+    if !fs_manager.is_dry_run {
+        config.save(fs_manager.is_dry_run)?;
+        println!(
+            "{} Added {} to {} tool",
+            "✓".green(),
+            source_path.display(),
+            tool
+        );
+    } else {
+        println!(
+            "  [DRY RUN] Would add {} to {} tool",
+            source_path.display(),
+            tool
+        );
+    }
 
     Ok(())
 }
 
-pub fn sync_files(config: &Config, profile: Option<&str>, dry_run: &mut DryRun, is_dry_run_mode: bool) -> Result<()> {
-    set_dry_run_mode(is_dry_run_mode);
+/// Sync all tracked files, creating symlinks from repo to destination.
+pub fn sync_files(
+    config: &Config,
+    profile: Option<&str>,
+    dry_run_tracker: &mut DryRun,
+    is_dry_run_mode: bool,
+) -> Result<()> {
     let tracked_files = config.get_tracked_files(profile)?;
     let symlink_resolution = config.get_symlink_resolution()?;
 
-    for file in tracked_files {
-        sync_file(&file, &symlink_resolution, dry_run)?;
-    }
+    // Create the FileSystemManager here. It will be passed down.
+    let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
 
-    Ok(())
-}
+    println!("{} Syncing {} file(s)...", "→".cyan(), tracked_files.len());
 
-fn sync_file(
-    file: &TrackedFile,
-    resolution: &SymlinkResolution,
-    dry_run: &mut DryRun,
-) -> Result<()> {
-    // Check if file is locked
-    if is_file_locked(&file.dest_path) {
+    for (idx, file) in tracked_files.iter().enumerate() {
         println!(
-            "{} Warning: {} is locked (may be in use), skipping",
-            "⚠".yellow(),
+            "\n{} [{}/{}] Processing: {}",
+            "→".cyan(),
+            idx + 1,
+            tracked_files.len(),
             file.dest_path.display()
         );
-        return Ok(());
-    }
-    
-    if is_file_locked(&file.repo_path) {
-        println!(
-            "{} Warning: {} is locked (may be in use), skipping",
-            "⚠".yellow(),
-            file.repo_path.display()
-        );
-        return Ok(());
-    }
-    
-    // Check if destination exists
-    if file.dest_path.exists() {
-        // Check if it's already a symlink pointing to the right place
-        if let Ok(link_target) = fs::read_link(&file.dest_path) {
-            if link_target == file.repo_path {
-                // Already correctly linked
-                return Ok(());
-            }
-        }
-
-        // Check if files are different
-        if files_differ(&file.repo_path, &file.dest_path)? {
-            let conflict_resolution = prompt_conflict(&file.dest_path)?;
-            match conflict_resolution {
-                ConflictResolution::BackupAndReplace => {
-                    create_backup(&file.dest_path, dry_run)?;
-                    create_symlink(file, resolution, dry_run)?;
-                }
-                ConflictResolution::Skip => {
-                    println!("{} Skipped {}", "⊘".yellow(), file.dest_path.display());
-                    return Ok(());
-                }
-                ConflictResolution::ViewDiff => {
-                    show_diff(&file.repo_path, &file.dest_path)?;
-                    // Ask again after showing diff
-                    let conflict_resolution = prompt_conflict(&file.dest_path)?;
-                    match conflict_resolution {
-                        ConflictResolution::BackupAndReplace => {
-                            create_backup(&file.dest_path, dry_run)?;
-                            create_symlink(file, resolution, dry_run)?;
-                        }
-                        ConflictResolution::Skip => {
-                            println!("{} Skipped {}", "⊘".yellow(), file.dest_path.display());
-                            return Ok(());
-                        }
-                        ConflictResolution::Cancel => {
-                            return Err(DotfilesError::Cancelled);
-                        }
-                        _ => {}
-                    }
-                }
-                ConflictResolution::Cancel => {
-                    return Err(DotfilesError::Cancelled);
-                }
-            }
-        } else {
-            // Files are the same, just ensure symlink exists
-            if !file.dest_path.exists() || fs::read_link(&file.dest_path).is_err() {
-                create_symlink(file, resolution, dry_run)?;
-            }
-        }
-    } else {
-        // Destination doesn't exist, create parent dirs and symlink
-        if let Some(parent) = file.dest_path.parent() {
-            if !parent.exists() {
-                let is_dry_run = is_dry_run();
-                if !is_dry_run && !dry_run.is_empty() {
-                    dry_run.log_operation(Operation::CreateDirectory {
-                        path: parent.to_path_buf(),
-                    });
-                } else if !is_dry_run {
-                    fs::create_dir_all(parent)?;
-                } else {
-                    dry_run.log_operation(Operation::CreateDirectory {
-                        path: parent.to_path_buf(),
-                    });
-                }
-            }
-        }
-        create_symlink(file, resolution, dry_run)?;
+        sync_file(file, &symlink_resolution, config, &mut fs_manager)?;
     }
 
+    println!("\n{} Sync complete", "✓".green());
     Ok(())
 }
 
-fn create_symlink(
-    file: &TrackedFile,
-    resolution: &SymlinkResolution,
-    dry_run: &mut DryRun,
+/// Backup all currently tracked files.
+pub fn backup_all_files(
+    config: &Config,
+    profile: Option<&str>,
+    dry_run_tracker: &mut DryRun,
+    is_dry_run_mode: bool,
 ) -> Result<()> {
-    let is_dry_run = is_dry_run();
-    
-    if !is_dry_run && !dry_run.is_empty() {
-        // In dry run mode, just log
-        dry_run.log_operation(Operation::CreateSymlink {
-            from: file.repo_path.clone(),
-            to: file.dest_path.clone(),
-        });
+    let tracked_files = config.get_tracked_files(profile)?;
+
+    if tracked_files.is_empty() {
+        println!("{} No tracked files to backup.", "⊘".yellow());
         return Ok(());
     }
-    
-    if !is_dry_run {
-        // Remove existing file/symlink if it exists
-        if file.dest_path.exists() || file.dest_path.is_symlink() {
-            fs::remove_file(&file.dest_path)?;
-        }
 
-        let link_target = match resolution {
-            SymlinkResolution::Auto => {
-                // Try relative, fall back to absolute
-                pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                    .unwrap_or_else(|| file.repo_path.clone())
-            }
-            SymlinkResolution::Relative => {
-                pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                    .ok_or_else(|| {
-                        DotfilesError::Path("Cannot create relative symlink".to_string())
-                    })?
-            }
-            SymlinkResolution::Absolute => file.repo_path.clone(),
-            SymlinkResolution::Follow => {
-                // Follow existing symlink if it exists
-                if file.dest_path.is_symlink() {
-                    let target = fs::read_link(&file.dest_path)?;
-                    if target.exists() {
-                        fs::remove_file(&target)?;
-                    }
-                }
-                pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                    .unwrap_or_else(|| file.repo_path.clone())
-            }
-            SymlinkResolution::Replace => {
-                // Copy file instead of symlinking
-                fs::copy(&file.repo_path, &file.dest_path)?;
+    println!(
+        "{} Backing up {} tracked file(s)...",
+        "→".cyan(),
+        tracked_files.len()
+    );
+
+    // Create a manager for this operation
+    let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
+
+    if is_dry_run_mode {
+        println!(
+            "{} DRY RUN MODE - No files will be modified",
+            "⚠".yellow().bold()
+        );
+    }
+
+    // Create a single timestamped backup directory for all files
+    let backup_dir = config
+        .get_backup_dir()?
+        .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
+    let canonical_backup_dir = normalize_path(&backup_dir);
+
+    let home = dirs::home_dir()
+        .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
+    let canonical_home = normalize_path(&home);
+
+    let mut backed_up_count = 0;
+    let mut skipped_count = 0;
+
+    for file in &tracked_files {
+        // Use the centralized helper to find what to back up
+        let file_to_backup = match get_path_to_backup(&file.dest_path) {
+            Some(path) => path,
+            None => {
                 println!(
-                    "{} Copied {} -> {}",
-                    "✓".green(),
-                    file.repo_path.display(),
+                    "  {} Skipping {} (destination does not exist or is broken symlink)",
+                    "⊘".yellow(),
                     file.dest_path.display()
                 );
-                return Ok(());
+                skipped_count += 1;
+                continue;
             }
         };
 
-        symlink(&link_target, &file.dest_path)?;
-        println!(
-            "{} Linked {} -> {}",
-            "✓".green(),
-            file.repo_path.display(),
-            file.dest_path.display()
-        );
-    }
-
-    Ok(())
-}
-
-fn create_backup(file_path: &Path, dry_run: &mut DryRun) -> Result<PathBuf> {
-    // This would need config, but for now use a simple approach
-    let backup_dir = dirs::home_dir()
-        .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
-        .join(".dotfiles")
-        .join(".backups")
-        .join(Local::now().format("%Y%m%d_%H%M%S").to_string());
-
-    let relative_path = file_path
-        .strip_prefix(dirs::home_dir().unwrap())
-        .unwrap_or(file_path);
-    let backup_path = backup_dir.join(relative_path);
-
-    let is_dry_run = is_dry_run();
-    if !is_dry_run {
-        fs::create_dir_all(backup_path.parent().unwrap())?;
-        fs::copy(file_path, &backup_path)?;
-        println!(
-            "{} Backed up {} -> {}",
-            "✓".yellow(),
-            file_path.display(),
-            backup_path.display()
-        );
-    } else {
-        dry_run.log_operation(Operation::CreateBackup {
-            file: file_path.to_path_buf(),
-            backup: backup_path.clone(),
-        });
-    }
-
-    Ok(backup_path)
-}
-
-fn files_differ(path1: &Path, path2: &Path) -> Result<bool> {
-    if !path1.exists() || !path2.exists() {
-        return Ok(true);
-    }
-
-    let content1 = fs::read(path1)?;
-    let content2 = fs::read(path2)?;
-
-    Ok(content1 != content2)
-}
-
-fn show_diff(path1: &Path, path2: &Path) -> Result<()> {
-    use std::process::Command;
-
-    let output = Command::new("diff")
-        .arg("-u")
-        .arg(path1)
-        .arg(path2)
-        .output()?;
-
-    if output.status.success() || output.status.code() == Some(1) {
-        print!("{}", String::from_utf8_lossy(&output.stdout));
-    }
-
-    Ok(())
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
-    
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let dst_path = dst.join(&file_name);
-        
-        if path.is_dir() {
-            copy_dir_all(&path, &dst_path)?;
-        } else {
-            fs::copy(&path, &dst_path)?;
+        if is_file_locked(&file_to_backup) {
+            println!(
+                "  {} Skipping {} (file is locked, may be in use)",
+                "⚠".yellow(),
+                file_to_backup.display()
+            );
+            skipped_count += 1;
+            continue;
         }
+
+        // SAFETY CHECK: Ensure source is not inside backup directory
+        let canonical_source = normalize_path(&file_to_backup);
+        if canonical_source.starts_with(&canonical_backup_dir) {
+            println!(
+                "  {} Skipping {} (source is inside backup directory)",
+                "⊘".yellow(),
+                file_to_backup.display()
+            );
+            skipped_count += 1;
+            continue;
+        }
+
+        // Calculate backup path
+        let relative_path = canonical_source
+            .strip_prefix(&canonical_home)
+            .unwrap_or(&canonical_source);
+        let backup_path = backup_dir.join(relative_path);
+
+        // Create parent directory
+        if let Some(parent) = backup_path.parent() {
+            fs_manager.create_dir_all(parent)?;
+        }
+
+        // Copy file or directory using the manager
+        if file_to_backup.is_dir() {
+            fs_manager.copy_dir_all(&file_to_backup, &backup_path)?;
+        } else {
+            fs_manager.copy(&file_to_backup, &backup_path)?;
+        }
+
+        // Log progress (fs_manager already logged the dry-run op)
+        if !is_dry_run_mode {
+            println!(
+                "  {} Backed up {} -> {}",
+                "✓".yellow(),
+                file_to_backup.display(),
+                backup_path.display()
+            );
+        }
+        backed_up_count += 1;
     }
-    
+
+    println!("\n{} Backup complete", "✓".green());
+    println!(
+        "  {} backed up, {} skipped",
+        backed_up_count.to_string().green(),
+        skipped_count.to_string().yellow()
+    );
+
+    if !is_dry_run_mode && backed_up_count > 0 {
+        println!(
+            "  Backup location: {}",
+            backup_dir.display().to_string().cyan()
+        );
+    }
+
     Ok(())
 }
 
+/// Remove a file from tracking and delete it from the filesystem.
 pub fn remove_file(
     config: &mut Config,
     tool: &str,
     file: &str,
-    dry_run: &mut DryRun,
+    fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
     // Find the file in config
     let tool_config = config
@@ -369,33 +265,21 @@ pub fn remove_file(
         .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
         .join(&file_entry.dest);
 
-    // Remove symlink
-    if dest_path.exists() || dest_path.is_symlink() {
-        let is_dry_run = is_dry_run();
-        if !is_dry_run {
-            fs::remove_file(&dest_path)?;
-        } else {
-            dry_run.log_operation(Operation::RemoveFile {
-                path: dest_path.clone(),
-            });
-        }
+    // BACKUP: Create backup before removing
+    if let Some(path_to_backup) = get_path_to_backup(&dest_path) {
+        println!("  Creating backup before removal...");
+        fs_manager.backup_file(&path_to_backup, config)?;
     }
+
+    // Remove symlink/file from destination
+    fs_manager.remove_file(&dest_path)?;
 
     // Remove from repo
     let repo_path = config.get_repo_path()?;
     let repo_file = repo_path.join(tool).join(file);
-    if repo_file.exists() {
-        let is_dry_run = is_dry_run();
-        if !is_dry_run {
-            fs::remove_file(&repo_file)?;
-        } else {
-            dry_run.log_operation(Operation::RemoveFile {
-                path: repo_file.clone(),
-            });
-        }
-    }
+    fs_manager.remove_file(&repo_file)?;
 
-    // Remove from config
+    // Remove from config (in memory)
     if let Some(tool_config) = config.tools.get_mut(tool) {
         tool_config.files.retain(|e| e.repo != file);
         if tool_config.files.is_empty() {
@@ -403,10 +287,571 @@ pub fn remove_file(
         }
     }
 
-    config.save()?;
-
-    println!("{} Removed {} from {} tool", "✓".green(), file, tool);
+    // Only save config if not in dry run mode
+    if !fs_manager.is_dry_run {
+        config.save(fs_manager.is_dry_run)?;
+        println!("{} Removed {} from {} tool", "✓".green(), file, tool);
+    } else {
+        println!("  [DRY RUN] Would remove {} from {} tool", file, tool);
+    }
 
     Ok(())
 }
 
+// #############################################################################
+// ## FileSystemManager Struct
+// #############################################################################
+
+/// Manages all file system operations, respecting dry run mode.
+/// This struct abstracts all file I/O, allowing other functions
+/// to focus on logic rather than implementation details.
+pub struct FileSystemManager<'a> {
+    dry_run: &'a mut DryRun,
+    pub is_dry_run: bool,
+}
+
+impl<'a> FileSystemManager<'a> {
+    /// Create a new FileSystemManager.
+    pub fn new(dry_run: &'a mut DryRun, is_dry_run: bool) -> Self {
+        Self { dry_run, is_dry_run }
+    }
+
+    pub fn create_dir_all(&mut self, path: &Path) -> Result<()> {
+        if self.is_dry_run {
+            println!("  [DRY RUN] Would create directory: {}", path.display());
+            self.dry_run.log_operation(Operation::CreateDirectory {
+                path: path.to_path_buf(),
+            });
+            Ok(())
+        } else {
+            fs::create_dir_all(path).map_err(Into::into)
+        }
+    }
+
+    pub fn copy(&mut self, from: &Path, to: &Path) -> Result<()> {
+        // Safety check: don't copy a file to itself
+        if from == to {
+            return Err(DotfilesError::Path(format!(
+                "Cannot copy file to itself: {}",
+                from.display()
+            )));
+        }
+
+        if self.is_dry_run {
+            println!("  [DRY RUN] Would copy file: {} -> {}", from.display(), to.display());
+            self.dry_run.log_operation(Operation::CopyFile {
+                from: from.to_path_buf(),
+                to: to.to_path_buf(),
+            });
+            Ok(())
+        } else {
+            fs::copy(from, to).map(|_| ()).map_err(Into::into)
+        }
+    }
+
+    pub fn copy_dir_all(&mut self, src: &Path, dst: &Path) -> Result<()> {
+        // Safety check: don't copy a directory to itself
+        if src == dst {
+            return Err(DotfilesError::Path(format!(
+                "Cannot copy directory to itself: {}",
+                src.display()
+            )));
+        }
+
+        if self.is_dry_run {
+            println!(
+                "  [DRY RUN] Would copy directory: {} -> {}",
+                src.display(),
+                dst.display()
+            );
+            self.dry_run.log_operation(Operation::CopyFile {
+                from: src.to_path_buf(),
+                to: dst.to_path_buf(),
+            });
+            Ok(())
+        } else {
+            copy_dir_all(src, dst)
+        }
+    }
+
+    pub fn remove_file(&mut self, path: &Path) -> Result<()> {
+        if self.is_dry_run {
+            println!("  [DRY RUN] Would remove file: {}", path.display());
+            self.dry_run.log_operation(Operation::RemoveFile {
+                path: path.to_path_buf(),
+            });
+            Ok(())
+        } else {
+            // Check if it exists (as file) or is a symlink (which might be broken)
+            if path.exists() || path.is_symlink() {
+                fs::remove_file(path).map_err(Into::into)
+            } else {
+                Ok(()) // Already gone
+            }
+        }
+    }
+
+    pub fn symlink(&mut self, from: &Path, to: &Path) -> Result<()> {
+        if self.is_dry_run {
+            println!(
+                "  [DRY RUN] Would create symlink: {} -> {}",
+                to.display(),
+                from.display()
+            );
+            self.dry_run.log_operation(Operation::CreateSymlink {
+                from: from.to_path_buf(),
+                to: to.to_path_buf(),
+            });
+            Ok(())
+        } else {
+            symlink(from, to).map_err(Into::into)
+        }
+    }
+
+    /// Creates a backup of a file using the backup directory from config.
+    pub fn backup_file(&mut self, file_path: &Path, config: &Config) -> Result<PathBuf> {
+        let backup_dir = config
+            .get_backup_dir()?
+            .join(Local::now().format("%Y%m%d_%H%M%S").to_string());
+
+        let home = dirs::home_dir()
+            .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
+        let relative_path = file_path.strip_prefix(&home).unwrap_or(file_path);
+        let backup_path = backup_dir.join(relative_path);
+
+        if self.is_dry_run {
+            println!(
+                "  [DRY RUN] Would backup {} -> {}",
+                file_path.display(),
+                backup_path.display()
+            );
+            self.dry_run.log_operation(Operation::CreateBackup {
+                file: file_path.to_path_buf(),
+                backup: backup_path.clone(),
+            });
+        } else {
+            fs::create_dir_all(backup_path.parent().unwrap())?;
+
+            if file_path.is_dir() {
+                copy_dir_all(file_path, &backup_path)?;
+            } else {
+                fs::copy(file_path, &backup_path)?;
+            }
+
+            println!(
+                "{} Backed up {} -> {}",
+                "✓".yellow(),
+                file_path.display(),
+                backup_path.display()
+            );
+        }
+
+        Ok(backup_path)
+    }
+}
+
+// #############################################################################
+// ## Sync Logic (Decomposed)
+// #############################################################################
+
+/// Enum representing the action to take during a sync.
+enum SyncAction {
+    /// Already correctly linked
+    DoNothing,
+    /// Destination doesn't exist, or is identical and not a symlink
+    CreateSymlink,
+    /// Safety check: Repo is empty, dest has content.
+    UpdateRepoFromDest,
+    /// Files differ, or symlink is wrong.
+    ResolveConflict,
+}
+
+/// Orchestrates the sync for a single file.
+fn sync_file(
+    file: &TrackedFile,
+    resolution: &SymlinkResolution,
+    config: &Config,
+    fs_manager: &mut FileSystemManager,
+) -> Result<()> {
+    println!("  Repo: {}", file.repo_path.display());
+    println!("  Dest: {}", file.dest_path.display());
+
+    // --- 1. Precondition Checks ---
+    if is_file_locked(&file.dest_path) {
+        println!(
+            "  {} Warning: {} is locked (may be in use), skipping",
+            "⚠".yellow(),
+            file.dest_path.display()
+        );
+        return Ok(());
+    }
+    if is_file_locked(&file.repo_path) {
+        println!(
+            "  {} Warning: {} is locked (may be in use), skipping",
+            "⚠".yellow(),
+            file.repo_path.display()
+        );
+        return Ok(());
+    }
+    if !file.repo_path.exists() {
+        println!("  {} Repo file does not exist, skipping", "⊘".yellow());
+        return Ok(());
+    }
+
+    // --- 2. Backup ---
+    // Backup *before* determining action, as any action (except DoNothing)
+    // might modify the destination. This simplifies all downstream logic.
+    if let Some(path_to_backup) = get_path_to_backup(&file.dest_path) {
+        println!("  Creating backup before any modifications...");
+        fs_manager.backup_file(&path_to_backup, config)?;
+    }
+
+    // --- 3. Determine Action ---
+    let action = determine_sync_action(file)?;
+
+    // --- 4. Execute Action ---
+    match action {
+        SyncAction::DoNothing => {
+            Ok(()) // Already logged by determine_sync_action
+        }
+        SyncAction::CreateSymlink => {
+            println!("  Destination needs to be symlinked.");
+            create_symlink_managed(file, resolution, fs_manager)?;
+            Ok(())
+        }
+        SyncAction::UpdateRepoFromDest => {
+            println!(
+                "{} Repo file {} is empty but destination has content. Updating repo from destination.",
+                "⚠".yellow(),
+                file.repo_path.display()
+            );
+            if let Some(parent) = file.repo_path.parent() {
+                fs_manager.create_dir_all(parent)?;
+            }
+            if file.dest_path.is_dir() {
+                fs_manager.copy_dir_all(&file.dest_path, &file.repo_path)?;
+            } else {
+                fs_manager.copy(&file.dest_path, &file.repo_path)?;
+            }
+
+            if !fs_manager.is_dry_run {
+                println!("{} Updated repo file from destination", "✓".green());
+            }
+            // Now that repo is updated, create the symlink
+            create_symlink_managed(file, resolution, fs_manager)?;
+            Ok(())
+        }
+        SyncAction::ResolveConflict => {
+            handle_file_conflict(file, resolution, fs_manager)?;
+            Ok(())
+        }
+    }
+}
+
+/// Determines what action to take for a file. (No side-effects)
+fn determine_sync_action(file: &TrackedFile) -> Result<SyncAction> {
+    if !file.dest_path.exists() && !file.dest_path.is_symlink() {
+        println!("  Destination does not exist");
+        return Ok(SyncAction::CreateSymlink);
+    }
+
+    println!("  Destination exists");
+
+    // Check if it's a symlink and already correctly linked
+    if file.dest_path.is_symlink() {
+        if let Ok(link_target) = fs::read_link(&file.dest_path) {
+            println!("  Is symlink pointing to: {}", link_target.display());
+            let resolved_target = if link_target.is_absolute() {
+                link_target
+            } else {
+                file.dest_path
+                    .parent()
+                    .map(|p| p.join(&link_target))
+                    .unwrap_or(link_target)
+            };
+            let normalized_target = normalize_path(&resolved_target);
+            let normalized_repo = normalize_path(&file.repo_path);
+
+            if normalized_target == normalized_repo {
+                println!("  {} Already correctly linked", "✓".green());
+                return Ok(SyncAction::DoNothing);
+            } else {
+                println!("  {} Symlink points to wrong location", "⚠".yellow());
+                return Ok(SyncAction::ResolveConflict);
+            }
+        }
+    }
+
+    println!("  Is regular file/directory (not symlink)");
+
+    // SAFETY CHECK: Don't overwrite non-empty destination with empty repo file
+    let repo_is_empty = if file.repo_path.is_file() {
+        fs::metadata(&file.repo_path).map(|m| m.len()).unwrap_or(0) == 0
+    } else {
+        false // Dirs aren't "empty" for this check
+    };
+    let dest_has_content = if file.dest_path.is_file() {
+        fs::metadata(&file.dest_path).map(|m| m.len()).unwrap_or(0) > 0
+    } else {
+        false
+    };
+
+    if repo_is_empty && dest_has_content {
+        println!(
+            "  {} Safety check: Repo is empty, destination has content",
+            "⚠".yellow()
+        );
+        return Ok(SyncAction::UpdateRepoFromDest);
+    }
+
+    // Check if files are different
+    println!("  Comparing files...");
+    if files_differ(&file.repo_path, &file.dest_path)? {
+        println!("  {} Files differ", "↻".yellow());
+        Ok(SyncAction::ResolveConflict)
+    } else {
+        println!("  {} Files are identical", "✓".green());
+        // Files are identical, but dest is not a symlink. Convert it.
+        Ok(SyncAction::CreateSymlink)
+    }
+}
+
+/// Handles the user-interactive part of resolving a file conflict.
+/// Assumes backup has already been created.
+fn handle_file_conflict(
+    file: &TrackedFile,
+    resolution: &SymlinkResolution,
+    fs_manager: &mut FileSystemManager,
+) -> Result<()> {
+    let conflict_resolution = if fs_manager.is_dry_run {
+        println!("  [DRY RUN] Files differ, would prompt for conflict resolution");
+        println!("  [DRY RUN] Assuming: Backup and Replace");
+        ConflictResolution::BackupAndReplace
+    } else {
+        // Backup was already created in sync_file
+        prompt_conflict(&file.dest_path)?
+    };
+
+    match conflict_resolution {
+        ConflictResolution::BackupAndReplace => {
+            println!("  User chose: Backup and Replace");
+            create_symlink_managed(file, resolution, fs_manager)?;
+        }
+        ConflictResolution::Skip => {
+            println!("  {} User chose: Skip", "⊘".yellow());
+            return Ok(());
+        }
+        ConflictResolution::ViewDiff => {
+            if !fs_manager.is_dry_run {
+                show_diff(&file.repo_path, &file.dest_path)?;
+                // Ask again after showing diff
+                let post_diff_resolution = prompt_conflict(&file.dest_path)?;
+                match post_diff_resolution {
+                    ConflictResolution::BackupAndReplace => {
+                        create_symlink_managed(file, resolution, fs_manager)?;
+                    }
+                    ConflictResolution::Skip => {
+                        println!("{} Skipped {}", "⊘".yellow(), file.dest_path.display());
+                    }
+                    ConflictResolution::Cancel => {
+                        return Err(DotfilesError::Cancelled);
+                    }
+                    _ => {} // ViewDiff again is not an option here
+                }
+            } else {
+                println!("  [DRY RUN] Would show diff and prompt again");
+                println!("  [DRY RUN] Assuming: Backup and Replace");
+                create_symlink_managed(file, resolution, fs_manager)?;
+            }
+        }
+        ConflictResolution::Cancel => {
+            return Err(DotfilesError::Cancelled);
+        }
+    }
+    Ok(())
+}
+
+/// Creates a symlink, managed by the FileSystemManager.
+/// Assumes backups have *already been created* by the caller.
+fn create_symlink_managed(
+    file: &TrackedFile,
+    resolution: &SymlinkResolution,
+    fs_manager: &mut FileSystemManager,
+) -> Result<()> {
+    // 1. Create parent directory if needed
+    if let Some(parent) = file.dest_path.parent() {
+        // In dry-run, create_dir_all will log and return Ok
+        // In normal mode, it will only create if it doesn't exist
+        fs_manager.create_dir_all(parent)?;
+    }
+
+    // 2. Remove existing file/symlink (backup was already done by caller)
+    // fs_manager.remove_file() handles dry run internally
+    println!("    Removing existing file/symlink...");
+    fs_manager.remove_file(&file.dest_path)?;
+
+    // 3. Handle the "Replace" (copy) case
+    if *resolution == SymlinkResolution::Replace {
+        println!("    Copying file instead of symlinking (Replace strategy)...");
+        fs_manager.copy(&file.repo_path, &file.dest_path)?;
+        if !fs_manager.is_dry_run {
+            println!(
+                "{} Copied {} -> {}",
+                "✓".green(),
+                file.repo_path.display(),
+                file.dest_path.display()
+            );
+        }
+        return Ok(());
+    }
+
+    // 4. Handle regular symlinking
+    let link_target = match resolution {
+        SymlinkResolution::Auto => {
+            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
+                .unwrap_or_else(|| file.repo_path.clone())
+        }
+        SymlinkResolution::Relative => {
+            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap()).ok_or_else(
+                || DotfilesError::Path("Cannot create relative symlink".to_string()),
+            )?
+        }
+        SymlinkResolution::Absolute => file.repo_path.clone(),
+        SymlinkResolution::Follow => {
+            // The original 'Follow' logic was dangerous as it tried to remove the
+            // symlink's target. The new backup logic is safer. We now
+            // treat 'Follow' as 'Auto' for link creation.
+            println!("    'Follow' resolution strategy is treated as 'Auto'.");
+            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
+                .unwrap_or_else(|| file.repo_path.clone())
+        }
+        SymlinkResolution::Replace => unreachable!(), // Handled above
+    };
+
+    println!(
+        "    Creating symlink: {} -> {}",
+        file.dest_path.display(),
+        link_target.display()
+    );
+    fs_manager.symlink(&link_target, &file.dest_path)?;
+
+    if !fs_manager.is_dry_run {
+        println!(
+            "    {} Linked {} -> {}",
+            "✓".green(),
+            file.repo_path.display(),
+            file.dest_path.display()
+        );
+    }
+
+    Ok(())
+}
+
+// #############################################################################
+// ## Module-Private Helpers
+// #############################################################################
+
+/// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails
+fn normalize_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Check if a file is locked by another process.
+pub fn is_file_locked(file_path: &Path) -> bool {
+    if let Ok(mut lock) = LockFile::open(file_path) {
+        if lock.try_lock().is_err() {
+            return true; // File is locked
+        }
+        let _ = lock.unlock();
+    }
+    false
+}
+
+/// Resolves the actual file to be backed up.
+/// If `path` is a file/dir, returns `Some(path)`.
+/// If `path` is a symlink, returns its *target* path.
+/// If `path` doesn't exist or is a broken symlink, returns `None`.
+fn get_path_to_backup(path: &Path) -> Option<PathBuf> {
+    if path.is_symlink() {
+        match fs::read_link(path) {
+            Ok(target) => {
+                let resolved_target = if target.is_absolute() {
+                    target
+                } else {
+                    path.parent().map(|p| p.join(&target)).unwrap_or(target)
+                };
+                let normalized_target = normalize_path(&resolved_target);
+                if normalized_target.exists() {
+                    Some(normalized_target)
+                } else {
+                    None // Broken symlink
+                }
+            }
+            Err(_) => None, // Can't read symlink
+        }
+    } else if path.exists() {
+        Some(path.to_path_buf()) // Regular file or directory
+    } else {
+        None // Doesn't exist
+    }
+}
+
+/// Recursively copy a directory.
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let dst_path = dst.join(&file_name);
+
+        if path.is_dir() {
+            copy_dir_all(&path, &dst_path)?;
+        } else {
+            fs::copy(&path, &dst_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Check if two files have different content.
+fn files_differ(path1: &Path, path2: &Path) -> Result<bool> {
+    if !path1.exists() || !path2.exists() {
+        return Ok(true); // One or both don't exist, so they are "different"
+    }
+
+    // If either is a directory, we can't compare contents directly
+    if path1.is_dir() || path2.is_dir() {
+        // For directories, we consider them different if one is dir and other isn't
+        return Ok(path1.is_dir() != path2.is_dir());
+    }
+
+    let content1 = fs::read(path1)?;
+    let content2 = fs::read(path2)?;
+
+    Ok(content1 != content2)
+}
+
+/// Show a diff between two files using the `diff` command.
+fn show_diff(path1: &Path, path2: &Path) -> Result<()> {
+    use std::process::Command;
+
+    let output = Command::new("diff")
+        .arg("-u")
+        .arg(path1)
+        .arg(path2)
+        .output()?;
+
+    // `diff` returns 1 if files differ, 0 if same, 2 on error.
+    // We want to print stdout for both 0 and 1.
+    if output.status.success() || output.status.code() == Some(1) {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    } else {
+        // Print stderr if `diff` command failed
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    Ok(())
+}

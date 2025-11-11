@@ -48,4 +48,3 @@ pub struct TrackedFile {
     pub dest_path: PathBuf,
     pub profile: Option<String>,
 }
-

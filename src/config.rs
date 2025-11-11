@@ -34,19 +34,19 @@ impl Config {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?
             .join("dotfiles-manager");
-        
+
         // Create config directory if it doesn't exist
         std::fs::create_dir_all(&config_dir)?;
-        
+
         // Create example config if it doesn't exist
         create_example_config(&config_dir)?;
-        
+
         let config_path = config_dir.join("config.toml");
-        
+
         if !config_path.exists() {
             // Create default config
             let config = Self::default();
-            config.save()?;
+            config.save(false)?;
             return Ok(config);
         }
 
@@ -55,13 +55,24 @@ impl Config {
         Ok(config)
     }
 
-    pub fn save(&self) -> Result<()> {
+    /// Save the configuration to disk.
+    ///
+    /// In dry run mode:
+    /// - Returns early without writing to disk
+    /// - Configuration changes remain in memory only
+    pub fn save(&self, is_dry_run: bool) -> Result<()> {
+
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?
             .join("dotfiles-manager");
-        
+
+        if is_dry_run {
+            // In dry run mode, don't actually save the config
+            return Ok(());
+        }
+
         std::fs::create_dir_all(&config_dir)?;
-        
+
         let config_path = config_dir.join("config.toml");
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&config_path, content)?;
@@ -84,7 +95,7 @@ impl Config {
                     continue; // Skip profile-specific for now
                 }
 
-                let repo_file = PathBuf::from(&repo_path).join(tool).join(&file_entry.repo);
+                let repo_file = PathBuf::from(&repo_path).join(&file_entry.repo);
                 let dest_file = home.join(&file_entry.dest);
                 let dest_key = file_entry.dest.clone();
 
@@ -107,7 +118,7 @@ impl Config {
                     }
 
                     let dest_key = file_entry.dest.clone();
-                    
+
                     // Check if this destination is already in base files
                     if processed_dests.contains(&dest_key) {
                         // Override: remove base entry and add profile entry
@@ -118,7 +129,11 @@ impl Config {
                     let repo_file = if file_entry.repo.starts_with("profiles/") {
                         PathBuf::from(&repo_path).join(&file_entry.repo)
                     } else {
-                        PathBuf::from(&repo_path).join("profiles").join(profile).join(tool).join(&file_entry.repo)
+                        PathBuf::from(&repo_path)
+                            .join("profiles")
+                            .join(profile)
+                            .join(tool)
+                            .join(&file_entry.repo)
                     };
 
                     let dest_file = home.join(&file_entry.dest);
@@ -143,9 +158,10 @@ impl Config {
         dest_path: &str,
         profile: Option<&str>,
     ) -> Result<()> {
-        let tool_config = self.tools.entry(tool.to_string()).or_insert_with(|| ToolConfig {
-            files: Vec::new(),
-        });
+        let tool_config = self
+            .tools
+            .entry(tool.to_string())
+            .or_insert_with(|| ToolConfig { files: Vec::new() });
 
         let file_entry = FileEntry {
             repo: repo_path.to_string(),
@@ -161,7 +177,7 @@ impl Config {
         self.general
             .symlink_resolution
             .parse()
-            .map_err(|e| DotfilesError::Config(e))
+            .map_err(DotfilesError::Config)
     }
 
     pub fn get_repo_path(&self) -> Result<PathBuf> {
@@ -202,18 +218,17 @@ pub fn create_example_config(config_dir: &PathBuf) -> Result<()> {
     if example_path.exists() {
         return Ok(()); // Already exists
     }
-    
+
     // Try to copy from project config directory
-    if let Ok(project_config) = std::env::current_exe() {
-        if let Some(project_dir) = project_config.parent() {
-            let project_example = project_dir.join("config").join("config.toml.example");
-            if project_example.exists() {
-                std::fs::copy(&project_example, &example_path)?;
-                return Ok(());
-            }
+    if let Ok(project_config) = std::env::current_exe()
+        && let Some(project_dir) = project_config.parent()
+    {
+        let project_example = project_dir.join("config").join("config.toml.example");
+        if project_example.exists() {
+            std::fs::copy(&project_example, &example_path)?;
+            return Ok(());
         }
     }
-    
+
     Ok(())
 }
-

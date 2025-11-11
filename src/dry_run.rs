@@ -6,6 +6,7 @@ pub enum Operation {
     CreateSymlink { from: PathBuf, to: PathBuf },
     CreateBackup { file: PathBuf, backup: PathBuf },
     CreateDirectory { path: PathBuf },
+    CopyFile { from: PathBuf, to: PathBuf },
     RemoveFile { path: PathBuf },
     GitCommit { message: String },
     GitStage { files: Vec<PathBuf> },
@@ -32,20 +33,43 @@ impl DryRun {
             return;
         }
 
-        println!("\n{}", "DRY RUN - Operations that would be performed:".bold().cyan());
+        println!(
+            "\n{}",
+            "DRY RUN - Operations that would be performed:"
+                .bold()
+                .cyan()
+        );
         println!("{}", "=".repeat(60).cyan());
 
         for (i, op) in self.operations.iter().enumerate() {
             println!("\n{}. {}", i + 1, format!("{:?}", op).bright_white());
             match op {
                 Operation::CreateSymlink { from, to } => {
-                    println!("   {} {} -> {}", "Create symlink:".green(), from.display(), to.display());
+                    println!(
+                        "   {} {} -> {}",
+                        "Create symlink:".green(),
+                        from.display(),
+                        to.display()
+                    );
                 }
                 Operation::CreateBackup { file, backup } => {
-                    println!("   {} {} -> {}", "Create backup:".yellow(), file.display(), backup.display());
+                    println!(
+                        "   {} {} -> {}",
+                        "Create backup:".yellow(),
+                        file.display(),
+                        backup.display()
+                    );
                 }
                 Operation::CreateDirectory { path } => {
                     println!("   {} {}", "Create directory:".blue(), path.display());
+                }
+                Operation::CopyFile { from, to } => {
+                    println!(
+                        "   {} {} -> {}",
+                        "Copy file:".cyan(),
+                        from.display(),
+                        to.display()
+                    );
                 }
                 Operation::RemoveFile { path } => {
                     println!("   {} {}", "Remove file:".red(), path.display());
@@ -63,7 +87,10 @@ impl DryRun {
         }
 
         println!("\n{}", "=".repeat(60).cyan());
-        println!("{}", format!("Total operations: {}", self.operations.len()).bold());
+        println!(
+            "{}",
+            format!("Total operations: {}", self.operations.len()).bold()
+        );
     }
 
     pub fn is_empty(&self) -> bool {
@@ -76,4 +103,3 @@ impl Default for DryRun {
         Self::new()
     }
 }
-

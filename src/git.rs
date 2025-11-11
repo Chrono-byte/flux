@@ -14,7 +14,12 @@ pub fn init_repo(repo_path: &Path) -> Result<Repository> {
     Ok(repo)
 }
 
-pub fn stage_changes(repo: &Repository, changes: &[FileChange], dry_run: &mut DryRun, is_dry_run: bool) -> Result<()> {
+pub fn stage_changes(
+    repo: &Repository,
+    changes: &[FileChange],
+    dry_run: &mut DryRun,
+    is_dry_run: bool,
+) -> Result<()> {
     if is_dry_run {
         let files: Vec<_> = changes
             .iter()
@@ -117,4 +122,3 @@ pub fn detect_changes(repo: &Repository) -> Result<Vec<FileChange>> {
 
     Ok(changes)
 }
-

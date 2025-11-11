@@ -82,6 +82,24 @@ files = [
 #     { repo = "extensions", dest = ".zenbrowser/profiles/default/extensions" }
 # ]
 
+[tools.alacritty]
+# Alacritty terminal emulator configuration
+# Use 'dotfiles-manager add-browser alacritty' to auto-detect and add
+# Example manual entry:
+# files = [
+#     { repo = "alacritty.toml", dest = ".config/alacritty/alacritty.toml" },
+#     # Or for YAML format:
+#     # { repo = "alacritty.yml", dest = ".config/alacritty/alacritty.yml" }
+# ]
+
+[tools.starship]
+# Starship prompt configuration
+# Use 'dotfiles-manager add-browser starship' to auto-detect and add
+# Example manual entry:
+# files = [
+#     { repo = "starship.toml", dest = ".config/starship.toml" }
+# ]
+
 # Custom tools can be added with any name
 # [tools.my_custom_tool]
 # files = [
