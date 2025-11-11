@@ -402,7 +402,7 @@ impl Config {
     }
 
     /// Get the XDG config path (authoritative location)
-    fn get_xdg_config_path() -> Result<PathBuf> {
+    pub fn get_xdg_config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
         Ok(config_dir.join("flux/config.toml"))
@@ -524,7 +524,6 @@ impl Config {
 
         Ok(tracked_files)
     }
-
 
     /// Sync XDG config to repo (overwrite repo config with XDG config)
     /// This is useful for manually forcing the sync when XDG config is authoritative

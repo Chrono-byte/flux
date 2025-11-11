@@ -172,7 +172,7 @@ mod config_validation_tests {
     #[test]
     fn test_symlink_resolution_toml_deserialization() {
         use crate::types::SymlinkResolution;
-        
+
         // Test that serde can deserialize valid lowercase strings from TOML
         let test_cases = vec![
             ("auto", SymlinkResolution::Auto),
@@ -194,7 +194,7 @@ symlink_resolution = "{}"
 "#,
                 input_str
             );
-            
+
             let config: Config = toml::from_str(&toml_str).unwrap();
             assert_eq!(
                 config.general.symlink_resolution, expected,

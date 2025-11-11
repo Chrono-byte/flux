@@ -490,7 +490,12 @@ pub fn cleanup_backups(
 
         println!(
             "  {} {} ({}){}",
-            if dry_run { "Would delete" } else { "Will delete" }.yellow(),
+            if dry_run {
+                "Would delete"
+            } else {
+                "Will delete"
+            }
+            .yellow(),
             backup
                 .timestamp
                 .format("%Y-%m-%d %H:%M:%S")
@@ -503,13 +508,20 @@ pub fn cleanup_backups(
 
     // Show summary
     println!("\n{} Summary:", "→".cyan());
-    println!("  Total backups to delete: {}", to_delete.len().to_string().yellow());
+    println!(
+        "  Total backups to delete: {}",
+        to_delete.len().to_string().yellow()
+    );
     println!("  Space to free: {}", format_size(total_size).cyan());
     if empty_count > 0 {
         println!("  Empty backups: {}", empty_count.to_string().yellow());
     }
     if small_count > 0 {
-        println!("  Small backups (< {}): {}", format_size(min_size), small_count.to_string().yellow());
+        println!(
+            "  Small backups (< {}): {}",
+            format_size(min_size),
+            small_count.to_string().yellow()
+        );
     }
     if kept_count > 0 {
         println!("  Backups to keep: {}", kept_count.to_string().green());

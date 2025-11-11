@@ -365,6 +365,12 @@ enum ConfigCommands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Format and organize XDG config file
+    Format {
+        /// Dry run mode (show what would be done without actually doing it)
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1109,6 +1115,36 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         Commands::Config { command } => match command {
             ConfigCommands::Sync { dry_run } => {
                 Config::sync_xdg_to_repo(dry_run)?;
+            }
+            ConfigCommands::Format { dry_run } => {
+                let xdg_config = Config::get_xdg_config_path()?;
+
+                if !xdg_config.exists() {
+                    return Err(DotfilesError::Config(
+                        "XDG config does not exist. Nothing to format.".to_string(),
+                    ));
+                }
+
+                if dry_run {
+                    println!(
+                        "{} [DRY RUN] Would format and organize {}",
+                        "⊘".yellow(),
+                        xdg_config.display()
+                    );
+                    return Ok(());
+                }
+
+                // Load config (will load from XDG if it exists)
+                let config = Config::load()?;
+
+                // Save it back (will save to XDG and format it)
+                config.save(true)?;
+
+                println!(
+                    "{} Formatted and organized config: {}",
+                    "✓".green(),
+                    xdg_config.display()
+                );
             }
         },
         Commands::Backup { command } => {
