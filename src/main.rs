@@ -120,6 +120,11 @@ enum Commands {
         #[arg(long, default_value = "auto")]
         package_manager: String,
     },
+    /// Configuration management operations
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -335,6 +340,16 @@ enum PackageCommands {
         /// Use sudo for system-wide package queries
         #[arg(long)]
         sudo: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Sync XDG config to repo (overwrite repo config with XDG config)
+    Sync {
+        /// Dry run mode (show what would be done without actually doing it)
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -1107,6 +1122,11 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         Commands::Service { command } => {
             return handle_service_command(command);
         }
+        Commands::Config { command } => match command {
+            ConfigCommands::Sync { dry_run } => {
+                Config::sync_xdg_to_repo(dry_run)?;
+            }
+        },
         Commands::Apply {
             profile,
             dry_run,
