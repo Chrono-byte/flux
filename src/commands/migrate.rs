@@ -129,7 +129,7 @@ fn migrate_file(
 
             // Backup destination before modifying (fs_manager handles dry run)
             println!("  Creating backup...");
-            fs_manager.backup_file(&file.dest_path, config)?;
+            fs_manager.backup_file(&file.dest_path, config, None)?;
 
             // Copy current file to repo (fs_manager handles dry run)
             println!("  Copying current file to repo...");
@@ -187,7 +187,7 @@ fn migrate_file(
             // Copy current file content to repo if we have a source
             if let Some(source) = &source_to_copy {
                 println!("  Creating backup...");
-                fs_manager.backup_file(source, config)?;
+                fs_manager.backup_file(source, config, None)?;
 
                 // Copy current file to repo (fs_manager handles dry run)
                 println!("  Copying current file to repo...");

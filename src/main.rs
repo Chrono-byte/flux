@@ -8,7 +8,7 @@ mod utils;
 #[cfg(test)]
 mod tests;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use commands::{
     add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_packages,
@@ -124,6 +124,11 @@ enum Commands {
     Maintain {
         #[command(subcommand)]
         command: MaintainCommands,
+    },
+    /// Generate shell completions
+    Completion {
+        /// Shell type (zsh, bash, fish, etc.)
+        shell: String,
     },
 }
 
@@ -246,6 +251,15 @@ enum BackupCommands {
         /// Keep all backups from the last N days (default: 7)
         #[arg(long)]
         days: Option<i64>,
+        /// Minimum size threshold in bytes - backups smaller than this will be deleted (default: 1024 = 1KB)
+        #[arg(long)]
+        min_size: Option<u64>,
+        /// Keep only the most recent N backups, ignoring age (overrides keep and days)
+        #[arg(long)]
+        only_keep: Option<usize>,
+        /// Skip confirmation prompts (auto-confirm)
+        #[arg(long)]
+        yes: bool,
         /// Dry run mode (show what would be deleted)
         #[arg(long)]
         dry_run: bool,
@@ -838,10 +852,13 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
         BackupCommands::Cleanup {
             keep,
             days,
+            min_size,
+            only_keep,
+            yes,
             dry_run,
         } => {
             let config = Config::load()?;
-            cleanup_backups(&config, keep, days, dry_run)?;
+            cleanup_backups(&config, keep, days, min_size, only_keep, yes, dry_run)?;
         }
     }
     Ok(())
@@ -1170,6 +1187,23 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         }
         Commands::Maintain { command } => {
             return handle_maintain_command(command);
+        }
+        Commands::Completion { shell } => {
+            use clap_complete::{generate, shells::Zsh};
+            let mut cmd = Cli::command();
+            match shell.to_lowercase().as_str() {
+                "zsh" => {
+                    generate(Zsh, &mut cmd, "flux", &mut std::io::stdout());
+                }
+                _ => {
+                    eprintln!(
+                        "{} Unsupported shell: {}. Supported shells: zsh",
+                        "Error:".red().bold(),
+                        shell
+                    );
+                    std::process::exit(1);
+                }
+            }
         }
     }
 

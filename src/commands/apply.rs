@@ -403,17 +403,19 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     let home = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
 
+    // Create a single timestamped backup directory for all files in this transaction
+    let backup_dir = options.config.get_backup_dir()?;
+    let transaction_backup_dir =
+        backup_dir.join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
+
     for file in &diff.files_to_sync {
         // Check if we need to backup
         if file.dest_path.exists() {
-            let backup_dir = options.config.get_backup_dir()?;
-            let backup_path = backup_dir
-                .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string())
-                .join(
-                    file.dest_path
-                        .strip_prefix(&home)
-                        .unwrap_or(&file.dest_path),
-                );
+            let backup_path = transaction_backup_dir.join(
+                file.dest_path
+                    .strip_prefix(&home)
+                    .unwrap_or(&file.dest_path),
+            );
 
             transaction.add_operation(FileOperation::BackupAndReplace {
                 source: file.repo_path.clone(),

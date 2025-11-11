@@ -28,7 +28,7 @@ pub fn add_file(
     let full_dest_path = home.join(dest_path);
     if let Some(path_to_backup) = get_path_to_backup(&full_dest_path) {
         println!("  Creating backup of existing destination...");
-        fs_manager.backup_file(&path_to_backup, config)?;
+        fs_manager.backup_file(&path_to_backup, config, None)?;
     }
 
     let repo_path = config.get_repo_path()?;
@@ -99,6 +99,11 @@ pub fn sync_files(
     // Create the FileSystemManager here. It will be passed down.
     let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
 
+    // Create a single timestamped backup directory for all files in this sync operation
+    let backup_dir = config
+        .get_backup_dir()?
+        .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
+
     println!("{} Syncing {} file(s)...", "→".cyan(), tracked_files.len());
 
     for (idx, file) in tracked_files.iter().enumerate() {
@@ -109,7 +114,13 @@ pub fn sync_files(
             tracked_files.len(),
             file.dest_path.display()
         );
-        sync_file(file, &symlink_resolution, config, &mut fs_manager)?;
+        sync_file(
+            file,
+            &symlink_resolution,
+            config,
+            &mut fs_manager,
+            Some(&backup_dir),
+        )?;
     }
 
     println!("\n{} Sync complete", "✓".green());
@@ -259,7 +270,7 @@ pub fn remove_file(
     // BACKUP: Create backup before removing
     if let Some(path_to_backup) = get_path_to_backup(&dest_path) {
         println!("  Creating backup before removal...");
-        fs_manager.backup_file(&path_to_backup, config)?;
+        fs_manager.backup_file(&path_to_backup, config, None)?;
     }
 
     // Remove symlink/file from destination
@@ -454,10 +465,20 @@ impl<'a> FileSystemManager<'a> {
     }
 
     /// Creates a backup of a file using the backup directory from config.
-    pub fn backup_file(&mut self, file_path: &Path, config: &Config) -> Result<PathBuf> {
-        let backup_dir = config
-            .get_backup_dir()?
-            .join(Local::now().format("%Y%m%d_%H%M%S").to_string());
+    /// If `backup_dir` is provided, uses that directory; otherwise creates a new timestamped directory.
+    pub fn backup_file(
+        &mut self,
+        file_path: &Path,
+        config: &Config,
+        backup_dir: Option<&Path>,
+    ) -> Result<PathBuf> {
+        let backup_dir = if let Some(dir) = backup_dir {
+            dir.to_path_buf()
+        } else {
+            config
+                .get_backup_dir()?
+                .join(Local::now().format("%Y%m%d_%H%M%S").to_string())
+        };
 
         let home = dirs::home_dir()
             .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
@@ -526,6 +547,7 @@ fn sync_file(
     resolution: &SymlinkResolution,
     config: &Config,
     fs_manager: &mut FileSystemManager,
+    backup_dir: Option<&Path>,
 ) -> Result<()> {
     println!("  Repo: {}", file.repo_path.display());
     println!("  Dest: {}", file.dest_path.display());
@@ -569,7 +591,7 @@ fn sync_file(
     // might modify the destination. This simplifies all downstream logic.
     if let Some(path_to_backup) = get_path_to_backup(&file.dest_path) {
         println!("  Creating backup before any modifications...");
-        fs_manager.backup_file(&path_to_backup, config)?;
+        fs_manager.backup_file(&path_to_backup, config, backup_dir)?;
     }
 
     // --- 3. Determine Action ---

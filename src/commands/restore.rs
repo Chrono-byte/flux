@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::prompt::prompt_yes_no;
 use chrono::DateTime;
 use colored::Colorize;
 use std::fs;
@@ -340,16 +341,23 @@ pub fn add_backup_to_repo(
 /// * `config` - The configuration containing backup directory
 /// * `keep_count` - Number of most recent backups to keep (default: 10)
 /// * `keep_days` - Keep all backups from the last N days (default: 7)
+/// * `min_size` - Minimum size threshold in bytes - backups smaller than this will be deleted (default: 1024 = 1KB)
+/// * `only_keep` - Keep only the most recent N backups, ignoring age (overrides keep and days)
+/// * `yes` - Skip confirmation prompts (auto-confirm)
 /// * `dry_run` - If true, only show what would be deleted
 pub fn cleanup_backups(
     config: &Config,
     keep_count: Option<usize>,
     keep_days: Option<i64>,
+    min_size: Option<u64>,
+    only_keep: Option<usize>,
+    yes: bool,
     dry_run: bool,
 ) -> Result<()> {
     let backup_dir = config.get_backup_dir()?;
     let keep_count = keep_count.unwrap_or(10);
     let keep_days = keep_days.unwrap_or(7);
+    let min_size = min_size.unwrap_or(1024); // Default: 1KB minimum
 
     if !backup_dir.exists() {
         println!("{} No backups to clean up.", "⊘".yellow());
@@ -363,33 +371,81 @@ pub fn cleanup_backups(
         return Ok(());
     }
 
+    println!(
+        "{} Found {} backup(s) to evaluate",
+        "→".cyan(),
+        backups.len()
+    );
+
     let now = chrono::Local::now();
     let cutoff_date = now - chrono::Duration::days(keep_days);
 
     let mut to_delete = Vec::new();
+    let mut kept_count = 0;
+    let mut small_backups = 0;
 
-    for (idx, backup) in backups.iter().enumerate() {
-        // Keep if it's within the recent count
-        if idx < keep_count {
-            continue;
+    // If only_keep is specified, use simpler logic
+    if let Some(n) = only_keep {
+        for (idx, backup) in backups.iter().enumerate() {
+            if idx < n {
+                kept_count += 1;
+                continue;
+            }
+            to_delete.push(backup.clone());
         }
+    } else {
+        // Calculate size for each backup and apply all criteria
+        for (idx, backup) in backups.iter().enumerate() {
+            let size = calculate_dir_size(&backup.path).unwrap_or(0);
 
-        // Keep if it's within the keep_days window
-        if backup.timestamp > cutoff_date {
-            continue;
+            // Check if backup is too small (likely from old buggy behavior)
+            // Small backups are always deleted, regardless of age or count
+            if size < min_size {
+                small_backups += 1;
+                to_delete.push(backup.clone());
+                continue;
+            }
+
+            // Primary filter: Keep the most recent N backups
+            if idx < keep_count {
+                kept_count += 1;
+                continue;
+            }
+
+            // Secondary filter: Keep backups within the keep_days window
+            // BUT only if we haven't already kept keep_count backups
+            // This prevents keeping too many backups when there are many within the time window
+            if backup.timestamp > cutoff_date {
+                // Only keep if we're still below a reasonable limit
+                // This allows some flexibility while preventing excessive backups
+                if kept_count < keep_count * 2 {
+                    kept_count += 1;
+                    continue;
+                }
+            }
+
+            // Otherwise, mark for deletion
+            to_delete.push(backup.clone());
         }
-
-        // Otherwise, mark for deletion
-        to_delete.push(backup.clone());
     }
 
     if to_delete.is_empty() {
-        println!(
-            "{} Backups are within retention policy (keep: {}, {}+ days old)",
-            "⊘".yellow(),
-            keep_count,
-            keep_days
-        );
+        println!("{} Backups are within retention policy", "⊘".yellow());
+        if let Some(n) = only_keep {
+            println!("  Keeping {} most recent backup(s)", n);
+        } else {
+            println!(
+                "  Keeping {} most recent backup(s) and all backups from the last {} day(s)",
+                keep_count, keep_days
+            );
+            if small_backups > 0 {
+                println!(
+                    "  {} small backup(s) (< {}) would be deleted",
+                    small_backups,
+                    format_size(min_size)
+                );
+            }
+        }
         return Ok(());
     }
 
@@ -398,26 +454,83 @@ pub fn cleanup_backups(
         "→".cyan(),
         to_delete.len()
     );
+    if kept_count > 0 {
+        println!(
+            "  {} backup(s) will be kept",
+            kept_count.to_string().green()
+        );
+    }
+    if small_backups > 0 {
+        println!(
+            "  {} small backup(s) (< {})",
+            small_backups.to_string().yellow(),
+            format_size(min_size)
+        );
+    }
 
     let mut total_size = 0u64;
+    let mut empty_count = 0;
+    let mut small_count = 0;
 
+    // First, calculate sizes and show what will be deleted
     for backup in &to_delete {
         let size = calculate_dir_size(&backup.path).unwrap_or(0);
         total_size += size;
 
         let size_str = format_size(size);
+        let reason = if size == 0 {
+            empty_count += 1;
+            " (empty)".yellow()
+        } else if size < min_size {
+            small_count += 1;
+            format!(" (< {})", format_size(min_size)).yellow()
+        } else {
+            "".normal()
+        };
+
         println!(
-            "  {} {} ({})",
-            if dry_run { "Would delete" } else { "Deleting" }.yellow(),
+            "  {} {} ({}){}",
+            if dry_run { "Would delete" } else { "Will delete" }.yellow(),
             backup
                 .timestamp
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string()
                 .cyan(),
-            size_str
+            size_str,
+            reason
         );
+    }
 
-        if !dry_run {
+    // Show summary
+    println!("\n{} Summary:", "→".cyan());
+    println!("  Total backups to delete: {}", to_delete.len().to_string().yellow());
+    println!("  Space to free: {}", format_size(total_size).cyan());
+    if empty_count > 0 {
+        println!("  Empty backups: {}", empty_count.to_string().yellow());
+    }
+    if small_count > 0 {
+        println!("  Small backups (< {}): {}", format_size(min_size), small_count.to_string().yellow());
+    }
+    if kept_count > 0 {
+        println!("  Backups to keep: {}", kept_count.to_string().green());
+    }
+
+    // Ask for confirmation (unless dry_run or --yes flag)
+    if !dry_run && !yes {
+        let prompt = format!(
+            "Delete {} backup(s) and free ~{}?",
+            to_delete.len(),
+            format_size(total_size)
+        );
+        if !prompt_yes_no(&prompt)? {
+            println!("{} Cleanup cancelled.", "⊘".yellow());
+            return Ok(());
+        }
+    }
+
+    // Now actually delete the backups
+    if !dry_run {
+        for backup in &to_delete {
             fs::remove_dir_all(&backup.path)?;
         }
     }
@@ -429,6 +542,16 @@ pub fn cleanup_backups(
             to_delete.len(),
             format_size(total_size)
         );
+        if empty_count > 0 {
+            println!("  {} empty backup(s) removed", empty_count);
+        }
+        if small_count > 0 {
+            println!(
+                "  {} small backup(s) (< {}) removed",
+                small_count,
+                format_size(min_size)
+            );
+        }
     } else {
         println!(
             "\n{} [DRY RUN] Would free ~{} by deleting {} backup(s)",
@@ -436,6 +559,16 @@ pub fn cleanup_backups(
             format_size(total_size),
             to_delete.len()
         );
+        if empty_count > 0 {
+            println!("  {} empty backup(s) would be removed", empty_count);
+        }
+        if small_count > 0 {
+            println!(
+                "  {} small backup(s) (< {}) would be removed",
+                small_count,
+                format_size(min_size)
+            );
+        }
     }
 
     Ok(())

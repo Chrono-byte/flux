@@ -167,7 +167,6 @@ impl Config {
         Ok(config)
     }
 
-    
     pub fn save(&self, validate: bool) -> Result<()> {
         if validate {
             self.validate()?;
