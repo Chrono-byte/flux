@@ -1,7 +1,6 @@
 pub mod browser;
 pub mod git;
 pub mod package_manager;
-pub mod service_manager;
 pub mod transactions;
 
 pub use browser::{
@@ -13,5 +12,4 @@ pub use git::{
     remove_remote, set_remote_url, stage_changes,
 };
 pub use package_manager::{DnfPackageManager, PackageManager, PackageManagerType};
-pub use service_manager::{ServiceManager, SystemdServiceManager};
 pub use transactions::{FileOperation, Transaction};

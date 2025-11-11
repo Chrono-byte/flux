@@ -90,22 +90,15 @@ flux file status
 
 - `flux config sync [--dry-run]` - Sync XDG config to repo
 
-### Package & Service Management
+### Package Management
 
 - `flux package show` - Show declared packages
 - `flux package list [--sudo]` - List installed packages
 - `flux package status [--sudo]` - Compare declared vs installed packages
-- `flux service list [--system]` - List declared services
-- `flux service status <name> [--system]` - Show service status
-- `flux service compare [--system]` - Compare declared vs actual service states
-- `flux service enable <name> [--system]` - Enable a service
-- `flux service start <name> [--system]` - Start a service
-- `flux service disable <name> [--system]` - Disable a service
-- `flux service stop <name> [--system]` - Stop a service
 
 ### Apply Configuration
 
-- `flux apply [--profile NAME] [--dry-run] [--yes] [--sudo] [--system]` - Apply configuration declaratively (packages, services, files)
+- `flux apply [--profile NAME] [--dry-run] [--yes] [--sudo]` - Apply configuration declaratively (packages and files)
 
 ### Git Operations
 
@@ -161,9 +154,6 @@ files = [
 [packages]
 sway = { name = "sway", version = "latest" }
 firefox = { name = "firefox", version = "latest" }
-
-[services]
-sway = { enabled = true, started = true }
 ```
 
 ### Symlink Resolution
@@ -264,7 +254,7 @@ flux file sync
 ### Declarative Configuration
 
 ```bash
-# Apply packages, services, and files
+# Apply packages and files
 flux apply
 
 # Preview changes

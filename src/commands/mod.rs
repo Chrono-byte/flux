@@ -2,7 +2,6 @@ pub mod apply;
 pub mod migrate;
 pub mod packages;
 pub mod restore;
-pub mod services;
 pub mod status;
 pub mod untracked;
 pub mod validate;
@@ -12,10 +11,6 @@ pub use migrate::migrate_files;
 pub use packages::{compare_packages, list_packages, show_declared_packages};
 pub use restore::{
     add_backup_to_repo, cleanup_backups, display_backups, list_backups, restore_backup,
-};
-pub use services::{
-    compare_services, disable_service, enable_service, list_services, show_service_status,
-    start_service, stop_service,
 };
 pub use status::{check_status, display_status};
 pub use untracked::{display_discrepancies, find_discrepancies};

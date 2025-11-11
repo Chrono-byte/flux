@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
-use crate::services::{PackageManager, PackageManagerType, ServiceManager, SystemdServiceManager};
+use crate::services::{PackageManager, PackageManagerType};
 use crate::types::SymlinkResolution;
 use crate::utils::error::{DotfilesError, Result};
 use std::collections::HashMap;
@@ -45,14 +45,6 @@ pub enum FileOperation {
     InstallPackage { name: String, version: String },
     /// Remove a package
     RemovePackage { name: String },
-    /// Enable a service
-    EnableService { name: String, system: bool },
-    /// Disable a service
-    DisableService { name: String, system: bool },
-    /// Start a service
-    StartService { name: String, system: bool },
-    /// Stop a service
-    StopService { name: String, system: bool },
 }
 
 /// Result of executing an operation
@@ -81,8 +73,6 @@ pub struct Transaction {
     pub metadata: HashMap<String, String>,
     /// Package manager instance (boxed trait object)
     package_manager: Option<Box<dyn PackageManager>>,
-    /// Service manager instance
-    service_manager: Option<SystemdServiceManager>,
 }
 
 impl Transaction {
@@ -90,7 +80,6 @@ impl Transaction {
     pub fn begin(
         temp_dir: PathBuf,
         use_sudo: bool,
-        user_services: bool,
         package_manager_type: PackageManagerType,
     ) -> Result<Self> {
         let id = Uuid::new_v4().to_string();
@@ -113,7 +102,6 @@ impl Transaction {
             backups: Vec::new(),
             metadata: HashMap::new(),
             package_manager,
-            service_manager: Some(SystemdServiceManager::new(user_services)),
         })
     }
 
@@ -188,16 +176,6 @@ impl Transaction {
                         ));
                     }
                 }
-                FileOperation::EnableService { name, .. }
-                | FileOperation::DisableService { name, .. }
-                | FileOperation::StartService { name, .. }
-                | FileOperation::StopService { name, .. } => {
-                    if name.is_empty() {
-                        return Err(DotfilesError::Config(
-                            "Service name cannot be empty".to_string(),
-                        ));
-                    }
-                }
             }
         }
 
@@ -254,18 +232,6 @@ impl Transaction {
                     self.execute_install_package(name, version)?
                 }
                 FileOperation::RemovePackage { name } => self.execute_remove_package(name)?,
-                FileOperation::EnableService { name, system } => {
-                    self.execute_enable_service(name, *system)?
-                }
-                FileOperation::DisableService { name, system } => {
-                    self.execute_disable_service(name, *system)?
-                }
-                FileOperation::StartService { name, system } => {
-                    self.execute_start_service(name, *system)?
-                }
-                FileOperation::StopService { name, system } => {
-                    self.execute_stop_service(name, *system)?
-                }
             };
 
             self.results.push(result.clone());
@@ -358,82 +324,6 @@ impl Transaction {
                         }
                     }
                 }
-                FileOperation::EnableService { name, .. } => {
-                    if let Some(ref sm) = self.service_manager {
-                        match sm.is_enabled(name) {
-                            Ok(true) => {
-                                // Service is enabled, verification passed
-                            }
-                            Ok(false) => {
-                                return Err(DotfilesError::Config(format!(
-                                    "Verification failed: service {} is not enabled",
-                                    name
-                                )));
-                            }
-                            Err(e) => {
-                                // Service manager error, but don't fail verification
-                                log::warn!("Could not verify service enable: {}", e);
-                            }
-                        }
-                    }
-                }
-                FileOperation::DisableService { name, .. } => {
-                    if let Some(ref sm) = self.service_manager {
-                        match sm.is_enabled(name) {
-                            Ok(false) => {
-                                // Service is disabled, verification passed
-                            }
-                            Ok(true) => {
-                                return Err(DotfilesError::Config(format!(
-                                    "Verification failed: service {} is still enabled",
-                                    name
-                                )));
-                            }
-                            Err(e) => {
-                                // Service manager error, but don't fail verification
-                                log::warn!("Could not verify service disable: {}", e);
-                            }
-                        }
-                    }
-                }
-                FileOperation::StartService { name, .. } => {
-                    if let Some(ref sm) = self.service_manager {
-                        match sm.is_running(name) {
-                            Ok(true) => {
-                                // Service is running, verification passed
-                            }
-                            Ok(false) => {
-                                return Err(DotfilesError::Config(format!(
-                                    "Verification failed: service {} is not running",
-                                    name
-                                )));
-                            }
-                            Err(e) => {
-                                // Service manager error, but don't fail verification
-                                log::warn!("Could not verify service start: {}", e);
-                            }
-                        }
-                    }
-                }
-                FileOperation::StopService { name, .. } => {
-                    if let Some(ref sm) = self.service_manager {
-                        match sm.is_running(name) {
-                            Ok(false) => {
-                                // Service is stopped, verification passed
-                            }
-                            Ok(true) => {
-                                return Err(DotfilesError::Config(format!(
-                                    "Verification failed: service {} is still running",
-                                    name
-                                )));
-                            }
-                            Err(e) => {
-                                // Service manager error, but don't fail verification
-                                log::warn!("Could not verify service stop: {}", e);
-                            }
-                        }
-                    }
-                }
                 _ => {
                     // Other operations verified by their success flag
                 }
@@ -499,30 +389,6 @@ impl Transaction {
                             if let Ok(false) = pm.is_installed(name) {
                                 let _ = pm.install(&[(name, "latest")]);
                             }
-                        }
-                    }
-                    FileOperation::EnableService { name, .. } => {
-                        // Rollback: disable the service
-                        if let Some(ref sm) = self.service_manager {
-                            let _ = sm.disable(name);
-                        }
-                    }
-                    FileOperation::DisableService { name, .. } => {
-                        // Rollback: enable the service
-                        if let Some(ref sm) = self.service_manager {
-                            let _ = sm.enable(name);
-                        }
-                    }
-                    FileOperation::StartService { name, .. } => {
-                        // Rollback: stop the service
-                        if let Some(ref sm) = self.service_manager {
-                            let _ = sm.stop(name);
-                        }
-                    }
-                    FileOperation::StopService { name, .. } => {
-                        // Rollback: start the service
-                        if let Some(ref sm) = self.service_manager {
-                            let _ = sm.start(name);
                         }
                     }
                 }
@@ -896,139 +762,4 @@ impl Transaction {
         }
     }
 
-    fn execute_enable_service(&mut self, name: &str, system: bool) -> Result<OperationResult> {
-        let service_name = name.to_string();
-
-        if let Some(ref sm) = self.service_manager {
-            match sm.enable(&service_name) {
-                Ok(()) => Ok(OperationResult {
-                    operation: FileOperation::EnableService {
-                        name: service_name,
-                        system,
-                    },
-                    success: true,
-                    error: None,
-                }),
-                Err(e) => Ok(OperationResult {
-                    operation: FileOperation::EnableService {
-                        name: service_name,
-                        system,
-                    },
-                    success: false,
-                    error: Some(format!("Failed to enable service: {}", e)),
-                }),
-            }
-        } else {
-            Ok(OperationResult {
-                operation: FileOperation::EnableService {
-                    name: service_name,
-                    system,
-                },
-                success: false,
-                error: Some("Service manager not available".to_string()),
-            })
-        }
-    }
-
-    fn execute_disable_service(&mut self, name: &str, system: bool) -> Result<OperationResult> {
-        let service_name = name.to_string();
-
-        if let Some(ref sm) = self.service_manager {
-            match sm.disable(&service_name) {
-                Ok(()) => Ok(OperationResult {
-                    operation: FileOperation::DisableService {
-                        name: service_name,
-                        system,
-                    },
-                    success: true,
-                    error: None,
-                }),
-                Err(e) => Ok(OperationResult {
-                    operation: FileOperation::DisableService {
-                        name: service_name,
-                        system,
-                    },
-                    success: false,
-                    error: Some(format!("Failed to disable service: {}", e)),
-                }),
-            }
-        } else {
-            Ok(OperationResult {
-                operation: FileOperation::DisableService {
-                    name: service_name,
-                    system,
-                },
-                success: false,
-                error: Some("Service manager not available".to_string()),
-            })
-        }
-    }
-
-    fn execute_start_service(&mut self, name: &str, system: bool) -> Result<OperationResult> {
-        let service_name = name.to_string();
-
-        if let Some(ref sm) = self.service_manager {
-            match sm.start(&service_name) {
-                Ok(()) => Ok(OperationResult {
-                    operation: FileOperation::StartService {
-                        name: service_name,
-                        system,
-                    },
-                    success: true,
-                    error: None,
-                }),
-                Err(e) => Ok(OperationResult {
-                    operation: FileOperation::StartService {
-                        name: service_name,
-                        system,
-                    },
-                    success: false,
-                    error: Some(format!("Failed to start service: {}", e)),
-                }),
-            }
-        } else {
-            Ok(OperationResult {
-                operation: FileOperation::StartService {
-                    name: service_name,
-                    system,
-                },
-                success: false,
-                error: Some("Service manager not available".to_string()),
-            })
-        }
-    }
-
-    fn execute_stop_service(&mut self, name: &str, system: bool) -> Result<OperationResult> {
-        let service_name = name.to_string();
-
-        if let Some(ref sm) = self.service_manager {
-            match sm.stop(&service_name) {
-                Ok(()) => Ok(OperationResult {
-                    operation: FileOperation::StopService {
-                        name: service_name,
-                        system,
-                    },
-                    success: true,
-                    error: None,
-                }),
-                Err(e) => Ok(OperationResult {
-                    operation: FileOperation::StopService {
-                        name: service_name,
-                        system,
-                    },
-                    success: false,
-                    error: Some(format!("Failed to stop service: {}", e)),
-                }),
-            }
-        } else {
-            Ok(OperationResult {
-                operation: FileOperation::StopService {
-                    name: service_name,
-                    system,
-                },
-                success: false,
-                error: Some("Service manager not available".to_string()),
-            })
-        }
-    }
 }

@@ -12,10 +12,10 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use commands::{
     add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_packages,
-    compare_services, compare_states, disable_service, display_backups, display_discrepancies,
-    display_preview, display_status, display_validation, enable_service, find_discrepancies,
-    list_backups, list_packages, list_services, migrate_files, restore_backup,
-    show_declared_packages, show_service_status, start_service, stop_service, validate_config,
+    compare_states, display_backups, display_discrepancies,
+    display_preview, display_status, display_validation, find_discrepancies,
+    list_backups, list_packages, migrate_files, restore_backup,
+    show_declared_packages, validate_config,
 };
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use config::{Config, EnvironmentConfig};
@@ -65,9 +65,6 @@ enum Commands {
         /// Use sudo for system-wide package operations
         #[arg(long)]
         sudo: bool,
-        /// Manage system services instead of user services
-        #[arg(long)]
-        system: bool,
         /// Description for this generation
         #[arg(long)]
         description: Option<String>,
@@ -94,11 +91,6 @@ enum Commands {
     Package {
         #[command(subcommand)]
         command: PackageCommands,
-    },
-    /// Service management operations
-    Service {
-        #[command(subcommand)]
-        command: ServiceCommands,
     },
     /// Manage remote repositories
     Remote {
@@ -373,61 +365,6 @@ enum ConfigCommands {
     },
 }
 
-#[derive(Subcommand)]
-enum ServiceCommands {
-    /// List services declared in configuration
-    List {
-        /// Manage system services instead of user services
-        #[arg(long)]
-        system: bool,
-    },
-    /// Show detailed status of a specific service
-    Status {
-        /// Service name
-        name: String,
-        /// Query system services instead of user services
-        #[arg(long)]
-        system: bool,
-    },
-    /// Compare declared services vs actual service states
-    Compare {
-        /// Check system services instead of user services
-        #[arg(long)]
-        system: bool,
-    },
-    /// Enable a service
-    Enable {
-        /// Service name
-        name: String,
-        /// Enable system service instead of user service
-        #[arg(long)]
-        system: bool,
-    },
-    /// Start a service
-    Start {
-        /// Service name
-        name: String,
-        /// Start system service instead of user service
-        #[arg(long)]
-        system: bool,
-    },
-    /// Disable a service
-    Disable {
-        /// Service name
-        name: String,
-        /// Disable system service instead of user service
-        #[arg(long)]
-        system: bool,
-    },
-    /// Stop a service
-    Stop {
-        /// Service name
-        name: String,
-        /// Stop system service instead of user service
-        #[arg(long)]
-        system: bool,
-    },
-}
 
 fn main() {
     // Load and validate environment configuration early
@@ -888,35 +825,6 @@ fn handle_package_command(command: PackageCommands) -> Result<()> {
     Ok(())
 }
 
-fn handle_service_command(command: ServiceCommands) -> Result<()> {
-    match command {
-        ServiceCommands::List { system } => {
-            let config = Config::load()?;
-            list_services(&config, !system)?; // user_mode is inverse of system flag
-        }
-        ServiceCommands::Status { name, system } => {
-            let config = Config::load()?;
-            show_service_status(&config, &name, !system)?;
-        }
-        ServiceCommands::Compare { system } => {
-            let config = Config::load()?;
-            compare_services(&config, !system)?;
-        }
-        ServiceCommands::Enable { name, system } => {
-            enable_service(&name, !system)?;
-        }
-        ServiceCommands::Start { name, system } => {
-            start_service(&name, !system)?;
-        }
-        ServiceCommands::Disable { name, system } => {
-            disable_service(&name, !system)?;
-        }
-        ServiceCommands::Stop { name, system } => {
-            stop_service(&name, !system)?;
-        }
-    }
-    Ok(())
-}
 
 fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
     match command {
@@ -1039,7 +947,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             dry_run,
             yes,
             sudo,
-            system,
             description,
             package_manager,
         } => {
@@ -1062,7 +969,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
 
             if dry_run {
                 // In dry-run mode, just show preview
-                let diff = compare_states(&config, profile.as_deref(), sudo, !system, pm_type)?;
+                let diff = compare_states(&config, profile.as_deref(), sudo, pm_type)?;
                 display_preview(&diff);
             } else {
                 use crate::commands::ApplyOptions;
@@ -1072,7 +979,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     dry_run,
                     yes,
                     use_sudo: sudo,
-                    user_services: !system,
                     description: description.as_deref(),
                     package_manager_type: pm_type,
                 })?;
@@ -1152,9 +1058,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         }
         Commands::Package { command } => {
             return handle_package_command(command);
-        }
-        Commands::Service { command } => {
-            return handle_service_command(command);
         }
         Commands::Remote { command } => {
             let config = Config::load()?;

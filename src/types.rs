@@ -109,44 +109,6 @@ impl std::fmt::Display for PackageSource {
     }
 }
 
-// ==================== Service Management Types ====================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServiceSpec {
-    /// Service name (derived from key if not specified)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-
-    /// Package that provides this service (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub package: Option<String>,
-
-    /// Should be enabled/started at boot
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Should be running now
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub running: Option<bool>,
-
-    /// Autostart on user login
-    #[serde(default)]
-    pub autostart: bool,
-}
-
-impl ServiceSpec {
-    #[allow(dead_code)]
-    pub fn new(name: String) -> Self {
-        Self {
-            name: Some(name),
-            package: None,
-            enabled: false,
-            running: None,
-            autostart: false,
-        }
-    }
-}
-
 // ==================== Environment Types ====================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

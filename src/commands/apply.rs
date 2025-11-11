@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
 use crate::services::{
-    FileOperation, PackageManagerType, ServiceManager, SystemdServiceManager, Transaction,
+    FileOperation, PackageManagerType, Transaction,
 };
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
@@ -25,8 +25,6 @@ pub struct ApplyOptions<'a> {
     pub yes: bool,
     /// Use sudo for operations requiring elevated privileges
     pub use_sudo: bool,
-    /// Use user services instead of system services
-    pub user_services: bool,
     /// Optional description for this apply operation
     pub description: Option<&'a str>,
     /// Package manager type to use
@@ -42,14 +40,6 @@ pub struct StateDiff {
     pub packages_to_install: Vec<(String, String)>,
     /// Packages that need to be removed
     pub packages_to_remove: Vec<String>,
-    /// Services that need to be enabled
-    pub services_to_enable: Vec<(String, bool)>,
-    /// Services that need to be disabled
-    pub services_to_disable: Vec<(String, bool)>,
-    /// Services that need to be started
-    pub services_to_start: Vec<(String, bool)>,
-    /// Services that need to be stopped
-    pub services_to_stop: Vec<(String, bool)>,
 }
 
 impl StateDiff {
@@ -58,10 +48,6 @@ impl StateDiff {
             files_to_sync: Vec::new(),
             packages_to_install: Vec::new(),
             packages_to_remove: Vec::new(),
-            services_to_enable: Vec::new(),
-            services_to_disable: Vec::new(),
-            services_to_start: Vec::new(),
-            services_to_stop: Vec::new(),
         }
     }
 
@@ -69,20 +55,12 @@ impl StateDiff {
         self.files_to_sync.is_empty()
             && self.packages_to_install.is_empty()
             && self.packages_to_remove.is_empty()
-            && self.services_to_enable.is_empty()
-            && self.services_to_disable.is_empty()
-            && self.services_to_start.is_empty()
-            && self.services_to_stop.is_empty()
     }
 
     pub fn total_changes(&self) -> usize {
         self.files_to_sync.len()
             + self.packages_to_install.len()
             + self.packages_to_remove.len()
-            + self.services_to_enable.len()
-            + self.services_to_disable.len()
-            + self.services_to_start.len()
-            + self.services_to_stop.len()
     }
 }
 
@@ -91,7 +69,6 @@ pub fn compare_states(
     config: &Config,
     profile: Option<&str>,
     use_sudo: bool,
-    user_services: bool,
     package_manager_type: PackageManagerType,
 ) -> Result<StateDiff> {
     let mut diff = StateDiff::new();
@@ -127,46 +104,6 @@ pub fn compare_states(
             }
             Err(_) => {
                 // Package manager unavailable, skip
-            }
-        }
-    }
-
-    // Compare services
-    let service_manager = SystemdServiceManager::new(user_services);
-    for (name, spec) in &config.services {
-        let service_name = spec.name.as_ref().unwrap_or(name);
-
-        // Check enabled state
-        match service_manager.is_enabled(service_name) {
-            Ok(enabled) => {
-                if spec.enabled && !enabled {
-                    diff.services_to_enable
-                        .push((service_name.clone(), !user_services));
-                } else if !spec.enabled && enabled {
-                    diff.services_to_disable
-                        .push((service_name.clone(), !user_services));
-                }
-            }
-            Err(_) => {
-                // Service manager unavailable, skip
-            }
-        }
-
-        // Check running state
-        if let Some(should_run) = spec.running {
-            match service_manager.is_running(service_name) {
-                Ok(running) => {
-                    if should_run && !running {
-                        diff.services_to_start
-                            .push((service_name.clone(), !user_services));
-                    } else if !should_run && running {
-                        diff.services_to_stop
-                            .push((service_name.clone(), !user_services));
-                    }
-                }
-                Err(_) => {
-                    // Service manager unavailable, skip
-                }
             }
         }
     }
@@ -240,10 +177,6 @@ pub fn display_preview(diff: &StateDiff) {
     if diff.files_to_sync.is_empty()
         && diff.packages_to_install.is_empty()
         && diff.packages_to_remove.is_empty()
-        && diff.services_to_enable.is_empty()
-        && diff.services_to_disable.is_empty()
-        && diff.services_to_start.is_empty()
-        && diff.services_to_stop.is_empty()
     {
         println!(
             "  {} System is already in sync with configuration",
@@ -285,54 +218,6 @@ pub fn display_preview(diff: &StateDiff) {
         }
     }
 
-    if !diff.services_to_enable.is_empty() {
-        println!(
-            "\n  {} Services to enable ({}):",
-            "▶".cyan(),
-            diff.services_to_enable.len()
-        );
-        for (name, system) in &diff.services_to_enable {
-            let scope = if *system { "system" } else { "user" };
-            println!("    • {} ({})", name, scope);
-        }
-    }
-
-    if !diff.services_to_disable.is_empty() {
-        println!(
-            "\n  {} Services to disable ({}):",
-            "⏸".cyan(),
-            diff.services_to_disable.len()
-        );
-        for (name, system) in &diff.services_to_disable {
-            let scope = if *system { "system" } else { "user" };
-            println!("    • {} ({})", name, scope);
-        }
-    }
-
-    if !diff.services_to_start.is_empty() {
-        println!(
-            "\n  {} Services to start ({}):",
-            "▶".cyan(),
-            diff.services_to_start.len()
-        );
-        for (name, system) in &diff.services_to_start {
-            let scope = if *system { "system" } else { "user" };
-            println!("    • {} ({})", name, scope);
-        }
-    }
-
-    if !diff.services_to_stop.is_empty() {
-        println!(
-            "\n  {} Services to stop ({}):",
-            "⏹".cyan(),
-            diff.services_to_stop.len()
-        );
-        for (name, system) in &diff.services_to_stop {
-            let scope = if *system { "system" } else { "user" };
-            println!("    • {} ({})", name, scope);
-        }
-    }
-
     println!("\n  {} Total changes: {}", "→".cyan(), diff.total_changes());
 }
 
@@ -345,7 +230,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
         options.config,
         options.profile,
         options.use_sudo,
-        options.user_services,
         options.package_manager_type,
     )?;
 
@@ -379,7 +263,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     let mut transaction = Transaction::begin(
         temp_dir.clone(),
         options.use_sudo,
-        options.user_services,
         options.package_manager_type,
     )?;
 
@@ -442,35 +325,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
 
     for name in &diff.packages_to_remove {
         transaction.add_operation(FileOperation::RemovePackage { name: name.clone() });
-    }
-
-    // Add service operations
-    for (name, system) in &diff.services_to_enable {
-        transaction.add_operation(FileOperation::EnableService {
-            name: name.clone(),
-            system: *system,
-        });
-    }
-
-    for (name, system) in &diff.services_to_disable {
-        transaction.add_operation(FileOperation::DisableService {
-            name: name.clone(),
-            system: *system,
-        });
-    }
-
-    for (name, system) in &diff.services_to_start {
-        transaction.add_operation(FileOperation::StartService {
-            name: name.clone(),
-            system: *system,
-        });
-    }
-
-    for (name, system) in &diff.services_to_stop {
-        transaction.add_operation(FileOperation::StopService {
-            name: name.clone(),
-            system: *system,
-        });
     }
 
     // Execute transaction
