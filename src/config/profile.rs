@@ -1,5 +1,6 @@
 use crate::config::Config;
-use crate::utils::error::{DotfilesError, Result};
+use crate::utils::error::Result;
+use crate::utils::error_utils;
 use colored::Colorize;
 use std::path::PathBuf;
 
@@ -19,7 +20,8 @@ pub fn switch_profile(config: &mut Config, name: &str) -> Result<()> {
     let profile_dir = repo_path.join("profiles").join(name);
 
     if !profile_dir.exists() {
-        return Err(DotfilesError::ProfileNotFound(name.to_string()));
+        let available_profiles = list_profiles(config)?;
+        return Err(error_utils::profile_not_found(name, &available_profiles));
     }
 
     config.general.current_profile = name.to_string();

@@ -1,9 +1,11 @@
 use crate::types::FileChange;
 use crate::utils::dry_run::{DryRun, Operation};
-use crate::utils::error::Result;
+use crate::utils::error::{DotfilesError, Result};
+use crate::utils::error_utils;
 use colored::Colorize;
 use git2::{Repository, Signature};
 use std::path::Path;
+use std::process::Command;
 
 pub fn init_repo(repo_path: &Path) -> Result<Repository> {
     let repo = if repo_path.join(".git").exists() {
@@ -266,6 +268,7 @@ pub fn push_to_remote(
     remote_name: &str,
     branch_name: &str,
     set_upstream: bool,
+    timeout_seconds: u64,
     dry_run: &mut DryRun,
     is_dry_run: bool,
 ) -> Result<()> {
@@ -278,47 +281,89 @@ pub fn push_to_remote(
         return Ok(());
     }
 
-    // Construct refspec: refs/heads/branch:refs/heads/branch
-    let refspec = format!("refs/heads/{}:refs/heads/{}", branch_name, branch_name);
+    let repo_path = repo
+        .path()
+        .parent()
+        .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
 
-    // Get or open the remote
-    let mut remote = repo.find_remote(remote_name)?;
+    // Get remote URL for display
+    let remote = repo.find_remote(remote_name)?;
+    let remote_url = remote.url().unwrap_or("unknown");
 
-    // Create push options with callbacks for authentication
-    let mut push_options = git2::PushOptions::new();
-    let mut callbacks = git2::RemoteCallbacks::new();
+    // Build git push command with timeout
+    // Use -k to send SIGKILL after timeout if process doesn't terminate
+    let mut push_cmd = Command::new("timeout");
+    push_cmd
+        .arg("-k")
+        .arg("5") // Give 5 seconds after timeout for graceful shutdown
+        .arg(format!("{}", timeout_seconds))
+        .arg("git")
+        .arg("push")
+        .current_dir(repo_path);
 
-    // Set up credentials callback
-    callbacks.credentials(|_url, _user_from_url, _cred_type| {
-        if let Ok(creds) = git2::Cred::ssh_key_from_agent("git") {
-            return Ok(creds);
+    if set_upstream {
+        push_cmd.arg("--set-upstream");
+    }
+
+    push_cmd.arg(remote_name).arg(branch_name);
+
+    // Execute the push command
+    let start_time = std::time::Instant::now();
+    let output = push_cmd.output().map_err(|e| {
+        error_utils::git_operation_failed(
+            "push",
+            repo_path,
+            &format!("Failed to execute git push: {}", e),
+        )
+    })?;
+
+    let elapsed = start_time.elapsed();
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // Check if it was a timeout (exit code 124)
+        if output.status.code() == Some(124) {
+            return Err(DotfilesError::Config(format!(
+                "Push operation timed out after {} seconds",
+                timeout_seconds
+            )));
         }
-        if let (Ok(user), Ok(pass)) = (std::env::var("GIT_USERNAME"), std::env::var("GIT_PASSWORD"))
-            && let Ok(creds) = git2::Cred::userpass_plaintext(&user, &pass)
-        {
-            return Ok(creds);
+
+        // Check if it was killed by timeout signal (SIGTERM = 143, SIGKILL = 137)
+        if output.status.code() == Some(143) || output.status.code() == Some(137) {
+            return Err(DotfilesError::Config(format!(
+                "Push operation timed out after {} seconds",
+                timeout_seconds
+            )));
         }
-        Err(git2::Error::new(
-            git2::ErrorCode::Auth,
-            git2::ErrorClass::Reference,
-            "No credentials available",
-        ))
-    });
 
-    push_options.remote_callbacks(callbacks);
+        let error_msg = if !stderr.is_empty() {
+            stderr.to_string()
+        } else if !stdout.is_empty() {
+            stdout.to_string()
+        } else {
+            format!("Git push failed with exit code: {:?}", output.status.code())
+        };
 
-    // Push the branch
-    remote.push(&[&refspec], Some(&mut push_options))?;
+        return Err(error_utils::git_operation_failed(
+            "push",
+            repo_path,
+            error_msg.trim(),
+        ));
+    }
 
     println!(
-        "{} Pushed {} to remote '{}' at {}",
+        "{} Pushed {} to remote '{}' at {} (took {:.2}s)",
         "✓".green(),
         branch_name,
         remote_name,
-        remote.url().unwrap_or("unknown")
+        remote_url,
+        elapsed.as_secs_f64()
     );
 
-    // Set upstream if requested
+    // Set upstream if requested (already done via --set-upstream flag, but also set config)
     if set_upstream {
         let mut config = repo.config()?;
         let upstream_branch = format!("{}/{}", remote_name, branch_name);

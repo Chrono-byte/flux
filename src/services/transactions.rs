@@ -70,9 +70,7 @@ pub struct Transaction {
 
 impl Transaction {
     /// Begin a new transaction
-    pub fn begin(
-        temp_dir: PathBuf,
-    ) -> Result<Self> {
+    pub fn begin(temp_dir: PathBuf) -> Result<Self> {
         let id = Uuid::new_v4().to_string();
 
         // Create temp directory if it doesn't exist
@@ -305,12 +303,6 @@ impl Transaction {
 
         self.state = TransactionState::RolledBack;
         Ok(())
-    }
-
-    /// Get list of changes made by this transaction
-    #[allow(dead_code)]
-    pub fn get_changes(&self) -> Vec<&FileOperation> {
-        self.operations.iter().collect()
     }
 
     /// Clean up temporary files and directories

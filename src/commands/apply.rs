@@ -49,10 +49,7 @@ impl StateDiff {
 }
 
 /// Compare declared state (from config) with actual system state
-pub fn compare_states(
-    config: &Config,
-    profile: Option<&str>,
-) -> Result<StateDiff> {
+pub fn compare_states(config: &Config, profile: Option<&str>) -> Result<StateDiff> {
     let mut diff = StateDiff::new();
 
     // Compare files
@@ -156,10 +153,7 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     println!("{} Applying configuration...", "→".cyan().bold());
 
     // Compare states
-    let diff = compare_states(
-        options.config,
-        options.profile,
-    )?;
+    let diff = compare_states(options.config, options.profile)?;
 
     if diff.is_empty() {
         println!(
@@ -188,9 +182,7 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
 
     // Create transaction
     let temp_dir = TempDir::new()?.path().to_path_buf();
-    let mut transaction = Transaction::begin(
-        temp_dir.clone(),
-    )?;
+    let mut transaction = Transaction::begin(temp_dir.clone())?;
 
     // Add metadata
     if let Some(desc) = options.description {

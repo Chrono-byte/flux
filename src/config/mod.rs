@@ -24,6 +24,9 @@ pub struct GeneralConfig {
     pub default_remote: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_branch: Option<String>,
+    /// Push timeout in seconds (default: 60)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_timeout: Option<u64>,
     /// List of config files to include and merge (later files override earlier ones)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<Vec<String>>,
@@ -42,6 +45,7 @@ impl Default for GeneralConfig {
             symlink_resolution: SymlinkResolution::Auto,
             default_remote: None,
             default_branch: None,
+            push_timeout: None,
             include: None,
         }
     }
@@ -97,31 +101,6 @@ impl Config {
 
             // Fall back to repo config or default location
             Self::get_config_path()?
-        };
-
-        Self::load_from_path(&config_path, &mut Vec::new())
-    }
-
-    /// Load configuration with optional custom path (from EnvironmentConfig)
-    #[allow(dead_code)] // Reserved for future use when EnvironmentConfig needs to be explicitly passed
-    pub fn load_with_env(env_config: Option<&EnvironmentConfig>) -> Result<Self> {
-        // Determine config path: env_config > environment variable > default location
-        let config_path = if let Some(env) = env_config {
-            env.config_file.clone().unwrap_or_else(|| {
-                // Fall back to environment variable or default
-                if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
-                    PathBuf::from(&config_path_str)
-                } else {
-                    Self::get_config_path().unwrap_or_default()
-                }
-            })
-        } else {
-            // No env_config provided, use standard load logic
-            if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
-                PathBuf::from(&config_path_str)
-            } else {
-                Self::get_config_path()?
-            }
         };
 
         Self::load_from_path(&config_path, &mut Vec::new())

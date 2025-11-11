@@ -74,8 +74,18 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
         // Check symlink target
         match fs::read_link(&file.dest_path) {
             Ok(link_target) => {
-                // Check if symlink is broken
-                if !link_target.exists() {
+                // Resolve relative symlink targets relative to the symlink's parent directory
+                let resolved_target = if link_target.is_absolute() {
+                    link_target.clone()
+                } else {
+                    file.dest_path
+                        .parent()
+                        .map(|p| p.join(&link_target))
+                        .unwrap_or_else(|| link_target.clone())
+                };
+
+                // Check if symlink is broken (target doesn't exist or is empty)
+                if !resolved_target.exists() {
                     return Ok(Some(Discrepancy {
                         file: file.clone(),
                         issue: IssueType::BrokenSymlink,
@@ -87,9 +97,12 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
                     }));
                 }
 
+                // Note: Empty files are valid - we don't treat them as broken symlinks
+                // An empty file is a legitimate state for a config file
+
                 // Check if symlink points to correct location
-                // Normalize paths for comparison
-                let normalized_target = normalize_path(&link_target);
+                // Normalize paths for comparison (use resolved target)
+                let normalized_target = normalize_path(&resolved_target);
                 let normalized_repo = normalize_path(&file.repo_path);
 
                 if normalized_target != normalized_repo {

@@ -46,7 +46,6 @@ pub fn validate_symlink_target(repo_path: &Path, target: &Path) -> Result<()> {
 }
 
 /// Validate that a destination path doesn't try to escape home directory
-#[allow(dead_code)]
 pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
     let canonical_home = home.canonicalize().map_err(|_| {
         DotfilesError::Path(format!(

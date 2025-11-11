@@ -5,7 +5,7 @@ use std::path::Path;
 
 /// Format error messages consistently
 /// Pattern: [What happened] [Why it matters] [What to do] [Related elements]
-#[allow(dead_code)]
+#[cfg(test)]
 pub struct ErrorBuilder {
     what: String,
     why: Option<String>,
@@ -13,7 +13,7 @@ pub struct ErrorBuilder {
     context: Vec<(String, String)>,
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 impl ErrorBuilder {
     pub fn new(what: impl Into<String>) -> Self {
         Self {
@@ -39,16 +39,8 @@ impl ErrorBuilder {
         self
     }
 
-    pub fn build_config_error(self) -> DotfilesError {
-        DotfilesError::Config(self.format())
-    }
-
     pub fn build_path_error(self) -> DotfilesError {
         DotfilesError::Path(self.format())
-    }
-
-    pub fn build_io_error(self) -> DotfilesError {
-        DotfilesError::Io(std::io::Error::other(self.format()))
     }
 
     fn format(&self) -> String {
@@ -68,25 +60,6 @@ impl ErrorBuilder {
 
         msg
     }
-}
-
-/// Common error scenarios with pre-built helpers
-/// File doesn't exist error with helpful context
-#[allow(dead_code)]
-pub fn file_not_found(path: &Path, context_type: &str) -> DotfilesError {
-    DotfilesError::Path(format!(
-        "What: {} file does not exist\n  \
-         Path: {}\n  \
-         Why: Required {} file is missing or at an unexpected location\n  \
-         Solution:\n    \
-         - Verify the file path is correct: `ls -la {}`\n    \
-         - Check for typos in file names or directories\n    \
-         - Use absolute paths if relative paths are ambiguous",
-        context_type,
-        path.display(),
-        context_type,
-        path.display()
-    ))
 }
 
 /// Home directory not found error
@@ -120,35 +93,6 @@ pub fn invalid_path_computation(from_path: &Path, to_path: &Path, reason: &str) 
         from_path.display(),
         to_path.display(),
         reason
-    ))
-}
-
-/// Invalid configuration value error
-#[allow(dead_code)]
-pub fn invalid_config_value(
-    key: &str,
-    invalid_value: &str,
-    valid_options: &[&str],
-    config_file: &str,
-) -> DotfilesError {
-    let valid_list = valid_options
-        .iter()
-        .map(|o| format!("  - {}", o))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    DotfilesError::Config(format!(
-        "What: Invalid configuration value\n  \
-         Key: {}\n  \
-         Invalid value: '{}'\n  \
-         Why: This value is not recognized and will cause incorrect behavior\n  \
-         Valid options:\n{}\n  \
-         Config file: {}\n  \
-         Solution:\n    \
-         - Edit {} and change the value\n    \
-         - Choose one of the valid options listed above\n    \
-         - Run `flux validate` to verify the fix",
-        key, invalid_value, valid_list, config_file, config_file
     ))
 }
 
@@ -186,28 +130,7 @@ pub fn dest_outside_home(dest: &Path, home: &Path) -> DotfilesError {
     ))
 }
 
-/// File operation error with context
-#[allow(dead_code)]
-pub fn file_operation_failed(operation: &str, file: &Path, reason: &str) -> DotfilesError {
-    DotfilesError::Io(std::io::Error::other(format!(
-        "What: File operation failed\n  \
-         Operation: {}\n  \
-         File: {}\n  \
-         Reason: {}\n  \
-         Solution:\n    \
-         - Check file permissions: `ls -l {}`\n    \
-         - Ensure the file is not locked by another process\n    \
-         - Verify sufficient disk space is available\n    \
-         - Try running with elevated privileges if needed",
-        operation,
-        file.display(),
-        reason,
-        file.display()
-    )))
-}
-
 /// Profile not found error with suggestions
-#[allow(dead_code)]
 pub fn profile_not_found(profile_name: &str, available_profiles: &[String]) -> DotfilesError {
     let profile_list = if available_profiles.is_empty() {
         "  - default (always available)".to_string()
@@ -232,7 +155,6 @@ pub fn profile_not_found(profile_name: &str, available_profiles: &[String]) -> D
 }
 
 /// Git operation error with troubleshooting
-#[allow(dead_code)]
 pub fn git_operation_failed(operation: &str, repo_path: &Path, reason: &str) -> DotfilesError {
     let error_msg = format!(
         "What: Git operation failed\n  \
@@ -257,7 +179,6 @@ pub fn git_operation_failed(operation: &str, repo_path: &Path, reason: &str) -> 
 }
 
 /// Backup restore error
-#[allow(dead_code)]
 pub fn backup_restore_failed(backup_path: &Path, target: &Path, reason: &str) -> DotfilesError {
     DotfilesError::Path(format!(
         "What: Failed to restore file from backup\n  \
@@ -277,14 +198,6 @@ pub fn backup_restore_failed(backup_path: &Path, target: &Path, reason: &str) ->
 }
 
 // Macros for common patterns
-
-/// Create a file not found error quickly
-#[macro_export]
-macro_rules! err_file_not_found {
-    ($path:expr, $context:expr) => {
-        $crate::error_utils::file_not_found($path, $context)
-    };
-}
 
 /// Create a home directory not found error
 #[macro_export]

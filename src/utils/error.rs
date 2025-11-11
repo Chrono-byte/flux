@@ -53,7 +53,7 @@ pub enum DotfilesError {
 
 impl DotfilesError {
     /// Provide additional context for the error
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn with_context(self, context: &str) -> Self {
         match self {
             DotfilesError::Config(msg) => {
@@ -62,7 +62,17 @@ impl DotfilesError {
             DotfilesError::Path(msg) => {
                 DotfilesError::Path(format!("{}\n  Context: {}", msg, context))
             }
-            other => other,
+            DotfilesError::Io(e) => DotfilesError::Io(e),
+            DotfilesError::Git(e) => DotfilesError::Git(e),
+            DotfilesError::Toml(e) => DotfilesError::Toml(e),
+            DotfilesError::TomlSerialize(e) => DotfilesError::TomlSerialize(e),
+            DotfilesError::InvalidTool(msg) => {
+                DotfilesError::InvalidTool(format!("{}\n  Context: {}", msg, context))
+            }
+            DotfilesError::ProfileNotFound(msg) => {
+                DotfilesError::ProfileNotFound(format!("{}\n  Context: {}", msg, context))
+            }
+            DotfilesError::Cancelled => DotfilesError::Cancelled,
         }
     }
 }

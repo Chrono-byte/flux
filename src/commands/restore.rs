@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::error_utils;
 use crate::utils::prompt::prompt_yes_no;
 use chrono::DateTime;
 use colored::Colorize;
@@ -164,9 +165,13 @@ pub fn restore_backup(
 
     // Copy backup file to target
     if backup_file.is_dir() {
-        copy_dir_all(&backup_file, target_path)?;
+        copy_dir_all(&backup_file, target_path).map_err(|e| {
+            error_utils::backup_restore_failed(&backup_file, target_path, &e.to_string())
+        })?;
     } else {
-        fs::copy(&backup_file, target_path)?;
+        fs::copy(&backup_file, target_path).map_err(|e| {
+            error_utils::backup_restore_failed(&backup_file, target_path, &e.to_string())
+        })?;
     }
 
     Ok(())

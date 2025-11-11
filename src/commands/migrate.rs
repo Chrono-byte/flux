@@ -6,7 +6,6 @@ use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
 use colored::Colorize;
 use std::fs;
-use std::path::Path;
 
 /// Migrate files to fix discrepancies between tracked files and actual state.
 ///
@@ -167,12 +166,63 @@ fn migrate_file(
                 // It's a symlink - try to read what it points to
                 match fs::read_link(&file.dest_path) {
                     Ok(link_target) => {
-                        // Check if the link target exists and is accessible
-                        if link_target.exists() {
-                            Some(link_target)
+                        // Resolve relative symlink targets relative to the symlink's parent directory
+                        let resolved_target = if link_target.is_absolute() {
+                            link_target
                         } else {
-                            // Broken symlink - can't copy anything
-                            None
+                            file.dest_path
+                                .parent()
+                                .map(|p| p.join(&link_target))
+                                .unwrap_or(link_target.clone())
+                        };
+
+                        // Check if the link target exists and has content
+                        if resolved_target.exists() {
+                            // Check if target is empty
+                            let is_empty = if resolved_target.is_file() {
+                                fs::metadata(&resolved_target)
+                                    .map(|m| m.len() == 0)
+                                    .unwrap_or(false)
+                            } else {
+                                false
+                            };
+
+                            if is_empty {
+                                // Target exists but is empty - try to read content through the symlink
+                                // (in case there's content accessible via the symlink path)
+                                if file.dest_path.exists() {
+                                    // Try reading through the symlink to see if there's content
+                                    match fs::read(&file.dest_path) {
+                                        Ok(content) if !content.is_empty() => {
+                                            // There's content accessible through the symlink
+                                            Some(file.dest_path.clone())
+                                        }
+                                        _ => {
+                                            // Empty or can't read - use the empty target
+                                            Some(resolved_target)
+                                        }
+                                    }
+                                } else {
+                                    // Can't read through symlink - use empty target
+                                    Some(resolved_target)
+                                }
+                            } else {
+                                // Target exists and has content
+                                Some(resolved_target)
+                            }
+                        } else {
+                            // Broken symlink - try to read content through the symlink path
+                            if file.dest_path.exists() {
+                                match fs::read(&file.dest_path) {
+                                    Ok(content) if !content.is_empty() => {
+                                        // There's content accessible through the symlink
+                                        Some(file.dest_path.clone())
+                                    }
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            }
                         }
                     }
                     Err(_) => None,
@@ -186,22 +236,43 @@ fn migrate_file(
 
             // Copy current file content to repo if we have a source
             if let Some(source) = &source_to_copy {
-                println!("  Creating backup...");
-                fs_manager.backup_file(source, config, None)?;
-
-                // Copy current file to repo (fs_manager handles dry run)
-                println!("  Copying current file to repo...");
-                if let Some(parent) = file.repo_path.parent() {
-                    fs_manager.create_dir_all(parent)?;
-                }
-
-                if source.is_dir() {
-                    fs_manager.copy_dir_all(source, &file.repo_path)?;
+                // Check if source is empty
+                let source_is_empty = if source.is_file() {
+                    fs::metadata(source).map(|m| m.len() == 0).unwrap_or(false)
                 } else {
-                    fs_manager.copy(source, &file.repo_path)?;
-                }
-                if !fs_manager.is_dry_run {
-                    println!("  {} Copied to repo", "✓".green());
+                    false
+                };
+
+                if source_is_empty {
+                    if !fs_manager.is_dry_run {
+                        println!("  {} Source file is empty - nothing to copy", "⊘".yellow());
+                    }
+                    // Still create the repo file structure even if empty
+                    if let Some(parent) = file.repo_path.parent() {
+                        fs_manager.create_dir_all(parent)?;
+                    }
+                    // Create empty file if it doesn't exist (using copy from empty source)
+                    if !file.repo_path.exists() {
+                        fs_manager.copy(source, &file.repo_path)?;
+                    }
+                } else {
+                    println!("  Creating backup...");
+                    fs_manager.backup_file(source, config, None)?;
+
+                    // Copy current file to repo (fs_manager handles dry run)
+                    println!("  Copying current file to repo...");
+                    if let Some(parent) = file.repo_path.parent() {
+                        fs_manager.create_dir_all(parent)?;
+                    }
+
+                    if source.is_dir() {
+                        fs_manager.copy_dir_all(source, &file.repo_path)?;
+                    } else {
+                        fs_manager.copy(source, &file.repo_path)?;
+                    }
+                    if !fs_manager.is_dry_run {
+                        println!("  {} Copied to repo", "✓".green());
+                    }
                 }
             } else if !fs_manager.is_dry_run {
                 println!(
@@ -258,24 +329,4 @@ fn compute_link_target(
                 .unwrap_or_else(|| file.repo_path.clone())
         }
     })
-}
-
-#[allow(dead_code)]
-fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
-
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let dst_path = dst.join(&file_name);
-
-        if path.is_dir() {
-            copy_dir_all(&path, &dst_path)?;
-        } else {
-            fs::copy(&path, &dst_path)?;
-        }
-    }
-
-    Ok(())
 }

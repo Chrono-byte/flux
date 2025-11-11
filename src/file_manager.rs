@@ -25,6 +25,10 @@ pub fn add_file(
 ) -> Result<()> {
     // BACKUP: Create backup of destination file if it exists BEFORE any changes
     let home = dirs::home_dir().ok_or_else(crate::utils::error_utils::home_dir_not_found)?;
+
+    // Validate destination path is within home directory
+    crate::utils::security::validate_dest_path(dest_path, &home)?;
+
     let full_dest_path = home.join(dest_path);
     if let Some(path_to_backup) = get_path_to_backup(&full_dest_path) {
         println!("  Creating backup of existing destination...");

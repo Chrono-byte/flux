@@ -18,19 +18,6 @@ pub mod env_keys {
     pub const GIT_PASSWORD: &str = "GIT_PASSWORD";
 }
 
-/// Default configuration values
-#[allow(dead_code)]
-pub mod defaults {
-    pub const DEFAULT_REPO_PATH: &str = "~/.dotfiles";
-    pub const DEFAULT_BACKUP_DIR: &str = "~/.dotfiles-backups";
-    pub const DEFAULT_PROFILE: &str = "default";
-    pub const DEFAULT_SYMLINK_RESOLUTION: &str = "auto";
-    pub const DEFAULT_REMOTE: &str = "origin";
-    pub const DEFAULT_BRANCH: &str = "main";
-    pub const DEFAULT_LOG_LEVEL: &str = "info";
-    pub const DEFAULT_LOG_FORMAT: &str = "default";
-}
-
 /// Type-safe environment configuration
 ///
 /// Loads and validates all environment-dependent configuration at startup.
@@ -245,33 +232,6 @@ impl EnvironmentConfig {
             self.git_password.is_some()
         );
         debug!("  CI environment: {}", self.is_ci_environment);
-    }
-
-    /// Get git credentials tuple if both are available
-    #[allow(dead_code)]
-    pub fn get_git_credentials(&self) -> Option<(&str, &str)> {
-        match (&self.git_username, &self.git_password) {
-            (Some(username), Some(password)) => Some((username.as_str(), password.as_str())),
-            _ => None,
-        }
-    }
-
-    /// Validate that git credentials are properly configured if needed
-    #[allow(dead_code)]
-    pub fn validate_git_credentials(&self) -> Result<()> {
-        match (&self.git_username, &self.git_password) {
-            (Some(_), None) => Err(DotfilesError::Config(format!(
-                "{} is set but {} is not. Both are required for HTTPS git authentication.",
-                env_keys::GIT_USERNAME,
-                env_keys::GIT_PASSWORD
-            ))),
-            (None, Some(_)) => Err(DotfilesError::Config(format!(
-                "{} is set but {} is not. Both are required for HTTPS git authentication.",
-                env_keys::GIT_PASSWORD,
-                env_keys::GIT_USERNAME
-            ))),
-            _ => Ok(()),
-        }
     }
 }
 

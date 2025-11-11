@@ -165,11 +165,6 @@ impl DryRun {
             format!("Total operations: {}", self.operations.len()).bold()
         );
     }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.operations.is_empty()
-    }
 }
 
 impl Default for DryRun {

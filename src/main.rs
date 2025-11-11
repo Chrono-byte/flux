@@ -12,9 +12,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use commands::{
     add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_states,
-    display_backups, display_discrepancies, display_preview, display_status,
-    display_validation, find_discrepancies, list_backups, migrate_files,
-    restore_backup, validate_config,
+    display_backups, display_discrepancies, display_preview, display_status, display_validation,
+    find_discrepancies, list_backups, migrate_files, restore_backup, validate_config,
 };
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use config::{Config, EnvironmentConfig};
@@ -98,6 +97,9 @@ enum Commands {
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
+        /// Timeout in seconds (default: 60 or config push_timeout)
+        #[arg(long)]
+        timeout: Option<u64>,
     },
     /// Maintenance and repair operations
     Maintain {
@@ -317,7 +319,6 @@ enum RemoteCommands {
         dry_run: bool,
     },
 }
-
 
 #[derive(Subcommand)]
 enum ConfigCommands {
@@ -776,7 +777,6 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
     Ok(())
 }
 
-
 fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
     match command {
         MaintainCommands::Check { profile } => {
@@ -1023,6 +1023,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             branch,
             set_upstream,
             dry_run,
+            timeout,
         } => {
             let config = Config::load()?;
             let repo_path = config.get_repo_path()?;
@@ -1040,11 +1041,15 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 .or_else(|| config.general.default_branch.clone())
                 .unwrap_or_else(|| "main".to_string());
 
+            // Resolve timeout: --timeout flag > config push_timeout > 60 seconds
+            let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
+
             push_to_remote(
                 &repo,
                 &resolved_remote,
                 &resolved_branch,
                 set_upstream,
+                resolved_timeout,
                 &mut dry_run_tracker,
                 dry_run,
             )?;
