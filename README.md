@@ -447,6 +447,10 @@ flux sync
 - Check profile directory exists in repository
 - Use `validate` to check configuration
 
+## Versioning
+
+Flux uses **Epoch Semantic Versioning**, an extension of Semantic Versioning that provides better communication about the scale of changes. For detailed information about our versioning scheme, see [VERSIONING.md](VERSIONING.md).
+
 ## License
 
 [Your License Here]
