@@ -120,9 +120,20 @@ fn check_orphaned_entries(
         collect_files(&tool_dir, &tool_dir, &mut repo_files)?;
 
         // Get files tracked in config
+        // Normalize repo paths: remove tool name prefix if present
         let mut tracked_files = std::collections::HashSet::new();
         for file_entry in &tool_config.files {
-            tracked_files.insert(file_entry.repo.clone());
+            let normalized_repo = if file_entry.repo.starts_with(&format!("{}/", tool)) {
+                // Remove tool name prefix (e.g., "cursor/settings.json" -> "settings.json")
+                file_entry
+                    .repo
+                    .strip_prefix(&format!("{}/", tool))
+                    .unwrap_or(&file_entry.repo)
+                    .to_string()
+            } else {
+                file_entry.repo.clone()
+            };
+            tracked_files.insert(normalized_repo);
         }
 
         // Find orphaned files

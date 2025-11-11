@@ -1,6 +1,10 @@
 # Flux Configuration
 # This is an example configuration file.
 # Copy this to ~/.config/flux/config.toml and customize as needed.
+#
+# For editor autocomplete and validation, use the JSON schema:
+# schemas/config.schema.json
+# See schemas/README.md for setup instructions.
 
 [general]
 # Repository path where dotfiles are stored

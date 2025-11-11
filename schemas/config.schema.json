@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/yourusername/dotfiles-manager/schemas/config.schema.json",
+  "title": "Flux Dotfiles Manager Configuration",
+  "description": "Schema for Flux dotfiles manager configuration file (config.toml)",
+  "type": "object",
+  "properties": {
+    "general": {
+      "type": "object",
+      "description": "General configuration settings",
+      "x-taplo": {
+        "initKeys": ["repo_path", "current_profile", "backup_dir", "symlink_resolution"]
+      },
+      "properties": {
+        "repo_path": {
+          "type": "string",
+          "description": "Repository path where dotfiles are stored. Supports tilde expansion (~).",
+          "default": "~/.dotfiles",
+          "examples": ["~/.dotfiles", "/home/user/dotfiles"],
+          "x-taplo": {
+            "docs": {
+              "main": "Repository path where dotfiles are stored.\n\nSupports tilde expansion (`~`) which will be expanded to your home directory.\n\n**Examples:**\n- `~/.dotfiles` - Standard location in home directory\n- `/home/user/dotfiles` - Absolute path\n- `~/Documents/dotfiles` - Custom location with tilde expansion"
+            }
+          }
+        },
+        "backup_dir": {
+          "type": "string",
+          "description": "Directory for backups (created automatically on conflicts). Supports tilde expansion (~).",
+          "default": "~/.dotfiles-backup",
+          "examples": ["~/.dotfiles-backups", "/tmp/dotfiles-backups"],
+          "x-taplo": {
+            "docs": {
+              "main": "Directory for backups created automatically when conflicts occur.\n\nSupports tilde expansion (`~`). Backups are created when:\n- Installing files that would overwrite existing files\n- Switching profiles with conflicting configurations\n\n**Examples:**\n- `~/.dotfiles-backup` - Default backup location\n- `/tmp/dotfiles-backups` - Temporary backup location"
+            }
+          }
+        },
+        "current_profile": {
+          "type": "string",
+          "description": "Current active profile name. Must be alphanumeric with underscores or hyphens.",
+          "default": "default",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "examples": ["default", "work", "laptop", "desktop"],
+          "x-taplo": {
+            "docs": {
+              "main": "Current active profile name.\n\nProfiles allow you to have different configurations for different environments (work, home, laptop, etc.). Files can be marked as profile-specific in the `tools` section.\n\n**Constraints:**\n- Must be alphanumeric with underscores or hyphens\n- Pattern: `^[a-zA-Z0-9_-]+$`\n\n**Examples:**\n- `default` - Default profile\n- `work` - Work environment\n- `laptop` - Laptop-specific configuration"
+            }
+          }
+        },
+        "symlink_resolution": {
+          "type": "string",
+          "description": "Symlink resolution strategy",
+          "enum": ["auto", "relative", "absolute", "follow", "replace"],
+          "default": "auto",
+          "x-taplo": {
+            "docs": {
+              "main": "Symlink resolution strategy for managing dotfiles.\n\n- **auto**: Use relative if possible, absolute if needed (recommended)\n- **relative**: Always create relative symlinks\n- **absolute**: Always create absolute symlinks\n- **follow**: Follow existing symlinks, replace target\n- **replace**: Replace symlinks with actual files (copy)",
+              "enumValues": [
+                "Use relative if possible, absolute if needed (recommended)",
+                "Always create relative symlinks",
+                "Always create absolute symlinks",
+                "Follow existing symlinks, replace target",
+                "Replace symlinks with actual files (copy)"
+              ],
+              "defaultValue": "Use relative if possible, absolute if needed (recommended)"
+            }
+          }
+        },
+        "default_remote": {
+          "type": "string",
+          "description": "Default remote name for git push operations (optional, defaults to 'origin')",
+          "examples": ["origin", "upstream", "github"]
+        },
+        "default_branch": {
+          "type": "string",
+          "description": "Default branch name for git push operations (optional, defaults to 'main' if no HEAD)",
+          "examples": ["main", "master", "develop"]
+        },
+        "include": {
+          "type": "array",
+          "description": "List of config files to include and merge. Later files override earlier ones. Paths can be relative (to config file directory), absolute, or use tilde expansion.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [
+            ["profiles/base.toml", "profiles/laptop.toml"],
+            ["~/.config/flux/shared.toml", "../common.toml"]
+          ]
+        }
+      },
+      "required": ["repo_path", "backup_dir", "current_profile", "symlink_resolution"]
+    },
+    "tools": {
+      "type": "object",
+      "description": "Tool configurations. Each key is a tool name, and each value contains files to track.",
+      "x-taplo": {
+        "docs": {
+          "main": "Tool configurations for managing dotfiles.\n\nEach key is a tool name (e.g., `sway`, `cursor`, `vim`), and each value contains a list of files to track. Files can be profile-specific by adding a `profile` field.\n\n**Example:**\n```toml\n[tools.sway]\nfiles = [\n    { repo = \"config\", dest = \".config/sway/config\" },\n    { repo = \"config.work\", dest = \".config/sway/config\", profile = \"work\" }\n]\n```"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "description": "List of files to track for this tool",
+            "x-taplo": {
+              "initKeys": ["repo", "dest"]
+            },
+            "items": {
+              "type": "object",
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "description": "Path to file in repository (relative to tool directory in repo)",
+                  "x-taplo": {
+                    "docs": {
+                      "main": "Path to file in repository, relative to the tool's directory.\n\nFor example, if the tool is `sway` and `repo = \"config\"`, the file will be at `{repo_path}/sway/config`."
+                    }
+                  }
+                },
+                "dest": {
+                  "type": "string",
+                  "description": "Destination path in home directory (relative to home, e.g., '.config/sway/config')",
+                  "x-taplo": {
+                    "docs": {
+                      "main": "Destination path in home directory.\n\nThis is relative to your home directory. Use dot notation for hidden files/directories.\n\n**Examples:**\n- `.config/sway/config` - Standard config location\n- `.vimrc` - Vim configuration\n- `.bashrc` - Bash configuration"
+                    }
+                  }
+                },
+                "profile": {
+                  "type": "string",
+                  "description": "Optional profile name. If specified, this file is only active for this profile.",
+                  "pattern": "^[a-zA-Z0-9_-]+$",
+                  "x-taplo": {
+                    "docs": {
+                      "main": "Optional profile name.\n\nIf specified, this file will only be active when the `current_profile` matches this value. This allows you to have different configurations for different environments.\n\n**Example:**\n```toml\n{ repo = \"config.work\", dest = \".config/sway/config\", profile = \"work\" }\n```\n\nThis file will only be used when `current_profile = \"work\"`."
+                    }
+                  }
+                }
+              },
+              "required": ["repo", "dest"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["files"],
+        "additionalProperties": false
+      },
+      "examples": [
+        {
+          "sway": {
+            "files": [
+              { "repo": "config", "dest": ".config/sway/config" }
+            ]
+          }
+        },
+        {
+          "cursor": {
+            "files": [
+              { "repo": "settings.json", "dest": ".config/Cursor/User/settings.json" },
+              { "repo": "keybindings.json", "dest": ".config/Cursor/User/keybindings.json" }
+            ]
+          }
+        },
+        {
+          "sway_work": {
+            "files": [
+              { "repo": "config", "dest": ".config/sway/config", "profile": "work" }
+            ]
+          }
+        }
+      ]
+    },
+    "packages": {
+      "type": "object",
+      "description": "Package declarations for declarative package management. Each key is a package name.",
+      "x-taplo": {
+        "docs": {
+          "main": "Package declarations for declarative package management.\n\nEach key is a package name, and the value specifies version constraints and optional metadata. This allows you to declare which packages should be installed and their versions.\n\n**Example:**\n```toml\n[packages.git]\nversion = \"latest\"\ndescription = \"Version control system\"\n\n[packages.vim]\nversion = \"~9.0\"\nmin_version = \"9.0.0\"\n```"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Package name (optional, key name is used if not specified)"
+          },
+          "version": {
+            "type": "string",
+            "description": "Version constraint (e.g., 'latest', '1.9.0', '~1.9')",
+            "default": "latest",
+            "examples": ["latest", "1.9.0", "~1.9", ">=2.0"],
+            "x-taplo": {
+              "docs": {
+                "main": "Version constraint for the package.\n\n**Supported formats:**\n- `latest` - Install the latest available version\n- `1.9.0` - Exact version\n- `~1.9` - Compatible version (>= 1.9.0, < 2.0.0)\n- `>=2.0` - Minimum version\n- `<3.0` - Maximum version (use `max_version` instead)\n\n**Examples:**\n- `latest` - Always use latest\n- `1.9.0` - Pin to specific version\n- `~1.9` - Compatible with 1.9.x",
+                "defaultValue": "Install the latest available version"
+              }
+            }
+          },
+          "min_version": {
+            "type": "string",
+            "description": "Optional minimum version constraint",
+            "examples": ["1.0.0", ">=1.5"]
+          },
+          "max_version": {
+            "type": "string",
+            "description": "Optional maximum version constraint",
+            "examples": ["2.0.0", "<3.0"]
+          },
+          "description": {
+            "type": "string",
+            "description": "Optional description of the package"
+          }
+        },
+        "additionalProperties": false
+      },
+      "examples": [
+        {
+          "git": {
+            "version": "latest",
+            "description": "Version control system"
+          }
+        },
+        {
+          "vim": {
+            "version": "~9.0",
+            "description": "Text editor"
+          }
+        },
+        {
+          "firefox": {
+            "version": "latest",
+            "min_version": "100.0",
+            "description": "Web browser"
+          }
+        }
+      ]
+    },
+    "services": {
+      "type": "object",
+      "description": "Service declarations for declarative service management. Each key is a service name.",
+      "x-taplo": {
+        "docs": {
+          "main": "Service declarations for declarative service management.\n\nEach key is a service name, and the value specifies whether the service should be enabled, running, and/or autostarted. This allows you to manage systemd services declaratively.\n\n**Example:**\n```toml\n[services.ssh]\nenabled = true\nrunning = true\npackage = \"openssh-server\"\n\n[services.docker]\nenabled = true\nautostart = true\n```"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Service name (optional, key name is used if not specified)"
+          },
+          "package": {
+            "type": "string",
+            "description": "Package that provides this service (optional)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Should be enabled/started at boot",
+            "default": false,
+            "x-taplo": {
+              "docs": {
+                "main": "Whether the service should be enabled to start at boot.\n\nWhen `true`, the service will be enabled in systemd (systemctl enable).",
+                "defaultValue": "Service will not be enabled at boot"
+              }
+            }
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Should be running now (optional, if not specified, follows enabled state)"
+          },
+          "autostart": {
+            "type": "boolean",
+            "description": "Autostart on user login (for user services)",
+            "default": false,
+            "x-taplo": {
+              "docs": {
+                "main": "Whether the service should autostart on user login.\n\nThis is typically used for user services (systemd --user). When `true`, the service will be configured to start automatically when the user logs in.",
+                "defaultValue": "Service will not autostart on login"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "examples": [
+        {
+          "ssh": {
+            "enabled": true,
+            "package": "openssh-server",
+            "running": true
+          }
+        },
+        {
+          "docker": {
+            "enabled": true,
+            "autostart": true
+          }
+        },
+        {
+          "syncthing": {
+            "enabled": true,
+            "running": true,
+            "autostart": true
+          }
+        }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "description": "Environment configuration",
+      "x-taplo": {
+        "docs": {
+          "main": "Environment configuration for setting environment variables and shell preferences.\n\nThis section allows you to declare environment variables and shell settings that should be applied to your system.\n\n**Example:**\n```toml\n[environment]\nvariables = { EDITOR = \"nvim\", SHELL = \"/bin/bash\" }\nshell = \"/bin/zsh\"\n```"
+        }
+      },
+      "properties": {
+        "variables": {
+          "type": "object",
+          "description": "Environment variables to set",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "examples": [
+            {
+              "EDITOR": "nvim",
+              "SHELL": "/bin/bash",
+              "LANG": "en_US.UTF-8"
+            }
+          ]
+        },
+        "shell": {
+          "type": "string",
+          "description": "Shell to use",
+          "examples": ["/bin/bash", "/bin/zsh", "/usr/bin/fish"]
+        }
+      },
+      "additionalProperties": false,
+      "examples": [
+        {
+          "variables": {
+            "EDITOR": "nvim",
+            "SHELL": "/bin/bash"
+          },
+          "shell": "/bin/zsh"
+        }
+      ]
+    }
+  },
+  "required": ["general"],
+  "additionalProperties": false
+}
+

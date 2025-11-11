@@ -267,7 +267,14 @@ pub fn remove_file(
 
     // Remove from repo
     let repo_path = config.get_repo_path()?;
-    let repo_file = repo_path.join(tool).join(file);
+    // Handle both cases: file may or may not include the tool name prefix
+    let repo_file = if file.starts_with(&format!("{}/", tool)) {
+        // file already includes tool name (e.g., "cursor/settings.json")
+        repo_path.join(file)
+    } else {
+        // file doesn't include tool name (e.g., "config")
+        repo_path.join(tool).join(file)
+    };
     fs_manager.remove_file(&repo_file)?;
 
     // Remove from config (in memory)

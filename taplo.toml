@@ -1,0 +1,29 @@
+# Taplo configuration for Flux dotfiles manager
+# This file configures Taplo to use the JSON schema for config.toml files
+#
+# Place this file in your project root or in ~/.config/taplo/taplo.toml
+# Taplo will automatically use this configuration when working with TOML files
+
+# Global schema configuration
+[schema]
+# Enable schema validation
+enabled = true
+# Path to the schema file (relative to this taplo.toml file or absolute)
+# For project-local use, use relative path
+# For global use in ~/.config/taplo/taplo.toml, use absolute path
+path = "./schemas/config.schema.json"
+
+# Rules can be used to override schema associations for specific files
+# This rule applies the schema to config.toml files in common locations
+[[rule]]
+name = "flux-config"
+# Match config.toml files in common locations
+include = [
+  "**/config.toml",
+  "**/flux/config.toml",
+  "~/.config/flux/config.toml",
+  "~/.dotfiles/config.toml"
+]
+# Schema configuration for this rule
+schema = { enabled = true, path = "./schemas/config.schema.json" }
+

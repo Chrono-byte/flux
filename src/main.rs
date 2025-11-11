@@ -150,6 +150,7 @@ enum FileCommands {
         dry_run: bool,
     },
     /// Remove a file from tracking
+    #[command(visible_alias = "rm")]
     Remove {
         /// Tool name
         tool: String,
@@ -965,7 +966,7 @@ desktop.ini
 
 fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
     // Note: env_config is validated at startup for early error detection.
-    // It may be used in future for git auth and other features.
+    // It's now used for custom config file paths and git auth.
     match cli.command {
         Commands::File { command } => {
             return handle_file_command(command);

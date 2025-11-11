@@ -22,6 +22,9 @@ pub struct GeneralConfig {
     pub default_remote: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_branch: Option<String>,
+    /// List of config files to include and merge (later files override earlier ones)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
 }
 
 impl Default for GeneralConfig {
@@ -33,6 +36,7 @@ impl Default for GeneralConfig {
             symlink_resolution: "auto".to_string(),
             default_remote: None,
             default_branch: None,
+            include: None,
         }
     }
 }
@@ -63,23 +67,199 @@ pub struct Config {
 }
 
 impl Config {
+    /// Load configuration, checking DOTFILES_CONFIG environment variable if set
     pub fn load() -> Result<Self> {
-        let config_path = Self::get_config_path()?;
+        // Check for custom config path from environment variable
+        let config_path = if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
+            PathBuf::from(&config_path_str)
+        } else {
+            Self::get_config_path()?
+        };
+
+        Self::load_from_path(&config_path, &mut Vec::new())
+    }
+
+    /// Load configuration with optional custom path (from EnvironmentConfig)
+    #[allow(dead_code)] // Reserved for future use when EnvironmentConfig needs to be explicitly passed
+    pub fn load_with_env(env_config: Option<&EnvironmentConfig>) -> Result<Self> {
+        // Determine config path: env_config > environment variable > default location
+        let config_path = if let Some(env) = env_config {
+            env.config_file.clone().unwrap_or_else(|| {
+                // Fall back to environment variable or default
+                if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
+                    PathBuf::from(&config_path_str)
+                } else {
+                    Self::get_config_path().unwrap_or_default()
+                }
+            })
+        } else {
+            // No env_config provided, use standard load logic
+            if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
+                PathBuf::from(&config_path_str)
+            } else {
+                Self::get_config_path()?
+            }
+        };
+
+        Self::load_from_path(&config_path, &mut Vec::new())
+    }
+
+    /// Load configuration from a specific path, with circular dependency tracking
+    fn load_from_path(config_path: &Path, visited: &mut Vec<PathBuf>) -> Result<Self> {
+        let config_path = match config_path.canonicalize() {
+            Ok(path) => path,
+            Err(_) => config_path.to_path_buf(),
+        };
+
+        // Check for circular includes
+        if visited.contains(&config_path) {
+            return Err(DotfilesError::Config(format!(
+                "Circular include detected: {}",
+                config_path.display()
+            )));
+        }
+        visited.push(config_path.clone());
 
         if !config_path.exists() {
-            // Create default config
-            let config = Config::default();
-            config.save(false)?;
-            return Ok(config);
+            // Create default config if this is the primary config file
+            if visited.len() == 1 {
+                let config = Config::default();
+                config.save(false)?;
+                return Ok(config);
+            } else {
+                return Err(DotfilesError::Config(format!(
+                    "Included config file does not exist: {}",
+                    config_path.display()
+                )));
+            }
         }
 
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| DotfilesError::Config(format!("Failed to read config: {}", e)))?;
-        let config: Config = toml::from_str(&content)
-            .map_err(|e| DotfilesError::Config(format!("Failed to parse config: {}", e)))?;
+        let content = fs::read_to_string(&config_path).map_err(|e| {
+            DotfilesError::Config(format!(
+                "Failed to read config {}: {}",
+                config_path.display(),
+                e
+            ))
+        })?;
 
-        config.validate()?;
+        let mut config: Config = toml::from_str(&content).map_err(|e| {
+            DotfilesError::Config(format!(
+                "Failed to parse config {}: {}",
+                config_path.display(),
+                e
+            ))
+        })?;
+
+        // Load and merge included configs
+        // Extract includes list to avoid borrow checker issues
+        let includes = config.general.include.clone();
+        if let Some(includes) = includes {
+            let base_dir = config_path.parent().ok_or_else(|| {
+                DotfilesError::Config("Config file has no parent directory".to_string())
+            })?;
+
+            for include_path_str in &includes {
+                // Resolve relative paths from the current config file's directory
+                let include_path =
+                    if include_path_str.starts_with('/') || include_path_str.starts_with('~') {
+                        // Absolute path or tilde expansion
+                        shellexpand::full(include_path_str)
+                            .map(|s| PathBuf::from(s.as_ref()))
+                            .map_err(|e| {
+                                DotfilesError::Config(format!(
+                                    "Failed to expand path {}: {}",
+                                    include_path_str, e
+                                ))
+                            })?
+                    } else {
+                        // Relative path - resolve from the config file's directory
+                        base_dir.join(include_path_str)
+                    };
+
+                // Canonicalize to check for self-inclusion
+                let include_path_canonical = include_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| include_path.clone());
+
+                let config_path_canonical = config_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| config_path.clone());
+
+                // Prevent config from including itself
+                if include_path_canonical == config_path_canonical {
+                    return Err(DotfilesError::Config(format!(
+                        "Config file cannot include itself: {}",
+                        include_path_str
+                    )));
+                }
+
+                let included_config = Self::load_from_path(&include_path, visited)?;
+                config.merge(&included_config)?;
+            }
+        }
+
+        // Remove this path from visited set after processing
+        visited.pop();
+
+        // Only validate the final merged config
+        if visited.is_empty() {
+            config.validate()?;
+        }
+
         Ok(config)
+    }
+
+    /// Merge another config into this one (later config overrides earlier)
+    fn merge(&mut self, other: &Config) -> Result<()> {
+        // Merge general config (later overrides earlier for most fields)
+        // For include, we don't merge - only the base config's includes are processed
+        if !other.general.repo_path.is_empty() {
+            self.general.repo_path = other.general.repo_path.clone();
+        }
+        if !other.general.backup_dir.is_empty() {
+            self.general.backup_dir = other.general.backup_dir.clone();
+        }
+        if !other.general.current_profile.is_empty() {
+            self.general.current_profile = other.general.current_profile.clone();
+        }
+        if !other.general.symlink_resolution.is_empty() {
+            self.general.symlink_resolution = other.general.symlink_resolution.clone();
+        }
+        if other.general.default_remote.is_some() {
+            self.general.default_remote = other.general.default_remote.clone();
+        }
+        if other.general.default_branch.is_some() {
+            self.general.default_branch = other.general.default_branch.clone();
+        }
+
+        // Merge tools (later entries override earlier ones)
+        for (tool_name, tool_config) in &other.tools {
+            let entry = self
+                .tools
+                .entry(tool_name.clone())
+                .or_insert_with(|| ToolConfig { files: Vec::new() });
+            // Merge file entries (append, allowing duplicates to be filtered later if needed)
+            entry.files.extend(tool_config.files.clone());
+        }
+
+        // Merge packages (later overrides earlier)
+        for (package_name, package_spec) in &other.packages {
+            self.packages
+                .insert(package_name.clone(), package_spec.clone());
+        }
+
+        // Merge services (later overrides earlier)
+        for (service_name, service_spec) in &other.services {
+            self.services
+                .insert(service_name.clone(), service_spec.clone());
+        }
+
+        // Merge environment (later overrides earlier, or replaces if None)
+        if other.environment.is_some() {
+            self.environment = other.environment.clone();
+        }
+
+        Ok(())
     }
 
     pub fn save(&self, validate: bool) -> Result<()> {
@@ -93,14 +273,107 @@ impl Config {
             fs::create_dir_all(parent)?;
         }
 
-        let content = toml::to_string_pretty(self)
+        // Use toml_edit to preserve comments and formatting
+        let mut doc = if config_path.exists() {
+            // Read existing file to preserve comments
+            let content = fs::read_to_string(&config_path).map_err(|e| {
+                DotfilesError::Config(format!(
+                    "Failed to read config {}: {}",
+                    config_path.display(),
+                    e
+                ))
+            })?;
+            content.parse::<toml_edit::DocumentMut>().map_err(|e| {
+                DotfilesError::Config(format!("Failed to parse existing config: {}", e))
+            })?
+        } else {
+            // Create new document
+            toml_edit::DocumentMut::new()
+        };
+
+        // Serialize current config to TOML and merge into existing document
+        let new_toml = toml::to_string_pretty(self)
             .map_err(|e| DotfilesError::Config(format!("Failed to serialize config: {}", e)))?;
-        fs::write(&config_path, content)?;
+        let new_doc = new_toml.parse::<toml_edit::DocumentMut>().map_err(|e| {
+            DotfilesError::Config(format!("Failed to parse serialized config: {}", e))
+        })?;
+
+        // Merge new values into existing document, preserving comments
+        // Recursively merge nested tables to preserve comments in sub-sections
+        Self::merge_toml_documents(&mut doc, &new_doc);
+
+        // Write back
+        fs::write(&config_path, doc.to_string())?;
 
         Ok(())
     }
 
+    /// Recursively merge two TOML documents, preserving comments from the original
+    fn merge_toml_documents(target: &mut toml_edit::DocumentMut, source: &toml_edit::DocumentMut) {
+        for (key, source_item) in source.iter() {
+            let target_item = target.get_mut(key);
+            match (target_item, source_item) {
+                (Some(target_item), toml_edit::Item::Table(_)) => {
+                    // Both are tables, merge recursively
+                    if let Some(target_table) = target_item.as_table_mut() {
+                        if let toml_edit::Item::Table(source_table) = source_item {
+                            Self::merge_toml_tables(target_table, source_table);
+                        }
+                    }
+                }
+                (Some(_), _) => {
+                    // Target exists but source is not a table, replace it
+                    target[key] = source_item.clone();
+                }
+                (None, _) => {
+                    // Key doesn't exist in target, add it
+                    target[key] = source_item.clone();
+                }
+            }
+        }
+    }
+
+    /// Recursively merge two TOML tables
+    fn merge_toml_tables(target: &mut toml_edit::Table, source: &toml_edit::Table) {
+        for (key, source_item) in source.iter() {
+            let target_item = target.get_mut(key);
+            match (target_item, source_item) {
+                (Some(target_item), toml_edit::Item::Table(_)) => {
+                    // Both are tables, merge recursively
+                    if let Some(target_table) = target_item.as_table_mut() {
+                        if let toml_edit::Item::Table(source_table) = source_item {
+                            Self::merge_toml_tables(target_table, source_table);
+                        }
+                    }
+                }
+                (Some(_), _) => {
+                    // Target exists, replace it with source value
+                    target.insert(key, source_item.clone());
+                }
+                (None, _) => {
+                    // Key doesn't exist in target, add it
+                    target.insert(key, source_item.clone());
+                }
+            }
+        }
+    }
+
+    /// Get the default config path, checking multiple locations in order:
+    /// 1. Environment variable DOTFILES_CONFIG (handled in load())
+    /// 2. ~/.dotfiles/config.toml (if repo exists)
+    /// 3. ~/.config/flux/config.toml (XDG standard location)
     pub fn get_config_path() -> Result<PathBuf> {
+        // First, try to check if ~/.dotfiles/config.toml exists
+        // We need to check this without loading the config (to avoid circular dependency)
+        let home = dirs::home_dir()
+            .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
+        let repo_config = home.join(".dotfiles").join("config.toml");
+
+        if repo_config.exists() {
+            return Ok(repo_config);
+        }
+
+        // Fall back to XDG config directory
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
         Ok(config_dir.join("flux/config.toml"))
@@ -199,7 +472,14 @@ impl Config {
                     file.profile.is_none() || file.profile.as_deref() == Some(current_profile);
 
                 if include {
-                    let repo_path = repo_path.join(tool).join(&file.repo);
+                    // Handle both cases: file.repo may or may not include the tool name prefix
+                    let repo_file_path = if file.repo.starts_with(&format!("{}/", tool)) {
+                        // file.repo already includes tool name (e.g., "cursor/settings.json")
+                        repo_path.join(&file.repo)
+                    } else {
+                        // file.repo doesn't include tool name (e.g., "config")
+                        repo_path.join(tool).join(&file.repo)
+                    };
                     let dest_path = dirs::home_dir()
                         .ok_or_else(|| {
                             DotfilesError::Config("Could not find home directory".to_string())
@@ -208,7 +488,7 @@ impl Config {
 
                     tracked_files.push(crate::types::TrackedFile {
                         tool: tool.clone(),
-                        repo_path,
+                        repo_path: repo_file_path,
                         dest_path,
                         profile: file.profile.clone(),
                     });

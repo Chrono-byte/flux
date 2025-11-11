@@ -578,7 +578,7 @@ checksum = "52051878f80a721bb68ebfbc930e07b65ba72f2da88968ea5c06fd6ca3d3a127"
 
 [[package]]
 name = "flux"
-version = "1.0.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -600,6 +600,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml",
+ "toml_edit 0.22.27",
  "uuid",
  "walkdir",
  "zbus",
