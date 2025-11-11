@@ -1,6 +1,7 @@
 use crate::error::{DotfilesError, Result};
 use crate::types::FileChange;
-use dialoguer::{Select, theme::ColorfulTheme};
+use colored::Colorize;
+use dialoguer::{Input, Select, theme::ColorfulTheme};
 use std::path::Path;
 
 pub enum ConflictResolution {
@@ -46,40 +47,45 @@ pub fn prompt_yes_no(question: &str) -> Result<bool> {
 }
 
 pub fn prompt_commit_message(changes: &[FileChange]) -> Result<String> {
-    use dialoguer::Input;
-
     if changes.is_empty() {
         return Ok("Update dotfiles".to_string());
     }
 
-    let mut messages = Vec::new();
-
+    // --- 1. Build a formatted summary of all changes ---
+    let mut change_summary = Vec::new();
     for change in changes {
         let change_desc = match change {
-            FileChange::Added(path) => format!("File: {} (added)", path.display()),
-            FileChange::Modified(path) => format!("File: {} (modified)", path.display()),
-            FileChange::Deleted(path) => format!("File: {} (deleted)", path.display()),
+            FileChange::Added(path) => {
+                format!("  {} {}", "[+] Added:".green(), path.display())
+            }
+            FileChange::Modified(path) => {
+                format!("  {} {}", "[*] Modified:".yellow(), path.display())
+            }
+            FileChange::Deleted(path) => {
+                format!("  {} {}", "[-] Deleted:".red(), path.display())
+            }
         };
-
-        let message: String = Input::with_theme(&ColorfulTheme::default())
-            .with_prompt(format!(
-                "{}\nEnter commit message for this change (or press Enter to skip):",
-                change_desc
-            ))
-            .allow_empty(true)
-            .interact_text()
-            .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
-
-        if !message.trim().is_empty() {
-            messages.push(message);
-        }
+        change_summary.push(change_desc);
     }
+    let summary_text = change_summary.join("\n");
 
-    if messages.is_empty() {
-        Ok("Update dotfiles".to_string())
-    } else if messages.len() == 1 {
-        Ok(messages[0].clone())
+    // --- 2. Create a single prompt with the summary ---
+    let prompt_text = format!(
+        "{}\n{}\n\nEnter commit message (or press Enter for 'Update dotfiles'):",
+        "The following changes will be committed:".bold(),
+        summary_text
+    );
+
+    let message: String = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt(prompt_text)
+        .allow_empty(true)
+        .interact_text()
+        .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
+
+    // --- 3. Handle the response ---
+    Ok(if message.trim().is_empty() {
+        "Update dotfiles".to_string()
     } else {
-        Ok(format!("Update dotfiles: {}", messages.join("; ")))
-    }
+        message
+    })
 }

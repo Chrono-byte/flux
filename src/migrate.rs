@@ -261,6 +261,7 @@ fn compute_link_target(
     })
 }
 
+#[allow(dead_code)]
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
 

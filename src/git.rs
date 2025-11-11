@@ -38,6 +38,10 @@ pub fn stage_changes(
     for change in changes {
         match change {
             FileChange::Added(path) | FileChange::Modified(path) => {
+                // Skip directories - git only tracks files
+                if path.is_dir() {
+                    continue;
+                }
                 let repo_path = repo.path().parent().unwrap();
                 if let Ok(relative) = path.strip_prefix(repo_path) {
                     index.add_path(relative)?;
