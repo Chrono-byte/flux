@@ -51,51 +51,6 @@ enum Commands {
         #[command(subcommand)]
         command: FileCommands,
     },
-    /// Backup and restore operations
-    Backup {
-        #[command(subcommand)]
-        command: BackupCommands,
-    },
-    /// Maintenance and repair operations
-    Maintain {
-        #[command(subcommand)]
-        command: MaintainCommands,
-    },
-    /// Profile management
-    Profile {
-        #[command(subcommand)]
-        command: ProfileCommands,
-    },
-    /// Manage remote repositories
-    Remote {
-        #[command(subcommand)]
-        command: RemoteCommands,
-    },
-    /// Push changes to remote repository
-    Push {
-        /// Remote name (default: origin or config default_remote)
-        #[arg(long)]
-        remote: Option<String>,
-        /// Branch name (default: current HEAD or config default_branch)
-        #[arg(long)]
-        branch: Option<String>,
-        /// Set upstream after push
-        #[arg(long)]
-        set_upstream: bool,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Package management operations
-    Package {
-        #[command(subcommand)]
-        command: PackageCommands,
-    },
-    /// Service management operations
-    Service {
-        #[command(subcommand)]
-        command: ServiceCommands,
-    },
     /// Apply configuration declaratively (NixOS-like)
     Apply {
         /// Profile name (default: current profile)
@@ -120,15 +75,72 @@ enum Commands {
         #[arg(long, default_value = "auto")]
         package_manager: String,
     },
+    /// Profile management
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommands,
+    },
     /// Configuration management operations
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    /// Backup and restore operations
+    Backup {
+        #[command(subcommand)]
+        command: BackupCommands,
+    },
+    /// Package management operations
+    Package {
+        #[command(subcommand)]
+        command: PackageCommands,
+    },
+    /// Service management operations
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommands,
+    },
+    /// Manage remote repositories
+    Remote {
+        #[command(subcommand)]
+        command: RemoteCommands,
+    },
+    /// Push changes to remote repository
+    Push {
+        /// Remote name (default: origin or config default_remote)
+        #[arg(long)]
+        remote: Option<String>,
+        /// Branch name (default: current HEAD or config default_branch)
+        #[arg(long)]
+        branch: Option<String>,
+        /// Set upstream after push
+        #[arg(long)]
+        set_upstream: bool,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Maintenance and repair operations
+    Maintain {
+        #[command(subcommand)]
+        command: MaintainCommands,
+    },
 }
 
 #[derive(Subcommand)]
 enum FileCommands {
+    /// List tracked files
+    List {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Show sync status of tracked files
+    Status {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
+    },
     /// Add a file to tracking
     Add {
         /// Tool name (e.g., sway, waybar, cursor, firefox, zen)
@@ -154,17 +166,6 @@ enum FileCommands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove a file from tracking
-    #[command(visible_alias = "rm")]
-    Remove {
-        /// Tool name
-        tool: String,
-        /// File name in repository
-        file: String,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
     /// Sync tracked files
     Sync {
         /// Profile name (default: current profile)
@@ -177,17 +178,16 @@ enum FileCommands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// List tracked files
-    List {
-        /// Profile name (default: current profile)
+    /// Remove a file from tracking
+    #[command(visible_alias = "rm")]
+    Remove {
+        /// Tool name
+        tool: String,
+        /// File name in repository
+        file: String,
+        /// Dry run mode
         #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Show sync status of tracked files
-    Status {
-        /// Profile name (default: current profile)
-        #[arg(long)]
-        profile: Option<String>,
+        dry_run: bool,
     },
 }
 
@@ -198,6 +198,21 @@ enum BackupCommands {
         /// Profile name (default: current profile)
         #[arg(long)]
         profile: Option<String>,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Restore files from backup
+    Restore {
+        /// Backup index, 'latest', or 'list' to show backups
+        #[arg(default_value = "list")]
+        backup: String,
+        /// Specific file to restore (optional, restores all if not specified)
+        #[arg(long)]
+        file: Option<String>,
+        /// Skip confirmation prompts (auto-confirm)
+        #[arg(long)]
+        yes: bool,
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
@@ -219,21 +234,6 @@ enum BackupCommands {
         /// Commit message (optional, will prompt if not provided)
         #[arg(long)]
         message: Option<String>,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Restore files from backup
-    Restore {
-        /// Backup index, 'latest', or 'list' to show backups
-        #[arg(default_value = "list")]
-        backup: String,
-        /// Specific file to restore (optional, restores all if not specified)
-        #[arg(long)]
-        file: Option<String>,
-        /// Skip confirmation prompts (auto-confirm)
-        #[arg(long)]
-        yes: bool,
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
@@ -260,6 +260,8 @@ enum MaintainCommands {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Validate configuration integrity
+    Validate,
     /// Migrate files with discrepancies: copy current files to repo and create symlinks
     Migrate {
         /// Profile name (default: current profile)
@@ -269,14 +271,14 @@ enum MaintainCommands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Validate configuration integrity
-    Validate,
     /// Generate a .gitignore file for the repository
     Gitignore,
 }
 
 #[derive(Subcommand)]
 enum ProfileCommands {
+    /// List all profiles
+    List,
     /// Create a new profile
     Create {
         /// Profile name
@@ -287,26 +289,18 @@ enum ProfileCommands {
         /// Profile name
         name: String,
     },
-    /// List all profiles
-    List,
 }
 
 #[derive(Subcommand)]
 enum RemoteCommands {
+    /// List all remotes
+    List,
     /// Add a remote repository
     Add {
         /// Remote name (e.g., origin)
         name: String,
         /// Remote URL (git@... or https://...)
         url: String,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Remove a remote repository
-    Remove {
-        /// Remote name
-        name: String,
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
@@ -321,8 +315,14 @@ enum RemoteCommands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// List all remotes
-    List,
+    /// Remove a remote repository
+    Remove {
+        /// Remote name
+        name: String,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -383,19 +383,19 @@ enum ServiceCommands {
         #[arg(long)]
         system: bool,
     },
-    /// Disable a service
-    Disable {
-        /// Service name
-        name: String,
-        /// Disable system service instead of user service
-        #[arg(long)]
-        system: bool,
-    },
     /// Start a service
     Start {
         /// Service name
         name: String,
         /// Start system service instead of user service
+        #[arg(long)]
+        system: bool,
+    },
+    /// Disable a service
+    Disable {
+        /// Service name
+        name: String,
+        /// Disable system service instead of user service
         #[arg(long)]
         system: bool,
     },
@@ -443,6 +443,24 @@ fn main() {
 
 fn handle_file_command(command: FileCommands) -> Result<()> {
     match command {
+        FileCommands::List { profile } => {
+            let config = Config::load()?;
+            let files = config.get_tracked_files(profile.as_deref())?;
+
+            println!("\n{}", "Tracked files:".bold().cyan());
+            for file in files {
+                println!(
+                    "  {} -> {}",
+                    file.repo_path.display(),
+                    file.dest_path.display()
+                );
+            }
+        }
+        FileCommands::Status { profile } => {
+            let config = Config::load()?;
+            let reports = check_status(&config, profile.as_deref())?;
+            display_status(&reports);
+        }
         FileCommands::Add {
             tool,
             file,
@@ -641,24 +659,6 @@ fn handle_file_command(command: FileCommands) -> Result<()> {
                 }
             }
         }
-        FileCommands::List { profile } => {
-            let config = Config::load()?;
-            let files = config.get_tracked_files(profile.as_deref())?;
-
-            println!("\n{}", "Tracked files:".bold().cyan());
-            for file in files {
-                println!(
-                    "  {} -> {}",
-                    file.repo_path.display(),
-                    file.dest_path.display()
-                );
-            }
-        }
-        FileCommands::Status { profile } => {
-            let config = Config::load()?;
-            let reports = check_status(&config, profile.as_deref())?;
-            display_status(&reports);
-        }
     }
     Ok(())
 }
@@ -669,78 +669,6 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
             let config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
             backup_all_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        BackupCommands::Add {
-            backup,
-            profile,
-            dry_run,
-        } => {
-            let config = Config::load()?;
-            let backups = list_backups(&config)?;
-
-            if backups.is_empty() {
-                println!("{}", "No backups available.".yellow());
-                return Ok(());
-            }
-
-            // Select backup
-            let selected_backup = if backup == "latest" {
-                &backups[0]
-            } else if backup == "list" {
-                display_backups(&backups);
-                return Ok(());
-            } else {
-                let index: usize = backup.parse().map_err(|_| {
-                    DotfilesError::Path(
-                        "Invalid backup index. Use 'latest', 'list', or a number".to_string(),
-                    )
-                })?;
-                if index == 0 || index > backups.len() {
-                    return Err(DotfilesError::Path(format!(
-                        "Backup index out of range (1-{})",
-                        backups.len()
-                    )));
-                }
-                &backups[index - 1]
-            };
-
-            let mut dry_run_tracker = DryRun::new();
-            add_backup_to_repo(
-                selected_backup,
-                &config,
-                profile.as_deref(),
-                &mut dry_run_tracker,
-                dry_run,
-            )?;
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        BackupCommands::Commit { message, dry_run } => {
-            let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
-
-            let repo_path = config.get_repo_path()?;
-            let repo = git::init_repo(&repo_path)?;
-            let changes = git::detect_changes(&repo)?;
-
-            if changes.is_empty() {
-                println!("{} No changes to commit.", "⊘".yellow());
-                return Ok(());
-            }
-
-            let commit_message = if let Some(msg) = message {
-                msg
-            } else {
-                prompt_commit_message(&changes)?
-            };
-
-            git::stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
-            git::commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
-
             if dry_run {
                 dry_run_tracker.display_summary();
             }
@@ -835,6 +763,78 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 }
             }
         }
+        BackupCommands::Add {
+            backup,
+            profile,
+            dry_run,
+        } => {
+            let config = Config::load()?;
+            let backups = list_backups(&config)?;
+
+            if backups.is_empty() {
+                println!("{}", "No backups available.".yellow());
+                return Ok(());
+            }
+
+            // Select backup
+            let selected_backup = if backup == "latest" {
+                &backups[0]
+            } else if backup == "list" {
+                display_backups(&backups);
+                return Ok(());
+            } else {
+                let index: usize = backup.parse().map_err(|_| {
+                    DotfilesError::Path(
+                        "Invalid backup index. Use 'latest', 'list', or a number".to_string(),
+                    )
+                })?;
+                if index == 0 || index > backups.len() {
+                    return Err(DotfilesError::Path(format!(
+                        "Backup index out of range (1-{})",
+                        backups.len()
+                    )));
+                }
+                &backups[index - 1]
+            };
+
+            let mut dry_run_tracker = DryRun::new();
+            add_backup_to_repo(
+                selected_backup,
+                &config,
+                profile.as_deref(),
+                &mut dry_run_tracker,
+                dry_run,
+            )?;
+            if dry_run {
+                dry_run_tracker.display_summary();
+            }
+        }
+        BackupCommands::Commit { message, dry_run } => {
+            let config = Config::load()?;
+            let mut dry_run_tracker = DryRun::new();
+
+            let repo_path = config.get_repo_path()?;
+            let repo = git::init_repo(&repo_path)?;
+            let changes = git::detect_changes(&repo)?;
+
+            if changes.is_empty() {
+                println!("{} No changes to commit.", "⊘".yellow());
+                return Ok(());
+            }
+
+            let commit_message = if let Some(msg) = message {
+                msg
+            } else {
+                prompt_commit_message(&changes)?
+            };
+
+            git::stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
+            git::commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
+
+            if dry_run {
+                dry_run_tracker.display_summary();
+            }
+        }
         BackupCommands::Cleanup {
             keep,
             days,
@@ -882,11 +882,11 @@ fn handle_service_command(command: ServiceCommands) -> Result<()> {
         ServiceCommands::Enable { name, system } => {
             enable_service(&name, !system)?;
         }
-        ServiceCommands::Disable { name, system } => {
-            disable_service(&name, !system)?;
-        }
         ServiceCommands::Start { name, system } => {
             start_service(&name, !system)?;
+        }
+        ServiceCommands::Disable { name, system } => {
+            disable_service(&name, !system)?;
         }
         ServiceCommands::Stop { name, system } => {
             stop_service(&name, !system)?;
@@ -906,6 +906,14 @@ fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        MaintainCommands::Validate => {
+            let config = Config::load()?;
+            let report = validate_config(&config)?;
+            display_validation(&report);
+            if !report.is_valid {
+                std::process::exit(1);
+            }
+        }
         MaintainCommands::Migrate { profile, dry_run } => {
             let config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
@@ -914,14 +922,6 @@ fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
 
             if dry_run {
                 dry_run_tracker.display_summary();
-            }
-        }
-        MaintainCommands::Validate => {
-            let config = Config::load()?;
-            let report = validate_config(&config)?;
-            display_validation(&report);
-            if !report.is_valid {
-                std::process::exit(1);
             }
         }
         MaintainCommands::Gitignore => {
@@ -983,15 +983,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
     // Note: env_config is validated at startup for early error detection.
     // It's now used for custom config file paths and git auth.
     match cli.command {
-        Commands::File { command } => {
-            return handle_file_command(command);
-        }
-        Commands::Backup { command } => {
-            return handle_backup_command(command);
-        }
-        Commands::Maintain { command } => {
-            return handle_maintain_command(command);
-        }
         Commands::Init { repo_path } => {
             let mut config = Config::load()?;
             if let Some(path) = repo_path {
@@ -1017,116 +1008,9 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 }
             );
         }
-        Commands::Profile { command } => {
-            let mut config = Config::load()?;
-            match command {
-                ProfileCommands::Create { name } => {
-                    create_profile(&mut config, &name)?;
-                }
-                ProfileCommands::Switch { name } => {
-                    switch_profile(&mut config, &name)?;
-                }
-                ProfileCommands::List => {
-                    let profiles = list_profiles(&config)?;
-                    println!("\n{}", "Profiles:".bold().cyan());
-                    for profile in &profiles {
-                        let marker = if profile == &config.general.current_profile {
-                            "→"
-                        } else {
-                            " "
-                        };
-                        let profile_files = get_profile_files(&config, profile)?;
-                        let file_count = profile_files.len();
-                        println!(
-                            "  {} {} ({} file(s))",
-                            marker.green(),
-                            profile,
-                            if file_count > 0 {
-                                file_count.to_string().cyan()
-                            } else {
-                                "0".yellow()
-                            }
-                        );
-                    }
-                }
-            }
+        Commands::File { command } => {
+            return handle_file_command(command);
         }
-        Commands::Remote { command } => {
-            let config = Config::load()?;
-            let repo_path = config.get_repo_path()?;
-            let repo = init_repo(&repo_path)?;
-            let mut dry_run_tracker = DryRun::new();
-
-            match command {
-                RemoteCommands::Add { name, url, dry_run } => {
-                    add_remote(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
-                    if dry_run {
-                        dry_run_tracker.display_summary();
-                    }
-                }
-                RemoteCommands::Remove { name, dry_run } => {
-                    remove_remote(&repo, &name, &mut dry_run_tracker, dry_run)?;
-                    if dry_run {
-                        dry_run_tracker.display_summary();
-                    }
-                }
-                RemoteCommands::SetUrl { name, url, dry_run } => {
-                    set_remote_url(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
-                    if dry_run {
-                        dry_run_tracker.display_summary();
-                    }
-                }
-                RemoteCommands::List => {
-                    list_remotes(&repo)?;
-                }
-            }
-        }
-        Commands::Push {
-            remote,
-            branch,
-            set_upstream,
-            dry_run,
-        } => {
-            let config = Config::load()?;
-            let repo_path = config.get_repo_path()?;
-            let repo = init_repo(&repo_path)?;
-            let mut dry_run_tracker = DryRun::new();
-
-            // Resolve remote: --remote flag > config default_remote > "origin"
-            let resolved_remote = remote
-                .or_else(|| config.general.default_remote.clone())
-                .unwrap_or_else(|| "origin".to_string());
-
-            // Resolve branch: --branch flag > current HEAD > config default_branch > "main"
-            let resolved_branch = branch
-                .or_else(|| git::get_current_branch(&repo).ok())
-                .or_else(|| config.general.default_branch.clone())
-                .unwrap_or_else(|| "main".to_string());
-
-            push_to_remote(
-                &repo,
-                &resolved_remote,
-                &resolved_branch,
-                set_upstream,
-                &mut dry_run_tracker,
-                dry_run,
-            )?;
-
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        Commands::Package { command } => {
-            return handle_package_command(command);
-        }
-        Commands::Service { command } => {
-            return handle_service_command(command);
-        }
-        Commands::Config { command } => match command {
-            ConfigCommands::Sync { dry_run } => {
-                Config::sync_xdg_to_repo(dry_run)?;
-            }
-        },
         Commands::Apply {
             profile,
             dry_run,
@@ -1170,6 +1054,122 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     package_manager_type: pm_type,
                 })?;
             }
+        }
+        Commands::Profile { command } => {
+            let mut config = Config::load()?;
+            match command {
+                ProfileCommands::List => {
+                    let profiles = list_profiles(&config)?;
+                    println!("\n{}", "Profiles:".bold().cyan());
+                    for profile in &profiles {
+                        let marker = if profile == &config.general.current_profile {
+                            "→"
+                        } else {
+                            " "
+                        };
+                        let profile_files = get_profile_files(&config, profile)?;
+                        let file_count = profile_files.len();
+                        println!(
+                            "  {} {} ({} file(s))",
+                            marker.green(),
+                            profile,
+                            if file_count > 0 {
+                                file_count.to_string().cyan()
+                            } else {
+                                "0".yellow()
+                            }
+                        );
+                    }
+                }
+                ProfileCommands::Create { name } => {
+                    create_profile(&mut config, &name)?;
+                }
+                ProfileCommands::Switch { name } => {
+                    switch_profile(&mut config, &name)?;
+                }
+            }
+        }
+        Commands::Config { command } => match command {
+            ConfigCommands::Sync { dry_run } => {
+                Config::sync_xdg_to_repo(dry_run)?;
+            }
+        },
+        Commands::Backup { command } => {
+            return handle_backup_command(command);
+        }
+        Commands::Package { command } => {
+            return handle_package_command(command);
+        }
+        Commands::Service { command } => {
+            return handle_service_command(command);
+        }
+        Commands::Remote { command } => {
+            let config = Config::load()?;
+            let repo_path = config.get_repo_path()?;
+            let repo = init_repo(&repo_path)?;
+            let mut dry_run_tracker = DryRun::new();
+
+            match command {
+                RemoteCommands::List => {
+                    list_remotes(&repo)?;
+                }
+                RemoteCommands::Add { name, url, dry_run } => {
+                    add_remote(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
+                    if dry_run {
+                        dry_run_tracker.display_summary();
+                    }
+                }
+                RemoteCommands::SetUrl { name, url, dry_run } => {
+                    set_remote_url(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
+                    if dry_run {
+                        dry_run_tracker.display_summary();
+                    }
+                }
+                RemoteCommands::Remove { name, dry_run } => {
+                    remove_remote(&repo, &name, &mut dry_run_tracker, dry_run)?;
+                    if dry_run {
+                        dry_run_tracker.display_summary();
+                    }
+                }
+            }
+        }
+        Commands::Push {
+            remote,
+            branch,
+            set_upstream,
+            dry_run,
+        } => {
+            let config = Config::load()?;
+            let repo_path = config.get_repo_path()?;
+            let repo = init_repo(&repo_path)?;
+            let mut dry_run_tracker = DryRun::new();
+
+            // Resolve remote: --remote flag > config default_remote > "origin"
+            let resolved_remote = remote
+                .or_else(|| config.general.default_remote.clone())
+                .unwrap_or_else(|| "origin".to_string());
+
+            // Resolve branch: --branch flag > current HEAD > config default_branch > "main"
+            let resolved_branch = branch
+                .or_else(|| git::get_current_branch(&repo).ok())
+                .or_else(|| config.general.default_branch.clone())
+                .unwrap_or_else(|| "main".to_string());
+
+            push_to_remote(
+                &repo,
+                &resolved_remote,
+                &resolved_branch,
+                set_upstream,
+                &mut dry_run_tracker,
+                dry_run,
+            )?;
+
+            if dry_run {
+                dry_run_tracker.display_summary();
+            }
+        }
+        Commands::Maintain { command } => {
+            return handle_maintain_command(command);
         }
     }
 
