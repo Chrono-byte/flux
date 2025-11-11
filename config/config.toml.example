@@ -1,6 +1,6 @@
-# Dotfiles Manager Configuration
+# Flux Configuration
 # This is an example configuration file.
-# Copy this to ~/.config/dotfiles-manager/config.toml and customize as needed.
+# Copy this to ~/.config/flux/config.toml and customize as needed.
 
 [general]
 # Repository path where dotfiles are stored
@@ -72,7 +72,7 @@ files = [
 
 [tools.firefox]
 # Firefox browser settings
-# Use 'dotfiles-manager add-browser firefox' to auto-detect and add
+# Use 'flux add-browser firefox' to auto-detect and add
 # Example manual entry:
 # files = [
 #     { repo = "prefs.js", dest = ".mozilla/firefox/xxxxx.default/prefs.js" },
@@ -81,7 +81,7 @@ files = [
 
 [tools.zen]
 # Zen browser settings
-# Use 'dotfiles-manager add-browser zen' to auto-detect and add
+# Use 'flux add-browser zen' to auto-detect and add
 # Example manual entry:
 # files = [
 #     { repo = "prefs.js", dest = ".zenbrowser/profiles/default/prefs.js" },
@@ -90,7 +90,7 @@ files = [
 
 [tools.alacritty]
 # Alacritty terminal emulator configuration
-# Use 'dotfiles-manager add-browser alacritty' to auto-detect and add
+# Use 'flux add-browser alacritty' to auto-detect and add
 # Example manual entry:
 # files = [
 #     { repo = "alacritty.toml", dest = ".config/alacritty/alacritty.toml" },
@@ -100,7 +100,7 @@ files = [
 
 [tools.starship]
 # Starship prompt configuration
-# Use 'dotfiles-manager add-browser starship' to auto-detect and add
+# Use 'flux add-browser starship' to auto-detect and add
 # Example manual entry:
 # files = [
 #     { repo = "starship.toml", dest = ".config/starship.toml" }

@@ -4,29 +4,41 @@ use std::path::Path;
 /// Validate that a symlink target is within the repository (prevents path traversal attacks)
 pub fn validate_symlink_target(repo_path: &Path, target: &Path) -> Result<()> {
     // Canonicalize both paths for comparison
-    let canonical_repo = repo_path.canonicalize().map_err(|e| {
+    let canonical_repo = repo_path.canonicalize().map_err(|_| {
         DotfilesError::Path(format!(
-            "Could not canonicalize repository path '{}': {}",
+            "What: Cannot validate repository path\n  \
+             Path: {}\n  \
+             Why: Path cannot be resolved to an absolute path (may not exist or permission denied)\n  \
+             💡 Solution:\n    \
+             - Verify repository path exists: `ls -la {}`\n    \
+             - Check directory permissions: `ls -ld {}`\n    \
+             - Ensure repository path is set correctly in config",
             repo_path.display(),
-            e
+            repo_path.display(),
+            repo_path.display()
         ))
     })?;
 
-    let canonical_target = target.canonicalize().map_err(|e| {
+    let canonical_target = target.canonicalize().map_err(|_| {
         DotfilesError::Path(format!(
-            "Could not canonicalize symlink target '{}': {}",
+            "What: Cannot resolve symlink target path\n  \
+             Path: {}\n  \
+             Why: Path cannot be made absolute (file may not exist or permission denied)\n  \
+             💡 Solution:\n    \
+             - Verify the target file exists and is readable\n    \
+             - Check permissions: `ls -la {}`\n    \
+             - Ensure path is correct in configuration",
             target.display(),
-            e
+            target.display()
         ))
     })?;
 
     // Check if target is within repository
     if !canonical_target.starts_with(&canonical_repo) {
-        return Err(DotfilesError::Path(format!(
-            "Symlink target '{}' is outside repository '{}' - potential security risk",
-            canonical_target.display(),
-            canonical_repo.display()
-        )));
+        return Err(crate::error_utils::symlink_target_outside_repo(
+            &canonical_target,
+            &canonical_repo,
+        ));
     }
 
     Ok(())
@@ -35,29 +47,42 @@ pub fn validate_symlink_target(repo_path: &Path, target: &Path) -> Result<()> {
 /// Validate that a destination path doesn't try to escape home directory
 #[allow(dead_code)]
 pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
-    let canonical_home = home.canonicalize().map_err(|e| {
+    let canonical_home = home.canonicalize().map_err(|_| {
         DotfilesError::Path(format!(
-            "Could not canonicalize home directory '{}': {}",
+            "What: Cannot validate home directory\n  \
+             Path: {}\n  \
+             Why: Home directory path cannot be resolved (may not exist or permission denied)\n  \
+             💡 Solution:\n    \
+             - Verify home directory exists: `ls -la {}`\n    \
+             - Check $HOME is set: `echo $HOME`\n    \
+             - Ensure permissions allow reading: `ls -ld {}`",
             home.display(),
-            e
+            home.display(),
+            home.display()
         ))
     })?;
 
     let full_dest = home.join(dest);
-    let canonical_dest = full_dest.canonicalize().map_err(|e| {
+    let canonical_dest = full_dest.canonicalize().map_err(|_| {
         DotfilesError::Path(format!(
-            "Could not canonicalize destination path '{}': {}",
+            "What: Cannot resolve destination path\n  \
+             Destination: {}\n  \
+             Why: Path cannot be made absolute or does not exist\n  \
+             💡 Solution:\n    \
+             - Verify the parent directory exists: `ls -la {}`\n    \
+             - Check path does not contain invalid characters\n    \
+             - Ensure path is relative to home directory",
             full_dest.display(),
-            e
+            full_dest
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "N/A".to_string())
         ))
     })?;
 
     // Check if destination is within home directory
     if !canonical_dest.starts_with(&canonical_home) {
-        return Err(DotfilesError::Path(format!(
-            "Destination path '{}' is outside home directory - not allowed",
-            dest.display()
-        )));
+        return Err(crate::error_utils::dest_outside_home(dest, home));
     }
 
     Ok(())

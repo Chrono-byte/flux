@@ -246,29 +246,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dotfiles-manager"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "colored",
- "dialoguer",
- "dirs",
- "env_logger",
- "git2",
- "log",
- "nix",
- "pathdiff",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "toml",
- "walkdir",
-]
-
-[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -324,6 +301,29 @@ name = "find-msvc-tools"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52051878f80a721bb68ebfbc930e07b65ba72f2da88968ea5c06fd6ca3d3a127"
+
+[[package]]
+name = "flux"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "colored",
+ "dialoguer",
+ "dirs",
+ "env_logger",
+ "git2",
+ "log",
+ "nix",
+ "pathdiff",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "walkdir",
+]
 
 [[package]]
 name = "form_urlencoded"

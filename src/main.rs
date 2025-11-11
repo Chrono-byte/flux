@@ -2,6 +2,7 @@ mod browser;
 mod config;
 mod dry_run;
 mod error;
+mod error_utils;
 mod file_manager;
 mod git;
 mod logging;
@@ -41,7 +42,7 @@ use untracked::{display_discrepancies, find_discrepancies};
 use validate::{display_validation, validate_config};
 
 #[derive(Parser)]
-#[command(name = "dotfiles-manager")]
+#[command(name = "flux")]
 #[command(about = "A tool to manage dotfiles with symlink-based sync")]
 struct Cli {
     #[command(subcommand)]

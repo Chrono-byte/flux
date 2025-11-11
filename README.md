@@ -1,4 +1,4 @@
-# Dotfiles Manager
+# Flux
 
 A powerful, symlink-based dotfiles manager written in Rust. Manage your
 configuration files across multiple machines and profiles with ease.
@@ -26,9 +26,9 @@ configuration files across multiple machines and profiles with ease.
 
 ```bash
 git clone <repository-url>
-cd dotfiles-manager
+cd flux
 cargo build --release
-sudo cp target/release/dotfiles-manager /usr/local/bin/
+sudo cp target/release/flux /usr/local/bin/
 ```
 
 ## Quick Start
@@ -36,25 +36,25 @@ sudo cp target/release/dotfiles-manager /usr/local/bin/
 1. **Initialize repository**:
 
    ```bash
-   dotfiles-manager init
+   flux init
    ```
 
 2. **Add a file**:
 
    ```bash
-   dotfiles-manager add sway ~/.config/sway/config --dest .config/sway/config
+   flux add sway ~/.config/sway/config --dest .config/sway/config
    ```
 
 3. **Sync files**:
 
    ```bash
-   dotfiles-manager sync
+   flux sync
    ```
 
 4. **Check status**:
 
    ```bash
-   dotfiles-manager status
+   flux status
    ```
 
 ## Commands
@@ -71,8 +71,8 @@ Add a file to tracking under a tool section.
 **Examples**:
 
 ```bash
-dotfiles-manager add sway ~/.config/sway/config
-dotfiles-manager add cursor ~/.config/Cursor/User/settings.json --dest .config/Cursor/User/settings.json
+flux add sway ~/.config/sway/config
+flux add cursor ~/.config/Cursor/User/settings.json --dest .config/Cursor/User/settings.json
 ```
 
 ### `add-browser [browser]`
@@ -82,9 +82,9 @@ Auto-detect and add browser profiles (Firefox and Zen). Defaults to `all`.
 **Examples**:
 
 ```bash
-dotfiles-manager add-browser
-dotfiles-manager add-browser firefox
-dotfiles-manager add-browser zen
+flux add-browser
+flux add-browser firefox
+flux add-browser zen
 ```
 
 ### `sync [--profile NAME] [--dry-run]`
@@ -94,9 +94,9 @@ Sync tracked files (create symlinks). Use `--dry-run` to preview changes.
 **Examples**:
 
 ```bash
-dotfiles-manager sync
-dotfiles-manager sync --profile work
-dotfiles-manager sync --dry-run
+flux sync
+flux sync --profile work
+flux sync --dry-run
 ```
 
 ### `status [--profile NAME]`
@@ -118,9 +118,9 @@ Restore files from backup. Use `latest` or backup index number.
 **Examples**:
 
 ```bash
-dotfiles-manager restore latest
-dotfiles-manager restore 1
-dotfiles-manager restore latest --file ~/.config/sway/config
+flux restore latest
+flux restore 1
+flux restore latest --file ~/.config/sway/config
 ```
 
 ### `validate`
@@ -142,7 +142,14 @@ List all available profiles.
 
 ## Configuration
 
-Configuration is stored in `~/.config/dotfiles-manager/config.toml`.
+Configuration can be stored in one of several locations, checked in this order:
+
+1. **Environment variable** - Set `DOTFILES_CONFIG=/path/to/config.toml`
+2. **Repository** - `~/.dotfiles/config.toml` (allows keeping config with dotfiles)
+3. **System config** - `~/.config/flux/config.toml` (XDG standard location)
+
+The first found configuration file is used. This means you can optionally keep your
+configuration file in your dotfiles repository for easier portability and version control.
 
 ### Example Configuration
 
@@ -198,8 +205,8 @@ Automatically detects default Zen profile and backs up the same files.
 **Usage**:
 
 ```bash
-dotfiles-manager add-browser
-dotfiles-manager sync
+flux add-browser
+flux sync
 ```
 
 ## Profiles
@@ -210,7 +217,7 @@ use cases.
 ### Creating a Profile
 
 ```bash
-dotfiles-manager profile create work
+flux profile create work
 ```
 
 ### Profile Overrides
@@ -241,8 +248,8 @@ resolved. Each backup is timestamped.
 **Restore from backup**:
 
 ```bash
-dotfiles-manager restore latest
-dotfiles-manager restore 1 --file ~/.config/sway/config
+flux restore latest
+flux restore 1 --file ~/.config/sway/config
 ```
 
 ## Git Integration
@@ -259,33 +266,33 @@ any other git hosting service.
 
 ```bash
 # Add origin remote (SSH)
-dotfiles-manager remote add origin git@github.com:username/dotfiles.git
+flux remote add origin git@github.com:username/dotfiles.git
 
 # Add origin remote (HTTPS)
-dotfiles-manager remote add origin https://github.com/username/dotfiles.git
+flux remote add origin https://github.com/username/dotfiles.git
 
 # Add with dry-run to preview
-dotfiles-manager remote add origin git@github.com:username/dotfiles.git --dry-run
+flux remote add origin git@github.com:username/dotfiles.git --dry-run
 ```
 
 #### Remove a Remote
 
 ```bash
-dotfiles-manager remote remove origin
-dotfiles-manager remote remove upstream --dry-run
+flux remote remove origin
+flux remote remove upstream --dry-run
 ```
 
 #### Change Remote URL
 
 ```bash
-dotfiles-manager remote set-url origin git@github.com:username/dotfiles.git
-dotfiles-manager remote set-url origin https://github.com/username/dotfiles.git
+flux remote set-url origin git@github.com:username/dotfiles.git
+flux remote set-url origin https://github.com/username/dotfiles.git
 ```
 
 #### List Remotes
 
 ```bash
-dotfiles-manager remote list
+flux remote list
 ```
 
 #### Push to Remote
@@ -294,22 +301,22 @@ Push your dotfiles to a remote repository:
 
 ```bash
 # Push with default settings (origin, current branch)
-dotfiles-manager push
+flux push
 
 # Push to specific remote
-dotfiles-manager push --remote upstream
+flux push --remote upstream
 
 # Push specific branch
-dotfiles-manager push --branch main
+flux push --branch main
 
 # Set upstream branch after push
-dotfiles-manager push --set-upstream
+flux push --set-upstream
 
 # Preview with dry-run
-dotfiles-manager push --dry-run
+flux push --dry-run
 
 # Combined options
-dotfiles-manager push --remote origin --branch main --set-upstream
+flux push --remote origin --branch main --set-upstream
 ```
 
 #### Configuration
@@ -330,13 +337,13 @@ default_branch = "main"
 3. Add remote:
 
    ```bash
-   dotfiles-manager remote add origin git@github.com:username/dotfiles.git
+   flux remote add origin git@github.com:username/dotfiles.git
    ```
 
 4. Push:
 
    ```bash
-   dotfiles-manager push --set-upstream
+   flux push --set-upstream
    ```
 
 #### GitLab Setup
@@ -344,8 +351,8 @@ default_branch = "main"
 Similar to GitHub, but use GitLab's git URLs:
 
 ```bash
-dotfiles-manager remote add origin git@gitlab.com:username/dotfiles.git
-dotfiles-manager push --set-upstream
+flux remote add origin git@gitlab.com:username/dotfiles.git
+flux push --set-upstream
 ```
 
 #### Gitea Setup
@@ -353,8 +360,8 @@ dotfiles-manager push --set-upstream
 For self-hosted Gitea instances:
 
 ```bash
-dotfiles-manager remote add origin git@gitea.example.com:username/dotfiles.git
-dotfiles-manager push --set-upstream
+flux remote add origin git@gitea.example.com:username/dotfiles.git
+flux push --set-upstream
 ```
 
 #### Authentication
@@ -373,7 +380,7 @@ The tool supports two authentication methods:
   ```bash
   export GIT_USERNAME=your_username
   export GIT_PASSWORD=your_personal_access_token
-  dotfiles-manager push
+  flux push
   ```
 
 ## Examples
@@ -382,42 +389,42 @@ The tool supports two authentication methods:
 
 ```bash
 # Initialize
-dotfiles-manager init
+flux init
 
 # Add sway config
-dotfiles-manager add sway ~/.config/sway/config
+flux add sway ~/.config/sway/config
 
 # Sync
-dotfiles-manager sync
+flux sync
 ```
 
 ### Managing Browser Settings
 
 ```bash
 # Auto-detect and add browser profiles
-dotfiles-manager add-browser
+flux add-browser
 
 # Sync (will skip if browser is running)
-dotfiles-manager sync
+flux sync
 
 # Check status
-dotfiles-manager status
+flux status
 ```
 
 ### Using Profiles
 
 ```bash
 # Create work profile
-dotfiles-manager profile create work
+flux profile create work
 
 # Add work-specific config
-dotfiles-manager add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
+flux add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
 
 # Switch to work profile
-dotfiles-manager profile switch work
+flux profile switch work
 
 # Sync work profile
-dotfiles-manager sync
+flux sync
 ```
 
 ## Troubleshooting
@@ -436,7 +443,7 @@ dotfiles-manager sync
 
 ### Profile not working
 
-- Verify profile exists: `dotfiles-manager profile list`
+- Verify profile exists: `flux profile list`
 - Check profile directory exists in repository
 - Use `validate` to check configuration
 

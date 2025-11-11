@@ -28,8 +28,6 @@ mod config_tests {
 
 #[cfg(test)]
 mod path_tests {
-    use std::path::PathBuf;
-
     #[test]
     fn test_path_expansion() {
         // Test path handling utilities
@@ -41,7 +39,6 @@ mod path_tests {
 #[cfg(test)]
 mod security_tests {
     use crate::security;
-    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]

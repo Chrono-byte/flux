@@ -108,7 +108,7 @@ pub fn commit_changes(
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
 
-    let signature = Signature::now("dotfiles-manager", "dotfiles-manager@localhost")?;
+    let signature = Signature::now("flux", "flux@localhost")?;
 
     let head = repo.head();
     let parent_commit = if let Ok(head) = head {

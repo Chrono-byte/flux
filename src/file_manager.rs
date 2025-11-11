@@ -24,8 +24,7 @@ pub fn add_file(
     fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
     // BACKUP: Create backup of destination file if it exists BEFORE any changes
-    let home = dirs::home_dir()
-        .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
+    let home = dirs::home_dir().ok_or_else(crate::error_utils::home_dir_not_found)?;
     let full_dest_path = home.join(dest_path);
     if let Some(path_to_backup) = get_path_to_backup(&full_dest_path) {
         println!("  Creating backup of existing destination...");
@@ -34,11 +33,15 @@ pub fn add_file(
 
     let repo_path = config.get_repo_path()?;
     let tool_dir = repo_path.join(tool);
-    let repo_file = tool_dir.join(
-        source_path
-            .file_name()
-            .ok_or_else(|| DotfilesError::Path("Invalid source path".to_string()))?,
-    );
+    let repo_file = tool_dir.join(source_path.file_name().ok_or_else(|| {
+        DotfilesError::Path(format!(
+            "What: Source path has no file name component\n  \
+                     Path: {}\n  \
+                     Why: Path ends with '/' or is empty, preventing file extraction\n  \
+                     💡 Solution: Specify a file path without trailing slashes",
+            source_path.display()
+        ))
+    })?);
 
     // Copy file or directory to repo
     fs_manager.create_dir_all(&tool_dir)?;
@@ -52,7 +55,13 @@ pub fn add_file(
     // Add to config (in memory)
     let repo_relative = repo_file
         .strip_prefix(&repo_path)
-        .map_err(|_| DotfilesError::Path("Could not compute relative path".to_string()))?
+        .map_err(|e| {
+            crate::error_utils::invalid_path_computation(
+                &repo_path,
+                &repo_file,
+                &format!("Repository file is not within repository directory: {}", e),
+            )
+        })?
         .to_string_lossy()
         .to_string();
     let dest_str = dest_path.to_string_lossy().to_string();
@@ -753,7 +762,7 @@ fn create_symlink_managed(
     // 3. Handle the "Replace" (copy) case
     if *resolution == SymlinkResolution::Replace {
         // ... (This logic is OK, but we must use atomic rename)
-        let temp_path = file.dest_path.with_extension("dotfiles-manager-temp-copy");
+        let temp_path = file.dest_path.with_extension("flux-temp-copy");
         println!("    Copying file instead of symlinking (Replace strategy)...");
 
         fs_manager.copy(&file.repo_path, &temp_path)?;
@@ -793,7 +802,7 @@ fn create_symlink_managed(
     // 5. NEW ATOMIC SYMLINK LOGIC
     // Create the symlink at a temporary path
     let temp_link_path = file.dest_path.with_extension(format!(
-        "{}.dotfiles-manager-temp",
+        "{}.flux-temp",
         file.dest_path
             .extension()
             .map_or("", |s| s.to_str().unwrap_or(""))

@@ -37,20 +37,28 @@ pub struct Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?
-            .join("dotfiles-manager");
-
-        // Create config directory if it doesn't exist
-        std::fs::create_dir_all(&config_dir)?;
-
-        // Create example config if it doesn't exist
-        create_example_config(&config_dir)?;
-
-        let config_path = config_dir.join("config.toml");
+        // Try to find config file, checking repo first, then system config dir
+        let config_path = Self::find_config_path()?;
 
         if !config_path.exists() {
-            // Create default config
+            // Create default config in system config directory
+            let config_dir = dirs::config_dir()
+                .ok_or_else(|| {
+                    DotfilesError::Config(
+                        "What: Cannot find XDG config directory\n  \
+                         Why: The XDG_CONFIG_HOME environment variable is not set and default location could not be found\n  \
+                         This is typically ~/.config on Linux/macOS\n  \
+                         💡 Solution:\n    \
+                         - Set XDG_CONFIG_HOME: export XDG_CONFIG_HOME=\"$HOME/.config\"\n    \
+                         - Add to your shell config (~/.bashrc, ~/.zshrc, etc.)\n    \
+                         - Restart your shell or run: source ~/.bashrc"
+                            .to_string(),
+                    )
+                })?
+                .join("flux");
+            std::fs::create_dir_all(&config_dir)?;
+            create_example_config(&config_dir)?;
+
             let mut config = Self::default();
             config.validate()?;
             config.save(false)?;
@@ -63,19 +71,90 @@ impl Config {
         // Validate the loaded config
         config.validate()?;
 
-        debug!("Configuration loaded and validated successfully");
+        debug!(
+            "Configuration loaded and validated successfully from {}",
+            config_path.display()
+        );
         Ok(config)
+    }
+
+    /// Find the configuration file, checking multiple locations in order:
+    /// 1. DOTFILES_CONFIG environment variable (if set)
+    /// 2. ~/.dotfiles/config.toml (in repository root)
+    /// 3. ~/.config/flux/config.toml (XDG standard location)
+    fn find_config_path() -> Result<PathBuf> {
+        // Check environment variable first
+        if let Ok(env_config) = std::env::var("DOTFILES_CONFIG") {
+            let env_path = PathBuf::from(&env_config);
+            if env_path.exists() {
+                debug!("Found config from DOTFILES_CONFIG: {}", env_path.display());
+                return Ok(env_path);
+            }
+        }
+
+        let home = dirs::home_dir()
+            .ok_or_else(|| {
+                DotfilesError::Config(
+                    "What: Could not determine home directory\n  \
+                     Why: The $HOME environment variable is not set or home directory lookup failed\n  \
+                     This is required for all dotfile operations\n  \
+                     💡 Solution:\n    \
+                     - Check that $HOME is exported: `echo $HOME`\n    \
+                     - If empty, add to your shell config (~/.bashrc, ~/.zshrc, etc.):\n    \
+                       export HOME=\"/home/your_username\"\n    \
+                     - Restart your shell or run: `source ~/.bashrc`"
+                        .to_string(),
+                )
+            })?;
+
+        // Check for config in default repo location (~/.dotfiles/config.toml)
+        let default_repo_config = home.join(".dotfiles").join("config.toml");
+        if default_repo_config.exists() {
+            debug!(
+                "Found config in repository: {}",
+                default_repo_config.display()
+            );
+            return Ok(default_repo_config);
+        }
+
+        // Fall back to system config directory
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| {
+                DotfilesError::Config(
+                    "What: Cannot find XDG config directory\n  \
+                     Why: The XDG_CONFIG_HOME environment variable is not set and default location could not be found\n  \
+                     This is typically ~/.config on Linux/macOS\n  \
+                     💡 Solution:\n    \
+                     - Set XDG_CONFIG_HOME: export XDG_CONFIG_HOME=\"$HOME/.config\"\n    \
+                     - Add to your shell config (~/.bashrc, ~/.zshrc, etc.)\n    \
+                     - Restart your shell or run: source ~/.bashrc"
+                        .to_string(),
+                )
+            })?
+            .join("flux");
+
+        std::fs::create_dir_all(&config_dir)?;
+        create_example_config(&config_dir)?;
+
+        let system_config = config_dir.join("config.toml");
+        debug!(
+            "Will use system config location: {}",
+            system_config.display()
+        );
+        Ok(system_config)
     }
 
     /// Validate the configuration for correctness
     fn validate(&mut self) -> Result<()> {
         // Validate symlink resolution mode
         self.general.symlink_resolution = self.general.symlink_resolution.to_lowercase();
-        SymlinkResolution::from_str(&self.general.symlink_resolution).map_err(|e| {
-            DotfilesError::Config(format!(
-                "Invalid symlink_resolution value '{}': {}",
-                self.general.symlink_resolution, e
-            ))
+        SymlinkResolution::from_str(&self.general.symlink_resolution).map_err(|_| {
+            crate::error_utils::invalid_config_value(
+                "symlink_resolution",
+                &self.general.symlink_resolution,
+                &["auto", "relative", "absolute", "follow", "replace"],
+                "~/.config/flux/config.toml",
+            )
         })?;
 
         // Validate repo path is not empty
@@ -128,7 +207,7 @@ impl Config {
     pub fn save(&self, is_dry_run: bool) -> Result<()> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?
-            .join("dotfiles-manager");
+            .join("flux");
 
         if is_dry_run {
             // In dry run mode, don't actually save the config

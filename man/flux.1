@@ -1,0 +1,232 @@
+.TH FLUX 1 "2024" "flux" "User Commands"
+.SH NAME
+flux \- A symlink-based dotfiles management tool
+.SH SYNOPSIS
+.B flux
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGS\fR]
+.SH DESCRIPTION
+\fBflux\fR is a tool for managing dotfiles using symlink-based synchronization.
+Files are stored in a repository and symlinked to their destination locations in the home directory.
+.SH COMMANDS
+.SS init
+Initialize dotfiles repository.
+.TP
+\fB--repo-path\fR \fIPATH\fR
+Repository path (default: ~/.dotfiles)
+.SS add
+Add a file to tracking.
+.TP
+\fB<tool>\fR
+Tool name (e.g., sway, waybar, cursor, firefox, zen)
+.TP
+\fB<file>\fR
+Source file path
+.TP
+\fB--dest\fR \fIPATH\fR
+Destination path in home directory
+.TP
+\fB--profile\fR \fINAME\fR
+Profile name (optional)
+.SS add-browser
+Auto-detect and add browser profiles (Firefox and Zen).
+.TP
+\fB[browser]\fR
+Browser name (firefox, zen, or all) - default: all
+.SS sync
+Sync tracked files (create symlinks).
+.TP
+\fB--profile\fR \fINAME\fR
+Profile name (default: current profile)
+.TP
+\fB--dry-run\fR
+Preview changes without applying
+.SS status
+Show sync status of tracked files.
+.TP
+\fB--profile\fR \fINAME\fR
+Profile name (default: current profile)
+.SS list
+List tracked files.
+.TP
+\fB--profile\fR \fINAME\fR
+Profile name (default: current profile)
+.SS remove
+Remove a file from tracking.
+.TP
+\fB<tool>\fR
+Tool name
+.TP
+\fB<file>\fR
+File name in repository
+.SS restore
+Restore files from backup.
+.TP
+\fB[backup]\fR
+Backup index or 'latest' (default: latest)
+.TP
+\fB--file\fR \fIPATH\fR
+Specific file to restore (optional)
+.SS validate
+Validate configuration integrity.
+.SS profile
+Profile management subcommands.
+.TP
+\fBcreate\fR \fINAME\fR
+Create a new profile
+.TP
+\fBswitch\fR \fINAME\fR
+Switch to a profile
+.TP
+\fBlist\fR
+List all profiles
+.SS remote
+Manage git remotes.
+.TP
+\fBadd\fR \fINAME\fR \fIURL\fR [\fB--dry-run\fR]
+Add a remote repository
+.TP
+\fBremove\fR \fINAME\fR [\fB--dry-run\fR]
+Remove a remote repository
+.TP
+\fBset-url\fR \fINAME\fR \fIURL\fR [\fB--dry-run\fR]
+Set or change remote URL
+.TP
+\fBlist\fR
+List all configured remotes
+.SS push
+Push changes to a remote repository.
+.TP
+\fB--remote\fR \fINAME\fR
+Remote name (default: origin or config default_remote)
+.TP
+\fB--branch\fR \fINAME\fR
+Branch name (default: current HEAD or config default_branch)
+.TP
+\fB--set-upstream\fR
+Set upstream branch after push
+.TP
+\fB--dry-run\fR
+Preview push without executing
+.SH CONFIGURATION
+Configuration is stored in \fI~/.config/flux/config.toml\fR.
+
+The configuration file uses TOML format with the following structure:
+
+.nf
+[general]
+repo_path = "~/.dotfiles"
+current_profile = "default"
+backup_dir = "~/.dotfiles/.backups"
+symlink_resolution = "auto"
+default_remote = "origin"
+default_branch = "main"
+
+[tools.<tool_name>]
+files = [
+    { repo = "filename", dest = ".config/path/to/file" },
+    { repo = "other", dest = ".config/path/to/other", profile = "work" }
+]
+.fi
+
+.SH SYMLINK RESOLUTION
+.TP
+\fBauto\fR
+Use relative if possible, absolute if needed (default)
+.TP
+\fBrelative\fR
+Always create relative symlinks
+.TP
+\fBabsolute\fR
+Always create absolute symlinks
+.TP
+\fBfollow\fR
+Follow existing symlinks, replace target
+.TP
+\fBreplace\fR
+Replace symlinks with actual files (copy)
+.SH EXAMPLES
+Initialize repository:
+.RS
+.nf
+flux init
+.fi
+.RE
+
+Add a file:
+.RS
+.nf
+flux add sway ~/.config/sway/config
+.fi
+.RE
+
+Sync files:
+.RS
+.nf
+flux sync
+.fi
+.RE
+
+Check status:
+.RS
+.nf
+flux status
+.fi
+.RE
+
+Add browser profiles:
+.RS
+.nf
+flux add-browser
+.fi
+.RE
+
+Create and use a profile:
+.RS
+.nf
+flux profile create work
+flux profile switch work
+flux sync --profile work
+.fi
+.RE
+
+Restore from backup:
+.RS
+.nf
+flux restore latest
+.fi
+.RE
+
+Add a remote and push:
+.RS
+.nf
+flux remote add origin git@github.com:username/dotfiles.git
+flux push --set-upstream
+.fi
+.RE
+
+List remotes:
+.RS
+.nf
+flux remote list
+.fi
+.RE
+.SH FILES
+.TP
+\fI~/.config/flux/config.toml\fR
+Main configuration file
+.TP
+\fI~/.dotfiles/\fR
+Repository directory (default)
+.TP
+\fI~/.dotfiles/.backups/\fR
+Backup directory (default)
+.SH SEE ALSO
+.BR git (1),
+.BR symlink (7)
+.SH AUTHOR
+Written for dotfiles management.
+.SH BUGS
+Report bugs to the project repository.
+.SH COPYRIGHT
+Copyright © 2024
+
