@@ -71,7 +71,6 @@ impl ErrorBuilder {
 }
 
 /// Common error scenarios with pre-built helpers
-
 /// File doesn't exist error with helpful context
 #[allow(dead_code)]
 pub fn file_not_found(path: &Path, context_type: &str) -> DotfilesError {

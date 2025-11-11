@@ -83,7 +83,7 @@ impl LogLevel {
     }
 
     /// Convert to string for log configuration
-    pub fn to_string(&self) -> &'static str {
+    pub fn to_string(self) -> &'static str {
         match self {
             LogLevel::Trace => "trace",
             LogLevel::Debug => "debug",
@@ -117,7 +117,7 @@ impl LogFormat {
     }
 
     /// Convert to string
-    pub fn to_string(&self) -> &'static str {
+    pub fn to_string(self) -> &'static str {
         match self {
             LogFormat::Default => "default",
             LogFormat::Json => "json",

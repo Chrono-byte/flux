@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::utils::error::{DotfilesError, Result};
-use crate::types::FileEntry;
+use crate::types::{FileEntry, PackageSpec, ServiceSpec, EnvironmentSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
@@ -43,20 +43,26 @@ pub struct ToolConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Config {
     pub general: GeneralConfig,
     #[serde(default)]
     pub tools: HashMap<String, ToolConfig>,
+    
+    // ==================== New Declarative System Layer ====================
+    /// Package declarations (e.g., [packages.git])
+    #[serde(default)]
+    pub packages: HashMap<String, PackageSpec>,
+    
+    /// Service declarations (e.g., [services.ssh])
+    #[serde(default)]
+    pub services: HashMap<String, ServiceSpec>,
+    
+    /// Environment configuration (e.g., [environment])
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<EnvironmentSpec>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            tools: HashMap::new(),
-        }
-    }
-}
 
 impl Config {
     pub fn load() -> Result<Self> {

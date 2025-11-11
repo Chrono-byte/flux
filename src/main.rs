@@ -12,6 +12,9 @@ use commands::{
     migrate_files, add_backup_to_repo, cleanup_backups, display_backups, list_backups,
     restore_backup, check_status, display_status, display_discrepancies, find_discrepancies,
     display_validation, validate_config,
+    compare_packages, list_packages, show_declared_packages,
+    compare_services, disable_service, enable_service, list_services, show_service_status,
+    start_service, stop_service,
 };
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -82,6 +85,16 @@ enum Commands {
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Package management operations
+    Package {
+        #[command(subcommand)]
+        command: PackageCommands,
+    },
+    /// Service management operations
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommands,
     },
 }
 
@@ -280,6 +293,80 @@ enum RemoteCommands {
     },
     /// List all remotes
     List,
+}
+
+#[derive(Subcommand)]
+enum PackageCommands {
+    /// Show packages declared in configuration
+    Show,
+    /// List all installed packages on the system
+    List {
+        /// Use sudo for system-wide package queries
+        #[arg(long)]
+        sudo: bool,
+    },
+    /// Compare declared packages vs installed packages
+    Status {
+        /// Use sudo for system-wide package queries
+        #[arg(long)]
+        sudo: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServiceCommands {
+    /// List services declared in configuration
+    List {
+        /// Manage system services instead of user services
+        #[arg(long)]
+        system: bool,
+    },
+    /// Show detailed status of a specific service
+    Status {
+        /// Service name
+        name: String,
+        /// Query system services instead of user services
+        #[arg(long)]
+        system: bool,
+    },
+    /// Compare declared services vs actual service states
+    Compare {
+        /// Check system services instead of user services
+        #[arg(long)]
+        system: bool,
+    },
+    /// Enable a service
+    Enable {
+        /// Service name
+        name: String,
+        /// Enable system service instead of user service
+        #[arg(long)]
+        system: bool,
+    },
+    /// Disable a service
+    Disable {
+        /// Service name
+        name: String,
+        /// Disable system service instead of user service
+        #[arg(long)]
+        system: bool,
+    },
+    /// Start a service
+    Start {
+        /// Service name
+        name: String,
+        /// Start system service instead of user service
+        #[arg(long)]
+        system: bool,
+    },
+    /// Stop a service
+    Stop {
+        /// Service name
+        name: String,
+        /// Stop system service instead of user service
+        #[arg(long)]
+        system: bool,
+    },
 }
 
 fn main() {
@@ -720,6 +807,54 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
     Ok(())
 }
 
+fn handle_package_command(command: PackageCommands) -> Result<()> {
+    match command {
+        PackageCommands::Show => {
+            let config = Config::load()?;
+            show_declared_packages(&config)?;
+        }
+        PackageCommands::List { sudo } => {
+            let config = Config::load()?;
+            list_packages(&config, sudo)?;
+        }
+        PackageCommands::Status { sudo } => {
+            let config = Config::load()?;
+            compare_packages(&config, sudo)?;
+        }
+    }
+    Ok(())
+}
+
+fn handle_service_command(command: ServiceCommands) -> Result<()> {
+    match command {
+        ServiceCommands::List { system } => {
+            let config = Config::load()?;
+            list_services(&config, !system)?;  // user_mode is inverse of system flag
+        }
+        ServiceCommands::Status { name, system } => {
+            let config = Config::load()?;
+            show_service_status(&config, &name, !system)?;
+        }
+        ServiceCommands::Compare { system } => {
+            let config = Config::load()?;
+            compare_services(&config, !system)?;
+        }
+        ServiceCommands::Enable { name, system } => {
+            enable_service(&name, !system)?;
+        }
+        ServiceCommands::Disable { name, system } => {
+            disable_service(&name, !system)?;
+        }
+        ServiceCommands::Start { name, system } => {
+            start_service(&name, !system)?;
+        }
+        ServiceCommands::Stop { name, system } => {
+            stop_service(&name, !system)?;
+        }
+    }
+    Ok(())
+}
+
 fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
     match command {
         MaintainCommands::Check { profile } => {
@@ -940,6 +1075,12 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             if dry_run {
                 dry_run_tracker.display_summary();
             }
+        }
+        Commands::Package { command } => {
+            return handle_package_command(command);
+        }
+        Commands::Service { command } => {
+            return handle_service_command(command);
         }
     }
 
