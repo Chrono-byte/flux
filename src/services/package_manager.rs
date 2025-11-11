@@ -586,25 +586,23 @@ struct TransactionResult {
 /// PackageKit-based package manager (GNOME)
 /// Uses D-Bus interface for PackageKit operations
 pub struct PackageKitPackageManager {
-    #[allow(dead_code)]
-    use_sudo: bool,
     runtime: tokio::runtime::Runtime,
 }
 
 impl PackageKitPackageManager {
-    pub fn new(use_sudo: bool) -> Self {
+    pub fn new() -> Self {
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for PackageKit");
 
-        Self { use_sudo, runtime }
+        Self { runtime }
     }
 
     /// Check if PackageKit D-Bus service is available
-    /// Now checks for session helper on session bus
+    /// Checks for PackageKit service on system bus
     pub fn is_packagekit_available(&self) -> bool {
-        // Check if PackageKit session helper is available on session bus
+        // Check if PackageKit service is available on system bus
         match std::process::Command::new("dbus-send")
-            .arg("--session")
+            .arg("--system")
             .arg("--print-reply")
             .arg("--dest=org.freedesktop.PackageKit")
             .arg("/org/freedesktop/PackageKit")
@@ -617,26 +615,12 @@ impl PackageKitPackageManager {
     }
 
     /// Get D-Bus connection (async helper)
-    /// Session helper uses the session bus
-    async fn get_session_connection_async(&self) -> Result<Connection> {
-        // Session helper uses session bus
-        let connection = Connection::session().await.map_err(|e| {
-            DotfilesError::Path(format!(
-                "Failed to connect to D-Bus session bus: {}\n  💡 Make sure you're running in a desktop session with PackageKit session helper (gpk-update-icon on GNOME, apper on KDE)",
-                e
-            ))
-        })?;
-
-        Ok(connection)
-    }
-
-    /// Get D-Bus connection for system service (async helper)
-    /// Still needed for query operations that may require transactions
-    async fn get_system_connection_async(&self) -> Result<Connection> {
-        // System service uses system bus
+    /// PackageKit is a system service and always runs on the system bus.
+    /// Authorization is handled by Polkit, not by the D-Bus connection itself.
+    async fn get_connection_async(&self) -> Result<Connection> {
         let connection = Connection::system().await.map_err(|e| {
             DotfilesError::Path(format!(
-                "Failed to connect to D-Bus system bus: {}\n  💡 Make sure PackageKit service is running (systemctl status packagekit)",
+                "Failed to connect to D-Bus system bus: {}\n  💡 Make sure PackageKit is running",
                 e
             ))
         })?;
@@ -644,24 +628,14 @@ impl PackageKitPackageManager {
         Ok(connection)
     }
 
-    /// Get PackageKit session proxy (async helper)
-    /// This is the session helper that provides simple synchronous methods
-    async fn get_session_proxy_async(&self) -> Result<PackageKitSessionProxy<'static>> {
-        let connection = self.get_session_connection_async().await?;
-        PackageKitSessionProxy::new(&connection).await
-            .map_err(|e| DotfilesError::Path(
-                format!("Failed to create PackageKit session proxy: {}\n  💡 Make sure PackageKit session helper is available (gpk-update-icon on GNOME, apper on KDE)", e)
-            ))
-    }
-
-    /// Get PackageKit system proxy (async helper)
-    /// Note: Used by search() and check_conflicts() methods which are marked as allow(dead_code)
+    /// Get PackageKit proxy (async helper)
+    /// PackageKit always uses the system bus
     #[allow(dead_code)]
-    async fn get_system_proxy_async(&self) -> Result<PackageKitProxy<'static>> {
-        let connection = self.get_system_connection_async().await?;
+    async fn get_proxy_async(&self) -> Result<PackageKitProxy<'static>> {
+        let connection = self.get_connection_async().await?;
         PackageKitProxy::new(&connection).await
             .map_err(|e| DotfilesError::Path(
-                format!("Failed to create PackageKit system proxy: {}\n  💡 Make sure PackageKit service is available", e)
+                format!("Failed to create PackageKit proxy: {}\n  💡 Make sure PackageKit service is available", e)
             ))
     }
 
@@ -704,9 +678,8 @@ impl PackageKitPackageManager {
     /// PackageKit requires creating a transaction and monitoring signals to get package lists
     /// IMPORTANT: Must use the same D-Bus connection for transaction creation and method calls
     /// to avoid "sender does not match" PolicyKit errors
-    /// Note: Query operations still use system service as session helper is primarily for install/remove
     async fn get_installed_packages_async(&self) -> Result<Vec<String>> {
-        let connection = self.get_system_connection_async().await?;
+        let connection = self.get_connection_async().await?;
         let proxy = self.get_proxy_from_connection(&connection).await?;
 
         // Create a transaction
@@ -1227,36 +1200,43 @@ impl PackageManager for PackageKitPackageManager {
         }
 
         self.block_on(async {
-            let session_proxy = self.get_session_proxy_async().await?;
+            let connection = self.get_connection_async().await?;
+            let proxy = self.get_proxy_from_connection(&connection).await?;
 
-            // Convert package names/versions to package spec strings
-            // PackageKit session helper accepts package names, optionally with version
-            let package_names: Vec<String> = packages
+            // Convert package names/versions to PackageKit IDs
+            let package_ids: Vec<String> = packages
                 .iter()
                 .map(|(name, version)| {
                     if *version == "latest" || version.is_empty() {
-                        name.to_string()
+                        self.package_name_to_id(name, None)
                     } else {
-                        format!("{}-{}", name, version)
+                        self.package_name_to_id(name, Some(version))
                     }
                 })
                 .collect();
 
-            let package_name_refs: Vec<&str> = package_names.iter().map(|s| s.as_str()).collect();
+            let package_id_refs: Vec<&str> = package_ids.iter().map(|s| s.as_str()).collect();
 
-            // Use session helper's InstallPackageName method
-            // The session helper handles all complexity (GPG keys, EULAs, authentication) automatically
-            // interact: 0 = no interaction (for automated scripts)
-            session_proxy
-                .install_package_name(&package_name_refs, 0)
+            // Start transaction and get transaction path
+            let transaction_path = proxy
+                .install_packages(TRANSACTION_FLAG_NONE, &package_id_refs)
                 .await
                 .map_err(|e| {
-                    let error_str = e.to_string();
-                    DotfilesError::Path(format!(
-                        "Failed to install packages via PackageKit session helper: {}\n  💡 The session helper handles authentication automatically. Make sure you're in a desktop session with PackageKit session helper running (gpk-update-icon on GNOME, apper on KDE).",
-                        error_str
-                    ))
+                    DotfilesError::Path(format!("Failed to start install transaction: {}", e))
                 })?;
+
+            // Wait for transaction to complete
+            let transaction_result = self
+                .wait_for_transaction(&connection, &transaction_path)
+                .await?;
+
+            if !transaction_result.success {
+                return Err(DotfilesError::Path(
+                    transaction_result
+                        .error
+                        .unwrap_or_else(|| "Install failed".to_string()),
+                ));
+            }
 
             Ok(())
         })
@@ -1268,41 +1248,8 @@ impl PackageManager for PackageKitPackageManager {
         }
 
         self.block_on(async {
-            let session_proxy = self.get_session_proxy_async().await?;
-
-            // Use session helper's RemovePackageName method
-            // The session helper handles all complexity automatically
-            // interact: 0 = no interaction (for automated scripts)
-            session_proxy
-                .remove_package_name(packages, 0)
-                .await
-                .map_err(|e| {
-                    let error_str = e.to_string();
-                    DotfilesError::Path(format!(
-                        "Failed to remove packages via PackageKit session helper: {}\n  💡 The session helper handles authentication automatically. Make sure you're in a desktop session with PackageKit session helper running (gpk-update-icon on GNOME, apper on KDE).",
-                        error_str
-                    ))
-                })?;
-
-            Ok(())
-        })
-    }
-
-    fn update(&self, packages: &[&str]) -> Result<()> {
-        // Note: Session helper doesn't have a direct update method
-        // We'll need to use the system service for updates, or install the latest version
-        // For now, we'll fall back to system service for updates
-        self.block_on(async {
-            let connection = self.get_system_connection_async().await?;
+            let connection = self.get_connection_async().await?;
             let proxy = self.get_proxy_from_connection(&connection).await?;
-
-            if packages.is_empty() {
-                // Update all packages - PackageKit doesn't have a direct "update all"
-                // We'd need to get all installed packages first
-                return Err(DotfilesError::Path(
-                    "PackageKit: Updating all packages not yet implemented".to_string(),
-                ));
-            }
 
             // Convert package names to PackageKit IDs
             let package_ids: Vec<String> = packages
@@ -1311,6 +1258,63 @@ impl PackageManager for PackageKitPackageManager {
                 .collect();
 
             let package_id_refs: Vec<&str> = package_ids.iter().map(|s| s.as_str()).collect();
+
+            // Start transaction and get transaction path
+            // allow_deps: true to allow removing dependencies if they become unused
+            let transaction_path = proxy
+                .remove_packages(TRANSACTION_FLAG_NONE, &package_id_refs, true)
+                .await
+                .map_err(|e| {
+                    DotfilesError::Path(format!("Failed to start remove transaction: {}", e))
+                })?;
+
+            // Wait for transaction to complete
+            let transaction_result = self
+                .wait_for_transaction(&connection, &transaction_path)
+                .await?;
+
+            if !transaction_result.success {
+                return Err(DotfilesError::Path(
+                    transaction_result
+                        .error
+                        .unwrap_or_else(|| "Remove failed".to_string()),
+                ));
+            }
+
+            Ok(())
+        })
+    }
+
+    fn update(&self, packages: &[&str]) -> Result<()> {
+        self.block_on(async {
+            let connection = self.get_connection_async().await?;
+            let proxy = self.get_proxy_from_connection(&connection).await?;
+
+            let package_ids: Vec<String>;
+            let package_id_refs: Vec<&str>;
+
+            if packages.is_empty() {
+                // "Update all" means getting all installed packages and passing them to UpdatePackages
+                log::debug!("PackageKit: 'update' with no args. Getting all installed packages...");
+                package_ids = self.get_installed_packages_async().await?;
+                package_id_refs = package_ids.iter().map(|s| s.as_str()).collect();
+                log::debug!(
+                    "PackageKit: Found {} packages to check for updates.",
+                    package_id_refs.len()
+                );
+            } else {
+                // Update specific packages
+                package_ids = packages
+                    .iter()
+                    .map(|name| self.package_name_to_id(name, None))
+                    .collect();
+                package_id_refs = package_ids.iter().map(|s| s.as_str()).collect();
+            }
+
+            if package_id_refs.is_empty() {
+                log::debug!("No packages to update.");
+                return Ok(());
+            }
 
             // Start transaction and get transaction path
             let transaction_path = proxy
@@ -1365,24 +1369,99 @@ impl PackageManager for PackageKitPackageManager {
 
     fn search(&self, query: &str) -> Result<Vec<PackageInfo>> {
         self.block_on(async {
-            let proxy = self.get_system_proxy_async().await?;
+            let connection = self.get_connection_async().await?;
+            let proxy = self.get_proxy_from_connection(&connection).await?;
 
             // Search for packages by name
-            let _transaction_path = proxy
+            let transaction_path = proxy
                 .search_names(TRANSACTION_FLAG_NONE, FILTER_NONE, &[query])
                 .await
                 .map_err(|e| DotfilesError::Path(format!("Failed to search packages: {}", e)))?;
 
-            // Note: PackageKit search returns a transaction path, and results come via signals
-            // For now, we'll return an empty list and note that full implementation
-            // requires signal monitoring
-            Ok(Vec::new())
+            // We need to monitor this transaction for 'Package' and 'Finished' signals
+            let transaction_proxy = TransactionProxy::builder(&connection)
+                .path(transaction_path.as_str())
+                .map_err(|e| {
+                    DotfilesError::Path(format!("Failed to create transaction proxy: {}", e))
+                })?
+                .build()
+                .await
+                .map_err(|e| {
+                    DotfilesError::Path(format!("Failed to build transaction proxy: {}", e))
+                })?;
+
+            let mut package_stream = transaction_proxy.receive_package().await.map_err(|e| {
+                DotfilesError::Path(format!("Failed to receive package signals: {}", e))
+            })?;
+
+            let mut finished_stream = transaction_proxy.receive_finished().await.map_err(|e| {
+                DotfilesError::Path(format!("Failed to receive finished signals: {}", e))
+            })?;
+
+            // Start the transaction
+            transaction_proxy
+                .run()
+                .await
+                .map_err(|e| DotfilesError::Path(format!("Failed to start transaction: {}", e)))?;
+
+            let mut results = Vec::new();
+
+            loop {
+                tokio::select! {
+                    Some(msg) = package_stream.next() => {
+                        match msg.args() {
+                            Ok(args) => {
+                                // info: u32, package_id: &str, summary: &str
+                                let package_id = args.package_id();
+                                let parts: Vec<&str> = package_id.split(';').collect();
+                                if parts.len() >= 2 {
+                                    results.push(PackageInfo {
+                                        name: parts[0].to_string(),
+                                        available_version: parts[1].to_string(),
+                                        description: args.summary().to_string(),
+                                        source: PackageSource::Fedora, // Or a more generic "PackageKit"
+                                    });
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to parse package signal args: {}", e);
+                            }
+                        }
+                    }
+                    Some(msg) = finished_stream.next() => {
+                        match msg.args() {
+                            Ok(args) => {
+                                let exit = *args.exit();
+                                log::debug!("Search transaction finished: exit={}", exit);
+                                if exit != ExitCode::Success as u32 {
+                                     return Err(DotfilesError::Path(
+                                        format!("Package search failed with exit code: {}", exit)
+                                    ));
+                                }
+                                break; // Success
+                            }
+                            Err(e) => {
+                                 return Err(DotfilesError::Path(
+                                    format!("Failed to parse search finished signal: {}", e)
+                                ));
+                            }
+                        }
+                    }
+                    else => {
+                        // Both streams closed
+                        break;
+                    }
+                }
+            }
+
+            Ok(results)
         })
     }
 
     fn check_conflicts(&self, packages: &[&str]) -> Result<Vec<String>> {
         self.block_on(async {
-            let proxy = self.get_system_proxy_async().await?;
+            let connection = self.get_connection_async().await?;
+            let proxy = self.get_proxy_from_connection(&connection).await?;
             let mut conflicts = Vec::new();
 
             for package in packages {
@@ -1414,11 +1493,12 @@ impl PackageManagerType {
     pub fn create_manager(&self, use_sudo: bool) -> Box<dyn PackageManager> {
         match self {
             PackageManagerType::Dnf => Box::new(DnfPackageManager::new(use_sudo)),
-            PackageManagerType::PackageKit => Box::new(PackageKitPackageManager::new(use_sudo)),
+            PackageManagerType::PackageKit => Box::new(PackageKitPackageManager::new()),
             PackageManagerType::Auto => {
                 // Try PackageKit first (preferred for GNOME), then DNF
-                if PackageKitPackageManager::new(use_sudo).is_packagekit_available() {
-                    Box::new(PackageKitPackageManager::new(use_sudo))
+                // Create a temporary manager just for the availability check
+                if PackageKitPackageManager::new().is_packagekit_available() {
+                    Box::new(PackageKitPackageManager::new())
                 } else if DnfPackageManager::new(use_sudo).is_dnf_available() {
                     Box::new(DnfPackageManager::new(use_sudo))
                 } else {
@@ -1445,10 +1525,9 @@ mod tests {
 
     #[test]
     fn test_packagekit_manager_creation() {
-        let manager = PackageKitPackageManager::new(false);
-        assert!(!manager.use_sudo);
-
-        let manager_sudo = PackageKitPackageManager::new(true);
-        assert!(manager_sudo.use_sudo);
+        // The manager is created without sudo param
+        let manager = PackageKitPackageManager::new();
+        // We can just assert that it exists and has a runtime
+        assert!(manager.runtime.block_on(async { true }));
     }
 }
