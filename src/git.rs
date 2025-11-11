@@ -55,9 +55,10 @@ pub fn stage_changes(
                         .filter_map(|e| e.ok())
                     {
                         if entry.path().is_file()
-                            && let Ok(relative) = entry.path().strip_prefix(repo_path) {
-                                index.add_path(relative)?;
-                            }
+                            && let Ok(relative) = entry.path().strip_prefix(repo_path)
+                        {
+                            index.add_path(relative)?;
+                        }
                     }
                 } else if let Ok(relative) = path.strip_prefix(repo_path) {
                     index.add_path(relative)?;
@@ -71,9 +72,10 @@ pub fn stage_changes(
                         .filter_map(|e| e.ok())
                     {
                         if entry.path().is_file()
-                            && let Ok(relative) = entry.path().strip_prefix(repo_path) {
-                                index.remove_path(relative)?;
-                            }
+                            && let Ok(relative) = entry.path().strip_prefix(repo_path)
+                        {
+                            index.remove_path(relative)?;
+                        }
                     }
                 } else if let Ok(relative) = path.strip_prefix(repo_path) {
                     index.remove_path(relative)?;
@@ -248,10 +250,11 @@ pub fn list_remotes(repo: &Repository) -> Result<()> {
     println!("\n{}", "Remotes:".bold().cyan());
     for name in remotes.iter() {
         if let Some(remote_name) = name
-            && let Ok(remote) = repo.find_remote(remote_name) {
-                let url = remote.url().unwrap_or("(invalid URL)");
-                println!("  {} {}", remote_name.cyan(), url);
-            }
+            && let Ok(remote) = repo.find_remote(remote_name)
+        {
+            let url = remote.url().unwrap_or("(invalid URL)");
+            println!("  {} {}", remote_name.cyan(), url);
+        }
     }
     println!();
     Ok(())
@@ -291,9 +294,10 @@ pub fn push_to_remote(
             return Ok(creds);
         }
         if let (Ok(user), Ok(pass)) = (std::env::var("GIT_USERNAME"), std::env::var("GIT_PASSWORD"))
-            && let Ok(creds) = git2::Cred::userpass_plaintext(&user, &pass) {
-                return Ok(creds);
-            }
+            && let Ok(creds) = git2::Cred::userpass_plaintext(&user, &pass)
+        {
+            return Ok(creds);
+        }
         Err(git2::Error::new(
             git2::ErrorCode::Auth,
             git2::ErrorClass::Reference,

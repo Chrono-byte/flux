@@ -7,6 +7,7 @@ use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct BackupInfo {
     pub path: PathBuf,
     pub timestamp: DateTime<chrono::Local>,
@@ -331,4 +332,147 @@ pub fn add_backup_to_repo(
     );
 
     Ok(copied_files)
+}
+
+/// Clean up old backups, keeping only the most recent ones.
+///
+/// # Arguments
+/// * `config` - The configuration containing backup directory
+/// * `keep_count` - Number of most recent backups to keep (default: 10)
+/// * `keep_days` - Keep all backups from the last N days (default: 7)
+/// * `dry_run` - If true, only show what would be deleted
+pub fn cleanup_backups(
+    config: &Config,
+    keep_count: Option<usize>,
+    keep_days: Option<i64>,
+    dry_run: bool,
+) -> Result<()> {
+    let backup_dir = config.get_backup_dir()?;
+    let keep_count = keep_count.unwrap_or(10);
+    let keep_days = keep_days.unwrap_or(7);
+
+    if !backup_dir.exists() {
+        println!("{} No backups to clean up.", "⊘".yellow());
+        return Ok(());
+    }
+
+    let backups = list_backups(config)?;
+
+    if backups.is_empty() {
+        println!("{} No backups found.", "⊘".yellow());
+        return Ok(());
+    }
+
+    let now = chrono::Local::now();
+    let cutoff_date = now - chrono::Duration::days(keep_days);
+
+    let mut to_delete = Vec::new();
+
+    for (idx, backup) in backups.iter().enumerate() {
+        // Keep if it's within the recent count
+        if idx < keep_count {
+            continue;
+        }
+
+        // Keep if it's within the keep_days window
+        if backup.timestamp > cutoff_date {
+            continue;
+        }
+
+        // Otherwise, mark for deletion
+        to_delete.push(backup.clone());
+    }
+
+    if to_delete.is_empty() {
+        println!(
+            "{} Backups are within retention policy (keep: {}, {}+ days old)",
+            "⊘".yellow(),
+            keep_count,
+            keep_days
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{} Found {} backup(s) to delete",
+        "→".cyan(),
+        to_delete.len()
+    );
+
+    let mut total_size = 0u64;
+
+    for backup in &to_delete {
+        let size = calculate_dir_size(&backup.path).unwrap_or(0);
+        total_size += size;
+
+        let size_str = format_size(size);
+        println!(
+            "  {} {} ({})",
+            if dry_run { "Would delete" } else { "Deleting" }.yellow(),
+            backup
+                .timestamp
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+                .cyan(),
+            size_str
+        );
+
+        if !dry_run {
+            fs::remove_dir_all(&backup.path)?;
+        }
+    }
+
+    if !dry_run {
+        println!(
+            "\n{} Cleaned up {} backup(s), freed ~{}",
+            "✓".green(),
+            to_delete.len(),
+            format_size(total_size)
+        );
+    } else {
+        println!(
+            "\n{} [DRY RUN] Would free ~{} by deleting {} backup(s)",
+            "⊘".yellow(),
+            format_size(total_size),
+            to_delete.len()
+        );
+    }
+
+    Ok(())
+}
+
+/// Calculate the total size of a directory in bytes
+fn calculate_dir_size(path: &Path) -> Result<u64> {
+    let mut size = 0u64;
+
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+
+        if metadata.is_dir() {
+            size += calculate_dir_size(&entry.path())?;
+        } else {
+            size += metadata.len();
+        }
+    }
+
+    Ok(size)
+}
+
+/// Format bytes into human-readable size
+fn format_size(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
+    let mut size = bytes as f64;
+    let mut unit_idx = 0;
+
+    while size >= 1024.0 && unit_idx < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_idx += 1;
+    }
+
+    if unit_idx == 0 {
+        format!("{} {}", size as u64, UNITS[unit_idx])
+    } else {
+        format!("{:.2} {}", size, UNITS[unit_idx])
+    }
 }

@@ -2,9 +2,11 @@ use crate::config::Config;
 use crate::dry_run::{DryRun, Operation};
 use crate::error::{DotfilesError, Result};
 use crate::prompt::{ConflictResolution, prompt_conflict};
+use crate::security;
 use crate::types::{SymlinkResolution, TrackedFile};
 use chrono::Local;
 use colored::Colorize;
+use log::{debug, warn};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -466,6 +468,15 @@ impl<'a> FileSystemManager<'a> {
                 fs::copy(file_path, &backup_path)?;
             }
 
+            // SECURITY: Set secure permissions on backup files (0600 - owner only)
+            if let Err(e) = security::set_secure_permissions(&backup_path) {
+                warn!(
+                    "Could not set secure permissions on backup {}: {}",
+                    backup_path.display(),
+                    e
+                );
+            }
+
             println!(
                 "{} Backed up {} -> {}",
                 "✓".yellow(),
@@ -508,6 +519,34 @@ fn sync_file(
     if !file.repo_path.exists() {
         println!("  {} Repo file does not exist, skipping", "⊘".yellow());
         return Ok(());
+    }
+
+    // Check if destination file is locked (e.g., in use by another process)
+    if file.dest_path.exists() {
+        match security::is_file_locked(&file.dest_path) {
+            Ok(true) => {
+                warn!(
+                    "File {} is locked (may be in use), skipping",
+                    file.dest_path.display()
+                );
+                println!(
+                    "  {} File is locked (may be in use by another application), skipping",
+                    "⚠".yellow()
+                );
+                return Ok(());
+            }
+            Ok(false) => {
+                debug!("File {} is not locked", file.dest_path.display());
+            }
+            Err(e) => {
+                warn!(
+                    "Could not check lock status for {}: {}",
+                    file.dest_path.display(),
+                    e
+                );
+                debug!("Continuing despite lock check error");
+            }
+        }
     }
 
     // --- 2. Backup ---
@@ -690,6 +729,22 @@ fn create_symlink_managed(
     resolution: &SymlinkResolution,
     fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
+    // SECURITY: Validate symlink target is within repo
+    if let Err(e) = security::validate_symlink_target(&file.repo_path, &file.repo_path) {
+        warn!(
+            "Symlink validation failed for {}: {}",
+            file.repo_path.display(),
+            e
+        );
+        return Err(e);
+    }
+
+    debug!(
+        "Creating symlink from {} to {}",
+        file.dest_path.display(),
+        file.repo_path.display()
+    );
+
     // 1. Create parent directory if needed
     if let Some(parent) = file.dest_path.parent() {
         fs_manager.create_dir_all(parent)?;

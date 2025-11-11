@@ -1,8 +1,10 @@
 use crate::error::{DotfilesError, Result};
 use crate::types::{FileEntry, SymlinkResolution, TrackedFile};
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
@@ -49,14 +51,73 @@ impl Config {
 
         if !config_path.exists() {
             // Create default config
-            let config = Self::default();
+            let mut config = Self::default();
+            config.validate()?;
             config.save(false)?;
             return Ok(config);
         }
 
         let content = std::fs::read_to_string(&config_path)?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+
+        // Validate the loaded config
+        config.validate()?;
+
+        debug!("Configuration loaded and validated successfully");
         Ok(config)
+    }
+
+    /// Validate the configuration for correctness
+    fn validate(&mut self) -> Result<()> {
+        // Validate symlink resolution mode
+        self.general.symlink_resolution = self.general.symlink_resolution.to_lowercase();
+        SymlinkResolution::from_str(&self.general.symlink_resolution).map_err(|e| {
+            DotfilesError::Config(format!(
+                "Invalid symlink_resolution value '{}': {}",
+                self.general.symlink_resolution, e
+            ))
+        })?;
+
+        // Validate repo path is not empty
+        if self.general.repo_path.is_empty() {
+            return Err(DotfilesError::Config(
+                "repo_path cannot be empty".to_string(),
+            ));
+        }
+
+        // Validate backup dir is not empty
+        if self.general.backup_dir.is_empty() {
+            return Err(DotfilesError::Config(
+                "backup_dir cannot be empty".to_string(),
+            ));
+        }
+
+        // Validate current profile is not empty
+        if self.general.current_profile.is_empty() {
+            return Err(DotfilesError::Config(
+                "current_profile cannot be empty".to_string(),
+            ));
+        }
+
+        // Warn about potentially problematic configurations
+        if self.general.repo_path == self.general.backup_dir {
+            warn!("repo_path and backup_dir are the same - this is not recommended");
+        }
+
+        // Validate file entries for duplicates
+        for (tool, tool_config) in &self.tools {
+            let mut seen_dests = std::collections::HashSet::new();
+            for entry in &tool_config.files {
+                if !seen_dests.insert(entry.dest.clone()) {
+                    warn!(
+                        "Tool '{}' has duplicate destination path: {}",
+                        tool, entry.dest
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Save the configuration to disk.
