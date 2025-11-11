@@ -39,7 +39,7 @@ pub fn migrate_files(
         discrepancies.len()
     );
 
-    let symlink_resolution = config.get_symlink_resolution()?;
+    let symlink_resolution = config.general.symlink_resolution;
     let mut migrated_count = 0;
     let mut skipped_count = 0;
 

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::{EnvironmentSpec, FileEntry, PackageSpec, ServiceSpec};
+use crate::types::{EnvironmentSpec, FileEntry, PackageSpec, ServiceSpec, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,7 +18,8 @@ pub struct GeneralConfig {
     pub repo_path: String,
     pub backup_dir: String,
     pub current_profile: String,
-    pub symlink_resolution: String,
+    #[serde(default = "default_symlink_resolution")]
+    pub symlink_resolution: SymlinkResolution,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_remote: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -28,13 +29,17 @@ pub struct GeneralConfig {
     pub include: Option<Vec<String>>,
 }
 
+fn default_symlink_resolution() -> SymlinkResolution {
+    SymlinkResolution::Auto
+}
+
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             repo_path: "~/.dotfiles".to_string(),
             backup_dir: "~/.dotfiles-backup".to_string(),
             current_profile: "default".to_string(),
-            symlink_resolution: "auto".to_string(),
+            symlink_resolution: SymlinkResolution::Auto,
             default_remote: None,
             default_branch: None,
             include: None,
@@ -450,16 +455,6 @@ impl Config {
             )));
         }
 
-        // Validate symlink resolution (normalized to lowercase)
-        let symlink_resolution_lower = self.general.symlink_resolution.to_lowercase();
-        let valid_modes = vec!["auto", "relative", "absolute", "follow", "replace"];
-        if !valid_modes.contains(&symlink_resolution_lower.as_str()) {
-            return Err(DotfilesError::Config(format!(
-                "Invalid symlink_resolution '{}': must be one of {:?}",
-                self.general.symlink_resolution, valid_modes
-            )));
-        }
-
         Ok(())
     }
 
@@ -530,12 +525,6 @@ impl Config {
         Ok(tracked_files)
     }
 
-    pub fn get_symlink_resolution(&self) -> Result<crate::types::SymlinkResolution> {
-        self.general
-            .symlink_resolution
-            .parse()
-            .map_err(|e: String| DotfilesError::Config(e))
-    }
 
     /// Sync XDG config to repo (overwrite repo config with XDG config)
     /// This is useful for manually forcing the sync when XDG config is authoritative

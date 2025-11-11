@@ -112,7 +112,7 @@ mod backup_tests {
 #[cfg(test)]
 mod config_validation_tests {
     use crate::config::Config;
-    // use crate::types::SymlinkResolution;
+    use crate::types::SymlinkResolution;
 
     /// Test primary config validation functionality
     #[test]
@@ -148,37 +148,58 @@ mod config_validation_tests {
     /// Test symlink resolution validation - valid modes
     #[test]
     fn test_symlink_resolution_valid() {
-        let valid_modes = vec!["auto", "relative", "absolute", "follow", "replace"];
+        let valid_modes = vec![
+            SymlinkResolution::Auto,
+            SymlinkResolution::Relative,
+            SymlinkResolution::Absolute,
+            SymlinkResolution::Follow,
+            SymlinkResolution::Replace,
+        ];
 
         for mode in valid_modes {
             let mut config = Config::default();
-            config.general.symlink_resolution = mode.to_string();
+            config.general.symlink_resolution = mode;
 
             assert!(
                 config.validate().is_ok(),
-                "Symlink mode '{}' should be valid",
+                "Symlink mode '{:?}' should be valid",
                 mode
             );
         }
     }
 
-    /// Test symlink resolution validation - case insensitivity
+    /// Test symlink resolution TOML deserialization
     #[test]
-    fn test_symlink_resolution_case_variations() {
-        let variations = vec![
-            ("AUTO", "auto"),
-            ("Relative", "relative"),
-            ("ABSOLUTE", "absolute"),
+    fn test_symlink_resolution_toml_deserialization() {
+        use crate::types::SymlinkResolution;
+        
+        // Test that serde can deserialize valid lowercase strings from TOML
+        let test_cases = vec![
+            ("auto", SymlinkResolution::Auto),
+            ("relative", SymlinkResolution::Relative),
+            ("absolute", SymlinkResolution::Absolute),
+            ("follow", SymlinkResolution::Follow),
+            ("replace", SymlinkResolution::Replace),
         ];
 
-        for (input, expected) in variations {
-            let mut config = Config::default();
-            config.general.symlink_resolution = input.to_string();
-
-            config.validate().unwrap();
+        for (input_str, expected) in test_cases {
+            // Create a TOML string and deserialize it
+            let toml_str = format!(
+                r#"
+[general]
+repo_path = "~/.dotfiles"
+backup_dir = "~/.dotfiles-backup"
+current_profile = "default"
+symlink_resolution = "{}"
+"#,
+                input_str
+            );
+            
+            let config: Config = toml::from_str(&toml_str).unwrap();
             assert_eq!(
                 config.general.symlink_resolution, expected,
-                "Should normalize to lowercase"
+                "Should deserialize '{}' to {:?}",
+                input_str, expected
             );
         }
     }

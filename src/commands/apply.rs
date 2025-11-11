@@ -399,7 +399,7 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
         .insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
 
     // Add file operations
-    let symlink_resolution = options.config.get_symlink_resolution()?;
+    let symlink_resolution = options.config.general.symlink_resolution;
     let home = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
 

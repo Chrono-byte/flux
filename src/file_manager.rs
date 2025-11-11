@@ -94,7 +94,7 @@ pub fn sync_files(
     is_dry_run_mode: bool,
 ) -> Result<()> {
     let tracked_files = config.get_tracked_files(profile)?;
-    let symlink_resolution = config.get_symlink_resolution()?;
+    let symlink_resolution = config.general.symlink_resolution;
 
     // Create the FileSystemManager here. It will be passed down.
     let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
