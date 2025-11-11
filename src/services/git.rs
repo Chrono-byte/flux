@@ -1,5 +1,5 @@
-use crate::dry_run::{DryRun, Operation};
-use crate::error::Result;
+use crate::utils::dry_run::{DryRun, Operation};
+use crate::utils::error::Result;
 use crate::types::FileChange;
 use colored::Colorize;
 use git2::{Repository, Signature};

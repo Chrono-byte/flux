@@ -1,9 +1,9 @@
 use crate::config::Config;
-use crate::dry_run::DryRun;
-use crate::error::Result;
+use crate::utils::dry_run::DryRun;
+use crate::utils::error::{DotfilesError, Result};
 use crate::file_manager::FileSystemManager;
 use crate::types::{SymlinkResolution, TrackedFile};
-use crate::untracked::IssueType;
+use crate::commands::untracked::IssueType;
 use colored::Colorize;
 use std::fs;
 use std::path::Path;
@@ -23,7 +23,7 @@ pub fn migrate_files(
     let mut fs_manager = FileSystemManager::new(dry_run, is_dry_run_mode);
 
     // Find all discrepancies
-    let discrepancies = crate::untracked::find_discrepancies(config, profile)?;
+    let discrepancies = crate::commands::untracked::find_discrepancies(config, profile)?;
 
     if discrepancies.is_empty() {
         println!(
@@ -243,7 +243,7 @@ fn compute_link_target(
         }
         SymlinkResolution::Relative => {
             pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap()).ok_or_else(
-                || crate::error::DotfilesError::Path("Cannot create relative symlink".to_string()),
+                || DotfilesError::Path("Cannot create relative symlink".to_string()),
             )?
         }
         SymlinkResolution::Absolute => file.repo_path.clone(),

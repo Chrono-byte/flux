@@ -1,6 +1,6 @@
 /// Error message utilities - provides helpers for creating consistent, helpful error messages
 /// following best practices: specific context, explanation of impact, and solution guidance
-use crate::error::DotfilesError;
+use crate::utils::error::DotfilesError;
 use std::path::Path;
 
 /// Format error messages consistently
@@ -125,6 +125,7 @@ pub fn invalid_path_computation(from_path: &Path, to_path: &Path, reason: &str) 
 }
 
 /// Invalid configuration value error
+#[allow(dead_code)]
 pub fn invalid_config_value(
     key: &str,
     invalid_value: &str,

@@ -1,45 +1,31 @@
-mod browser;
 mod config;
-mod dry_run;
-mod error;
-mod error_utils;
+mod commands;
 mod file_manager;
-mod git;
-mod logging;
-mod migrate;
-mod profile;
-mod prompt;
-mod restore;
-mod security;
-mod status;
+mod services;
 mod types;
-mod untracked;
-mod validate;
+mod utils;
 
 #[cfg(test)]
 mod tests;
 
-use browser::{
-    detect_alacritty_configs, detect_firefox_profiles, detect_starship_configs,
-    detect_zen_profiles, get_browser_profile_files,
+use commands::{
+    migrate_files, add_backup_to_repo, cleanup_backups, display_backups, list_backups,
+    restore_backup, check_status, display_status, display_discrepancies, find_discrepancies,
+    display_validation, validate_config,
 };
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use config::Config;
-use dry_run::DryRun;
-use error::Result;
-use file_manager::{add_file, backup_all_files, remove_file, sync_files};
-use git::{
-    add_remote, commit_changes, detect_changes, init_repo, list_remotes, push_to_remote,
-    remove_remote, set_remote_url, stage_changes,
+use config::{Config, EnvironmentConfig};
+use services::{
+    detect_alacritty_configs, detect_firefox_profiles, detect_starship_configs,
+    detect_zen_profiles, get_browser_profile_files, add_remote, commit_changes, detect_changes,
+    init_repo, list_remotes, push_to_remote, remove_remote, set_remote_url, stage_changes,
 };
-use migrate::migrate_files;
-use profile::{create_profile, get_profile_files, list_profiles, switch_profile};
-use prompt::{prompt_commit_message, prompt_yes_no};
-use restore::{add_backup_to_repo, cleanup_backups, display_backups, list_backups, restore_backup};
-use status::{check_status, display_status};
-use untracked::{display_discrepancies, find_discrepancies};
-use validate::{display_validation, validate_config};
+use services::git;
+use utils::{DryRun, DotfilesError, Result, logging};
+use file_manager::{add_file, backup_all_files, remove_file, sync_files};
+use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
+use utils::prompt::{prompt_commit_message, prompt_yes_no};
 
 #[derive(Parser)]
 #[command(name = "flux")]
@@ -297,12 +283,32 @@ enum RemoteCommands {
 }
 
 fn main() {
+    // Load and validate environment configuration early
+    let env_config = match EnvironmentConfig::load() {
+        Ok(config) => {
+            config.display_summary();
+            config
+        }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to load environment configuration: {}",
+                "Error:".red().bold(),
+                e
+            );
+            eprintln!(
+                "{} Please check your environment variables",
+                "Help:".yellow().bold()
+            );
+            std::process::exit(1);
+        }
+    };
+
     // Initialize logging system
     logging::init_logging();
 
     let cli = Cli::parse();
 
-    if let Err(e) = run(cli) {
+    if let Err(e) = run(cli, env_config) {
         eprintln!("{} {}", "Error:".red().bold(), e);
         std::process::exit(1);
     }
@@ -324,7 +330,7 @@ fn handle_file_command(command: FileCommands) -> Result<()> {
 
             let source_path = std::path::Path::new(&file);
             if !source_path.exists() {
-                return Err(error::DotfilesError::Path(format!(
+                return Err(DotfilesError::Path(format!(
                     "Source file does not exist: {}",
                     file
                 )));
@@ -335,7 +341,7 @@ fn handle_file_command(command: FileCommands) -> Result<()> {
             } else {
                 // Use source path relative to home
                 let home = dirs::home_dir().ok_or_else(|| {
-                    error::DotfilesError::Config("Could not find home directory".to_string())
+                    DotfilesError::Config("Could not find home directory".to_string())
                 })?;
                 source_path
                     .strip_prefix(&home)
@@ -561,12 +567,12 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 return Ok(());
             } else {
                 let index: usize = backup.parse().map_err(|_| {
-                    error::DotfilesError::Path(
+                    DotfilesError::Path(
                         "Invalid backup index. Use 'latest', 'list', or a number".to_string(),
                     )
                 })?;
                 if index == 0 || index > backups.len() {
-                    return Err(error::DotfilesError::Path(format!(
+                    return Err(DotfilesError::Path(format!(
                         "Backup index out of range (1-{})",
                         backups.len()
                     )));
@@ -641,12 +647,12 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 return Ok(());
             } else {
                 let index: usize = backup.parse().map_err(|_| {
-                    error::DotfilesError::Path(
+                    DotfilesError::Path(
                         "Invalid backup index. Use 'latest', 'list', or a number".to_string(),
                     )
                 })?;
                 if index == 0 || index > backups.len() {
-                    return Err(error::DotfilesError::Path(format!(
+                    return Err(DotfilesError::Path(format!(
                         "Backup index out of range (1-{})",
                         backups.len()
                     )));
@@ -686,7 +692,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 }
 
                 let home = dirs::home_dir().ok_or_else(|| {
-                    error::DotfilesError::Config("Could not find home directory".to_string())
+                    DotfilesError::Config("Could not find home directory".to_string())
                 })?;
 
                 for backup_file in &selected_backup.files {
@@ -798,7 +804,9 @@ desktop.ini
     Ok(())
 }
 
-fn run(cli: Cli) -> Result<()> {
+fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
+    // Note: env_config is validated at startup for early error detection.
+    // It may be used in future for git auth and other features.
     match cli.command {
         Commands::File { command } => {
             return handle_file_command(command);

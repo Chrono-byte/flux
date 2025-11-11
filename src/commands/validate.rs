@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::error::Result;
+use crate::utils::error::Result;
 use crate::types::TrackedFile;
 use colored::Colorize;
 use std::fs;

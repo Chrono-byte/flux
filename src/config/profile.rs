@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::error::{DotfilesError, Result};
+use crate::utils::error::{DotfilesError, Result};
 use colored::Colorize;
 use std::path::PathBuf;
 

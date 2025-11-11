@@ -236,7 +236,7 @@ are used if not overridden.
 The tool uses `flock` to detect locked files. If a file is locked (e.g., browser
 is running), it will be skipped with a warning:
 
-```
+```md
 ⚠ Warning: /path/to/file is locked (may be in use), skipping
 ```
 
@@ -319,7 +319,7 @@ flux push --dry-run
 flux push --remote origin --branch main --set-upstream
 ```
 
-#### Configuration
+#### Default Remote and Branch Configuration
 
 You can set default remote and branch in your config to avoid repeated flags:
 

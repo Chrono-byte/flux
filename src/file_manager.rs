@@ -1,8 +1,8 @@
 use crate::config::Config;
-use crate::dry_run::{DryRun, Operation};
-use crate::error::{DotfilesError, Result};
-use crate::prompt::{ConflictResolution, prompt_conflict};
-use crate::security;
+use crate::utils::dry_run::{DryRun, Operation};
+use crate::utils::error::{DotfilesError, Result};
+use crate::utils::prompt::{ConflictResolution, prompt_conflict};
+use crate::utils::security;
 use crate::types::{SymlinkResolution, TrackedFile};
 use chrono::Local;
 use colored::Colorize;
@@ -24,7 +24,7 @@ pub fn add_file(
     fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
     // BACKUP: Create backup of destination file if it exists BEFORE any changes
-    let home = dirs::home_dir().ok_or_else(crate::error_utils::home_dir_not_found)?;
+    let home = dirs::home_dir().ok_or_else(crate::utils::error_utils::home_dir_not_found)?;
     let full_dest_path = home.join(dest_path);
     if let Some(path_to_backup) = get_path_to_backup(&full_dest_path) {
         println!("  Creating backup of existing destination...");
@@ -56,7 +56,7 @@ pub fn add_file(
     let repo_relative = repo_file
         .strip_prefix(&repo_path)
         .map_err(|e| {
-            crate::error_utils::invalid_path_computation(
+            crate::utils::error_utils::invalid_path_computation(
                 &repo_path,
                 &repo_file,
                 &format!("Repository file is not within repository directory: {}", e),
@@ -64,8 +64,7 @@ pub fn add_file(
         })?
         .to_string_lossy()
         .to_string();
-    let dest_str = dest_path.to_string_lossy().to_string();
-    config.add_file_to_tool(tool, &repo_relative, &dest_str, profile)?;
+    config.add_file_to_tool(tool, &repo_relative, dest_path, profile)?;
 
     // Only save config if not in dry run mode
     if !fs_manager.is_dry_run {

@@ -1,4 +1,5 @@
-use crate::error::{DotfilesError, Result};
+use crate::utils::error::{DotfilesError, Result};
+use crate::utils::error_utils;
 use std::path::Path;
 
 /// Validate that a symlink target is within the repository (prevents path traversal attacks)
@@ -35,7 +36,7 @@ pub fn validate_symlink_target(repo_path: &Path, target: &Path) -> Result<()> {
 
     // Check if target is within repository
     if !canonical_target.starts_with(&canonical_repo) {
-        return Err(crate::error_utils::symlink_target_outside_repo(
+        return Err(error_utils::symlink_target_outside_repo(
             &canonical_target,
             &canonical_repo,
         ));
@@ -82,7 +83,7 @@ pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
 
     // Check if destination is within home directory
     if !canonical_dest.starts_with(&canonical_home) {
-        return Err(crate::error_utils::dest_outside_home(dest, home));
+        return Err(error_utils::dest_outside_home(dest, home));
     }
 
     Ok(())

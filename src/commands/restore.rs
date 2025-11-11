@@ -1,6 +1,6 @@
 use crate::config::Config;
-use crate::dry_run::DryRun;
-use crate::error::{DotfilesError, Result};
+use crate::utils::dry_run::DryRun;
+use crate::utils::error::{DotfilesError, Result};
 use crate::types::TrackedFile;
 use chrono::DateTime;
 use colored::Colorize;
@@ -84,7 +84,7 @@ pub fn restore_backup(
     dry_run: &mut DryRun,
     is_dry_run_mode: bool,
 ) -> Result<()> {
-    use crate::dry_run::Operation;
+    use crate::utils::dry_run::Operation;
 
     // Find the corresponding file in backup
     let relative_path = target_path
@@ -229,7 +229,7 @@ pub fn add_backup_to_repo(
     dry_run: &mut DryRun,
     is_dry_run_mode: bool,
 ) -> Result<Vec<PathBuf>> {
-    use crate::git::{init_repo, stage_changes};
+    use crate::services::git::{init_repo, stage_changes};
     let tracked_files = config.get_tracked_files(profile)?;
     let home = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
@@ -315,7 +315,7 @@ pub fn add_backup_to_repo(
         let repo = init_repo(&repo_path)?;
 
         // Detect all changes in the repo (this will include our copied files)
-        let changes = crate::git::detect_changes(&repo)?;
+        let changes = crate::services::git::detect_changes(&repo)?;
 
         if !changes.is_empty() {
             stage_changes(&repo, &changes, dry_run, is_dry_run_mode)?;

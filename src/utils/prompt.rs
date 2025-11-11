@@ -1,4 +1,4 @@
-use crate::error::{DotfilesError, Result};
+use crate::utils::error::{DotfilesError, Result};
 use crate::types::FileChange;
 use colored::Colorize;
 use dialoguer::{Input, Select, theme::ColorfulTheme};

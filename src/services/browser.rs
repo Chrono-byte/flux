@@ -1,4 +1,4 @@
-use crate::error::{DotfilesError, Result};
+use crate::utils::error::{DotfilesError, Result};
 use std::path::PathBuf;
 
 pub struct BrowserProfile {
