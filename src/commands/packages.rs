@@ -1,11 +1,11 @@
 use crate::config::Config;
-use crate::services::{DnfPackageManager, PackageManager};
+use crate::services::PackageManagerType;
 use crate::utils::error::Result;
 use colored::Colorize;
 
 /// List all installed system packages
 pub fn list_packages(_config: &Config, use_sudo: bool) -> Result<()> {
-    let manager = DnfPackageManager::new(use_sudo);
+    let manager = PackageManagerType::PackageKit.create_manager(use_sudo);
 
     println!("{} Fetching installed packages...\n", "→".cyan());
 
@@ -38,18 +38,19 @@ pub fn list_packages(_config: &Config, use_sudo: bool) -> Result<()> {
                     "•".dimmed(),
                     packages.len() - 50
                 );
-                println!("  💡 Use 'dnf list installed' to see all packages");
+                println!("  💡 Use 'pkcon get-packages --filter installed' to see all packages");
             }
         }
         Err(e) => {
             eprintln!("{} {}", "✗".red(), e);
             eprintln!(
                 "\n{}",
-                "💡 This command requires DNF (Fedora/RHEL package manager)".yellow()
+                "💡 This command requires PackageKit or DNF package manager".yellow()
             );
             eprintln!(
                 "{}",
-                "   If you're not on Fedora, package management is not available.".yellow()
+                "   Make sure PackageKit service is running (systemctl --user status packagekit)"
+                    .yellow()
             );
         }
     }
@@ -103,7 +104,7 @@ pub fn compare_packages(config: &Config, use_sudo: bool) -> Result<()> {
         return Ok(());
     }
 
-    let manager = DnfPackageManager::new(use_sudo);
+    let manager = PackageManagerType::PackageKit.create_manager(use_sudo);
 
     println!(
         "{} Comparing declared vs installed packages...\n",
@@ -113,11 +114,27 @@ pub fn compare_packages(config: &Config, use_sudo: bool) -> Result<()> {
     let installed = match manager.list_installed() {
         Ok(pkgs) => pkgs,
         Err(e) => {
-            eprintln!("{} {}", "✗".red(), e);
-            eprintln!(
-                "\n{}",
-                "💡 Cannot compare packages without DNF access".yellow()
-            );
+            let error_msg = format!("{}", e);
+
+            // Check if it's a network error and provide specific guidance
+            if error_msg.contains("Network error") || error_msg.contains("Could not resolve") {
+                eprintln!("{} {}", "✗".red(), e);
+                eprintln!(
+                    "\n{}",
+                    "💡 Network error: Check your internet connection and repository configuration"
+                        .yellow()
+                );
+            } else {
+                eprintln!("{} {}", "✗".red(), e);
+                eprintln!(
+                    "\n{}",
+                    "💡 Cannot compare packages without PackageKit access".yellow()
+                );
+                eprintln!(
+                    "{}",
+                    "   Make sure PackageKit service is running (systemctl --user status packagekit)".yellow()
+                );
+            }
             return Ok(());
         }
     };

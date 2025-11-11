@@ -47,6 +47,81 @@ impl DnfPackageManager {
         Self { use_sudo }
     }
 
+    /// Extract a concise error message from DNF's verbose stderr output
+    fn extract_dnf_error(stderr: &str) -> String {
+        let lines: Vec<&str> = stderr.lines().collect();
+
+        // Look for common error patterns and extract the most relevant line
+        // Check for network resolution errors first (most specific)
+        for line in &lines {
+            let line = line.trim();
+
+            // Network resolution errors (most specific)
+            if line.contains("Could not resolve hostname")
+                || line.contains("Could not resolve host")
+            {
+                // Try to extract the hostname from brackets like [Could not resolve host: example.com]
+                if let Some(bracket_start) = line.find('[')
+                    && let Some(bracket_end) = line[bracket_start..].find(']')
+                {
+                    let bracket_content = &line[bracket_start + 1..bracket_start + bracket_end];
+                    // Extract hostname if present (format: "Could not resolve host: hostname")
+                    if let Some(host_colon) = bracket_content.find("host:") {
+                        let hostname = bracket_content[host_colon + 5..].trim();
+                        return format!("Network error: Could not resolve hostname ({})", hostname);
+                    }
+                }
+                // Fallback: return a concise message
+                return "Network error: Could not resolve hostname (check DNS/network connection)"
+                    .to_string();
+            }
+        }
+
+        // Check for other network/metadata errors
+        for line in &lines {
+            let line = line.trim();
+
+            // Repository/metadata errors (often caused by network issues)
+            if line.contains("Failed to download metadata") {
+                return "Failed to download repository metadata (check network connection)"
+                    .to_string();
+            }
+
+            // Permission errors
+            if line.contains("Permission denied") || line.contains("requires root") {
+                return "Permission denied (try with --sudo flag)".to_string();
+            }
+
+            // Lock errors
+            if line.contains("lock") || line.contains("another process") {
+                return "DNF is locked by another process".to_string();
+            }
+
+            // Repository not found
+            if line.contains("No such file or directory") && line.contains("repo") {
+                return "Repository configuration error".to_string();
+            }
+        }
+
+        // If no specific pattern found, try to get the first non-empty line
+        // or a summary of the error
+        for line in &lines {
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with("Error:") && line.len() < 200 {
+                // Return first meaningful line that's not too long
+                return line.to_string();
+            }
+        }
+
+        // Fallback: return first 150 chars of stderr
+        let summary: String = stderr.chars().take(150).collect();
+        if summary.len() == 150 {
+            format!("{}...", summary)
+        } else {
+            summary
+        }
+    }
+
     /// Execute a DNF command and return the output
     fn dnf_command(&self, args: &[&str]) -> Result<String> {
         // Check if dnf is available
@@ -73,9 +148,13 @@ impl DnfPackageManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+
+            // Extract the most relevant error message from DNF's verbose output
+            let error_summary = Self::extract_dnf_error(&stderr);
+
             return Err(DotfilesError::Path(format!(
                 "DNF command failed: {}\n  Command: dnf {}",
-                stderr,
+                error_summary,
                 args.join(" ")
             )));
         }
@@ -266,18 +345,46 @@ impl PackageManager for DnfPackageManager {
     }
 }
 
-/// PackageKit D-Bus proxy interface
+/// PackageKit Session D-Bus proxy interface
+/// This is the session helper interface that handles all complexity automatically
+/// (GPG keys, EULAs, authentication) and provides synchronous methods
+/// The session interface is on the same service but uses different methods
+#[proxy(
+    interface = "org.freedesktop.PackageKit",
+    default_service = "org.freedesktop.PackageKit",
+    default_path = "/org/freedesktop/PackageKit"
+)]
+trait PackageKitSession {
+    /// Install packages by name (synchronous, handles all complexity)
+    /// interact: 0 = no interaction, 1 = show progress, 2 = show progress and allow cancel
+    fn install_package_name(&self, packages: &[&str], interact: u32) -> zbus::Result<()>;
+
+    /// Remove packages by name (synchronous, handles all complexity)
+    /// interact: 0 = no interaction, 1 = show progress, 2 = show progress and allow cancel
+    fn remove_package_name(&self, packages: &[&str], interact: u32) -> zbus::Result<()>;
+
+    /// Install package that provides a file
+    fn install_provide_file(&self, files: &[&str], interact: u32) -> zbus::Result<()>;
+
+    /// Install local package file
+    fn install_local_file(&self, files: &[&str], interact: u32) -> zbus::Result<()>;
+
+    /// Install package by MIME type
+    fn install_mime_type(&self, mime_types: &[&str], interact: u32) -> zbus::Result<()>;
+
+    /// Install font
+    fn install_font(&self, font_specs: &[&str], interact: u32) -> zbus::Result<()>;
+}
+
+/// PackageKit D-Bus proxy interface (system service, kept for query operations)
 #[proxy(
     interface = "org.freedesktop.PackageKit",
     default_service = "org.freedesktop.PackageKit",
     default_path = "/org/freedesktop/PackageKit"
 )]
 trait PackageKit {
-    /// Get package details
-    fn get_details(&self, package_ids: &[&str]) -> zbus::Result<Vec<Vec<String>>>;
-
-    /// Get packages with filter
-    fn get_packages(&self, filter: u64) -> zbus::Result<Vec<String>>;
+    /// Create a new transaction
+    fn create_transaction(&self) -> zbus::Result<zbus::zvariant::OwnedObjectPath>;
 
     /// Install packages
     fn install_packages(
@@ -316,8 +423,8 @@ trait PackageKit {
     default_service = "org.freedesktop.PackageKit"
 )]
 trait Transaction {
-    /// Set the role for the transaction
-    fn set_role(&self, role: u32) -> zbus::Result<()>;
+    /// Get packages with filter (returns results via Package signals)
+    fn get_packages(&self, filter: u64) -> zbus::Result<()>;
 
     /// Set whether to allow reinstall
     fn set_allow_reinstall(&self, allow_reinstall: bool) -> zbus::Result<()>;
@@ -479,6 +586,7 @@ struct TransactionResult {
 /// PackageKit-based package manager (GNOME)
 /// Uses D-Bus interface for PackageKit operations
 pub struct PackageKitPackageManager {
+    #[allow(dead_code)]
     use_sudo: bool,
     runtime: tokio::runtime::Runtime,
 }
@@ -492,16 +600,15 @@ impl PackageKitPackageManager {
     }
 
     /// Check if PackageKit D-Bus service is available
+    /// Now checks for session helper on session bus
     pub fn is_packagekit_available(&self) -> bool {
-        // Check if PackageKit D-Bus service is running
+        // Check if PackageKit session helper is available on session bus
         match std::process::Command::new("dbus-send")
-            .arg("--system")
+            .arg("--session")
             .arg("--print-reply")
             .arg("--dest=org.freedesktop.PackageKit")
             .arg("/org/freedesktop/PackageKit")
-            .arg("org.freedesktop.DBus.Properties.Get")
-            .arg("string:org.freedesktop.PackageKit")
-            .arg("string:VersionMajor")
+            .arg("org.freedesktop.DBus.Introspectable.Introspect")
             .output()
         {
             Ok(output) => output.status.success(),
@@ -510,17 +617,12 @@ impl PackageKitPackageManager {
     }
 
     /// Get D-Bus connection (async helper)
-    async fn get_connection_async(&self) -> Result<Connection> {
-        let connection = if self.use_sudo {
-            // For system operations, use system bus
-            Connection::system().await
-        } else {
-            // For user operations, use session bus
-            Connection::session().await
-        }
-        .map_err(|e| {
+    /// Session helper uses the session bus
+    async fn get_session_connection_async(&self) -> Result<Connection> {
+        // Session helper uses session bus
+        let connection = Connection::session().await.map_err(|e| {
             DotfilesError::Path(format!(
-                "Failed to connect to D-Bus: {}\n  💡 Make sure PackageKit is running",
+                "Failed to connect to D-Bus session bus: {}\n  💡 Make sure you're running in a desktop session with PackageKit session helper (gpk-update-icon on GNOME, apper on KDE)",
                 e
             ))
         })?;
@@ -528,10 +630,48 @@ impl PackageKitPackageManager {
         Ok(connection)
     }
 
-    /// Get PackageKit proxy (async helper)
-    async fn get_proxy_async(&self) -> Result<PackageKitProxy<'static>> {
-        let connection = self.get_connection_async().await?;
+    /// Get D-Bus connection for system service (async helper)
+    /// Still needed for query operations that may require transactions
+    async fn get_system_connection_async(&self) -> Result<Connection> {
+        // System service uses system bus
+        let connection = Connection::system().await.map_err(|e| {
+            DotfilesError::Path(format!(
+                "Failed to connect to D-Bus system bus: {}\n  💡 Make sure PackageKit service is running (systemctl status packagekit)",
+                e
+            ))
+        })?;
+
+        Ok(connection)
+    }
+
+    /// Get PackageKit session proxy (async helper)
+    /// This is the session helper that provides simple synchronous methods
+    async fn get_session_proxy_async(&self) -> Result<PackageKitSessionProxy<'static>> {
+        let connection = self.get_session_connection_async().await?;
+        PackageKitSessionProxy::new(&connection).await
+            .map_err(|e| DotfilesError::Path(
+                format!("Failed to create PackageKit session proxy: {}\n  💡 Make sure PackageKit session helper is available (gpk-update-icon on GNOME, apper on KDE)", e)
+            ))
+    }
+
+    /// Get PackageKit system proxy (async helper)
+    /// Note: Used by search() and check_conflicts() methods which are marked as allow(dead_code)
+    #[allow(dead_code)]
+    async fn get_system_proxy_async(&self) -> Result<PackageKitProxy<'static>> {
+        let connection = self.get_system_connection_async().await?;
         PackageKitProxy::new(&connection).await
+            .map_err(|e| DotfilesError::Path(
+                format!("Failed to create PackageKit system proxy: {}\n  💡 Make sure PackageKit service is available", e)
+            ))
+    }
+
+    /// Get PackageKit proxy from existing connection (async helper)
+    /// This ensures the same connection is used for transaction creation and method calls
+    async fn get_proxy_from_connection(
+        &self,
+        connection: &Connection,
+    ) -> Result<PackageKitProxy<'static>> {
+        PackageKitProxy::new(connection).await
             .map_err(|e| DotfilesError::Path(
                 format!("Failed to create PackageKit proxy: {}\n  💡 Make sure PackageKit service is available", e)
             ))
@@ -558,6 +698,170 @@ impl PackageKitPackageManager {
         F: std::future::Future,
     {
         self.runtime.block_on(future)
+    }
+
+    /// Get installed packages using a transaction
+    /// PackageKit requires creating a transaction and monitoring signals to get package lists
+    /// IMPORTANT: Must use the same D-Bus connection for transaction creation and method calls
+    /// to avoid "sender does not match" PolicyKit errors
+    /// Note: Query operations still use system service as session helper is primarily for install/remove
+    async fn get_installed_packages_async(&self) -> Result<Vec<String>> {
+        let connection = self.get_system_connection_async().await?;
+        let proxy = self.get_proxy_from_connection(&connection).await?;
+
+        // Create a transaction
+        let transaction_path = proxy.create_transaction().await.map_err(|e| {
+            DotfilesError::Path(format!("Failed to create PackageKit transaction: {}", e))
+        })?;
+
+        // Create transaction proxy
+        let transaction_proxy = TransactionProxy::builder(&connection)
+            .path(transaction_path.as_str())
+            .map_err(|e| DotfilesError::Path(format!("Failed to create transaction proxy: {}", e)))?
+            .build()
+            .await
+            .map_err(|e| {
+                DotfilesError::Path(format!("Failed to build transaction proxy: {}", e))
+            })?;
+
+        // Collect packages from Package signals
+        let packages = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+        let packages_clone = packages.clone();
+
+        // Monitor Package signals
+        let mut package_stream = transaction_proxy.receive_package().await.map_err(|e| {
+            DotfilesError::Path(format!("Failed to receive package signals: {}", e))
+        })?;
+
+        // Monitor Finished signal
+        let mut finished_stream = transaction_proxy.receive_finished().await.map_err(|e| {
+            DotfilesError::Path(format!("Failed to receive finished signals: {}", e))
+        })?;
+
+        // Monitor ErrorCode signal
+        let mut error_stream = transaction_proxy
+            .receive_error_code()
+            .await
+            .map_err(|e| DotfilesError::Path(format!("Failed to receive error signals: {}", e)))?;
+
+        // Call GetPackages - PackageKit automatically sets the role based on the method called
+        transaction_proxy
+            .get_packages(FILTER_INSTALLED)
+            .await
+            .map_err(|e| {
+                let error_str = e.to_string();
+                // Check for PolicyKit/permission errors
+                if error_str.contains("RefusedByPolicy")
+                    || error_str.contains("sender does not match")
+                    || error_str.contains("NotAuthorized")
+                {
+                    let mut error_msg = format!("PackageKit permission denied: {}", error_str);
+                    if error_str.contains("sender does not match") {
+                        error_msg.push_str("\n  💡 This error indicates a D-Bus connection mismatch. PackageKit requires the same connection for transaction creation and method calls.");
+                        error_msg.push_str("\n  💡 This should be fixed in the code, but if it persists, try:");
+                    } else {
+                        error_msg.push_str("\n  💡 PackageKit requires PolicyKit authorization for query operations.");
+                        error_msg.push_str("\n  💡 Options:");
+                    }
+                    error_msg.push_str("\n    1. Run with sudo: sudo flux package status");
+                    error_msg.push_str("\n    2. Add PolicyKit rule: Create /etc/polkit-1/rules.d/99-flux-packagekit.rules");
+                    DotfilesError::Path(error_msg)
+                } else if error_str.contains("UnknownMethod") {
+                    DotfilesError::Path(format!(
+                        "PackageKit method not found: {}\n  💡 This might indicate a PackageKit version mismatch or D-Bus interface issue.\n  💡 Make sure PackageKit service is running: systemctl status packagekit",
+                        error_str
+                    ))
+                } else {
+                    DotfilesError::Path(format!("Failed to call GetPackages: {}", error_str))
+                }
+            })?;
+
+        // Note: PackageKit transactions start automatically when you call methods like GetPackages
+        // No explicit run() call is needed - the transaction begins immediately
+
+        // Collect packages and wait for completion
+        let (tx, rx) = oneshot::channel::<Result<Vec<String>>>();
+        let tx = Arc::new(tokio::sync::Mutex::new(Some(tx)));
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(msg) = package_stream.next() => {
+                        match msg.args() {
+                            Ok(args) => {
+                                let package_id = args.package_id().to_string();
+                                packages_clone.lock().await.push(package_id);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to parse package signal args: {}", e);
+                            }
+                        }
+                    }
+                    Some(msg) = finished_stream.next() => {
+                        match msg.args() {
+                            Ok(args) => {
+                                let exit = *args.exit();
+                                if exit == ExitCode::Success as u32 {
+                                    let packages_vec = packages_clone.lock().await.clone();
+                                    let mut sender = tx.lock().await;
+                                    if let Some(s) = sender.take() {
+                                        let _ = s.send(Ok(packages_vec));
+                                    }
+                                } else {
+                                    let error_msg = format!("GetPackages transaction failed with exit code: {}", exit);
+                                    let mut sender = tx.lock().await;
+                                    if let Some(s) = sender.take() {
+                                        let _ = s.send(Err(DotfilesError::Path(error_msg)));
+                                    }
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to parse finished signal: {}", e);
+                                let mut sender = tx.lock().await;
+                                if let Some(s) = sender.take() {
+                                    let _ = s.send(Err(DotfilesError::Path(error_msg)));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    Some(msg) = error_stream.next() => {
+                        match msg.args() {
+                            Ok(args) => {
+                                let code = *args.code();
+                                let details = args.details().to_string();
+                                let error_msg = format!("PackageKit error {}: {}", code, details);
+                                let mut sender = tx.lock().await;
+                                if let Some(s) = sender.take() {
+                                    let _ = s.send(Err(DotfilesError::Path(error_msg)));
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to parse error signal: {}", e);
+                                let mut sender = tx.lock().await;
+                                if let Some(s) = sender.take() {
+                                    let _ = s.send(Err(DotfilesError::Path(error_msg)));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Wait for result with timeout
+        match tokio::time::timeout(Duration::from_secs(60), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(DotfilesError::Path(
+                "GetPackages transaction channel closed unexpectedly".to_string(),
+            )),
+            Err(_) => Err(DotfilesError::Path(
+                "GetPackages transaction timed out after 60 seconds".to_string(),
+            )),
+        }
     }
 
     /// Wait for transaction to complete by monitoring signals
@@ -590,11 +894,8 @@ impl PackageKitPackageManager {
             .await
             .map_err(|e| DotfilesError::Path(format!("Failed to receive error signals: {}", e)))?;
 
-        // Start the transaction
-        transaction_proxy
-            .run()
-            .await
-            .map_err(|e| DotfilesError::Path(format!("Failed to start transaction: {}", e)))?;
+        // Note: Transactions created via install_packages()/remove_packages() are already started
+        // No explicit run() call is needed - just monitor the signals
 
         // Monitor signals until transaction completes
         let tx_clone = tx.clone();
@@ -689,6 +990,139 @@ impl PackageKitPackageManager {
     }
 }
 
+// PackageKit transaction role constants
+// Note: PackageKit automatically sets the role based on which method is called
+#[allow(dead_code)]
+const ROLE_UNKNOWN: u32 = 0;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES: u32 = 1;
+#[allow(dead_code)]
+const ROLE_GET_DEPENDS: u32 = 2;
+#[allow(dead_code)]
+const ROLE_GET_DETAILS: u32 = 3;
+#[allow(dead_code)]
+const ROLE_GET_UPDATE_DETAIL: u32 = 4;
+#[allow(dead_code)]
+const ROLE_GET_DISTRO_UPGRADES: u32 = 5;
+#[allow(dead_code)]
+const ROLE_GET_CATEGORIES: u32 = 6;
+#[allow(dead_code)]
+const ROLE_GET_OLD_TRANSACTIONS: u32 = 7;
+#[allow(dead_code)]
+const ROLE_REPAIR_SYSTEM: u32 = 8;
+#[allow(dead_code)]
+const ROLE_GET_FILES: u32 = 9;
+#[allow(dead_code)]
+const ROLE_REFRESH_CACHE: u32 = 10;
+#[allow(dead_code)]
+const ROLE_GET_REPO_LIST: u32 = 11;
+#[allow(dead_code)]
+const ROLE_ENABLE_REPO: u32 = 12;
+#[allow(dead_code)]
+const ROLE_SET_REPO_DATA: u32 = 13;
+#[allow(dead_code)]
+const ROLE_REMOVE_REPO: u32 = 14;
+#[allow(dead_code)]
+const ROLE_RESOLVE: u32 = 15;
+#[allow(dead_code)]
+const ROLE_GET_REQUIRES: u32 = 17;
+#[allow(dead_code)]
+const ROLE_GET_UPDATE_DETAIL_NATIVE: u32 = 18;
+#[allow(dead_code)]
+const ROLE_GET_DISTRO_UPGRADES_NATIVE: u32 = 19;
+#[allow(dead_code)]
+const ROLE_GET_FILES_LOCAL: u32 = 20;
+#[allow(dead_code)]
+const ROLE_REPAIR_SYSTEM_NATIVE: u32 = 21;
+#[allow(dead_code)]
+const ROLE_DOWNLOAD_PACKAGES: u32 = 22;
+#[allow(dead_code)]
+const ROLE_INSTALL_PACKAGES: u32 = 23;
+#[allow(dead_code)]
+const ROLE_INSTALL_FILES: u32 = 24;
+#[allow(dead_code)]
+const ROLE_REFRESH_CACHE_NATIVE: u32 = 25;
+#[allow(dead_code)]
+const ROLE_UPDATE_PACKAGES: u32 = 26;
+#[allow(dead_code)]
+const ROLE_CANCEL: u32 = 27;
+#[allow(dead_code)]
+const ROLE_GET_REPO_LIST_NATIVE: u32 = 28;
+#[allow(dead_code)]
+const ROLE_ENABLE_REPO_NATIVE: u32 = 29;
+#[allow(dead_code)]
+const ROLE_REMOVE_REPO_NATIVE: u32 = 30;
+#[allow(dead_code)]
+const ROLE_SET_REPO_DATA_NATIVE: u32 = 31;
+#[allow(dead_code)]
+const ROLE_WHAT_PROVIDES: u32 = 32;
+#[allow(dead_code)]
+const ROLE_INSTALL_SIGNATURE: u32 = 33;
+#[allow(dead_code)]
+const ROLE_ACCEPT_EULA: u32 = 34;
+#[allow(dead_code)]
+const ROLE_GET_DETAILS_LOCAL: u32 = 35;
+#[allow(dead_code)]
+const ROLE_REMOVE_PACKAGES: u32 = 36;
+#[allow(dead_code)]
+const ROLE_INSTALL_PACKAGES_NATIVE: u32 = 37;
+#[allow(dead_code)]
+const ROLE_REMOVE_PACKAGES_NATIVE: u32 = 38;
+#[allow(dead_code)]
+const ROLE_UPDATE_PACKAGES_NATIVE: u32 = 39;
+#[allow(dead_code)]
+const ROLE_GET_DETAILS_NATIVE: u32 = 40;
+#[allow(dead_code)]
+const ROLE_GET_DEPENDS_NATIVE: u32 = 41;
+#[allow(dead_code)]
+const ROLE_GET_REQUIRES_NATIVE: u32 = 42;
+#[allow(dead_code)]
+const ROLE_GET_UPDATE_DETAIL_NATIVE2: u32 = 43;
+#[allow(dead_code)]
+const ROLE_GET_DISTRO_UPGRADES_NATIVE2: u32 = 44;
+#[allow(dead_code)]
+const ROLE_UPGRADE_SYSTEM: u32 = 45;
+#[allow(dead_code)]
+const ROLE_UPGRADE_SYSTEM_NATIVE: u32 = 46;
+#[allow(dead_code)]
+const ROLE_REPAIR_SYSTEM_NATIVE2: u32 = 47;
+#[allow(dead_code)]
+const ROLE_SEARCH_DETAILS: u32 = 48;
+#[allow(dead_code)]
+const ROLE_SEARCH_DETAILS_NATIVE: u32 = 49;
+#[allow(dead_code)]
+const ROLE_SEARCH_FILE: u32 = 50;
+#[allow(dead_code)]
+const ROLE_SEARCH_FILE_NATIVE: u32 = 51;
+#[allow(dead_code)]
+const ROLE_SEARCH_GROUP: u32 = 52;
+#[allow(dead_code)]
+const ROLE_SEARCH_GROUP_NATIVE: u32 = 53;
+#[allow(dead_code)]
+const ROLE_SEARCH_NAME: u32 = 54;
+#[allow(dead_code)]
+const ROLE_SEARCH_NAME_NATIVE: u32 = 55;
+#[allow(dead_code)]
+const ROLE_GET_DETAILS_LOCAL_NATIVE: u32 = 56;
+#[allow(dead_code)]
+const ROLE_GET_FILES_LOCAL_NATIVE: u32 = 57;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_DETAILS: u32 = 58;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_DETAILS_NATIVE: u32 = 59;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_ID: u32 = 60;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_ID_NATIVE: u32 = 61;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_FILES: u32 = 62;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_FILES_NATIVE: u32 = 63;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_PATTERN: u32 = 64;
+#[allow(dead_code)]
+const ROLE_GET_PACKAGES_BY_PATTERN_NATIVE: u32 = 65;
+
 // PackageKit filter constants
 #[allow(dead_code)]
 const FILTER_INSTALLED: u64 = 1 << 0;
@@ -759,10 +1193,7 @@ const TRANSACTION_FLAG_FORCE_REINSTALL: u64 = 1 << 5;
 impl PackageManager for PackageKitPackageManager {
     fn is_installed(&self, package: &str) -> Result<bool> {
         self.block_on(async {
-            let proxy = self.get_proxy_async().await?;
-            let packages = proxy.get_packages(FILTER_INSTALLED).await.map_err(|e| {
-                DotfilesError::Path(format!("Failed to get installed packages: {}", e))
-            })?;
+            let packages = self.get_installed_packages_async().await?;
 
             // Check if package is in the list
             for pkg_id in packages {
@@ -777,10 +1208,7 @@ impl PackageManager for PackageKitPackageManager {
 
     fn get_version(&self, package: &str) -> Result<Option<String>> {
         self.block_on(async {
-            let proxy = self.get_proxy_async().await?;
-            let packages = proxy.get_packages(FILTER_INSTALLED).await.map_err(|e| {
-                DotfilesError::Path(format!("Failed to get installed packages: {}", e))
-            })?;
+            let packages = self.get_installed_packages_async().await?;
 
             // Find package and extract version
             for pkg_id in packages {
@@ -799,44 +1227,36 @@ impl PackageManager for PackageKitPackageManager {
         }
 
         self.block_on(async {
-            let connection = self.get_connection_async().await?;
-            let proxy = self.get_proxy_async().await?;
+            let session_proxy = self.get_session_proxy_async().await?;
 
-            // Convert package names to PackageKit IDs
-            let package_ids: Vec<String> = packages
+            // Convert package names/versions to package spec strings
+            // PackageKit session helper accepts package names, optionally with version
+            let package_names: Vec<String> = packages
                 .iter()
                 .map(|(name, version)| {
-                    let version_str = if *version == "latest" {
-                        None
+                    if *version == "latest" || version.is_empty() {
+                        name.to_string()
                     } else {
-                        Some(*version)
-                    };
-                    self.package_name_to_id(name, version_str)
+                        format!("{}-{}", name, version)
+                    }
                 })
                 .collect();
 
-            let package_id_refs: Vec<&str> = package_ids.iter().map(|s| s.as_str()).collect();
+            let package_name_refs: Vec<&str> = package_names.iter().map(|s| s.as_str()).collect();
 
-            // Start transaction and get transaction path
-            let transaction_path = proxy
-                .install_packages(TRANSACTION_FLAG_NONE, &package_id_refs)
+            // Use session helper's InstallPackageName method
+            // The session helper handles all complexity (GPG keys, EULAs, authentication) automatically
+            // interact: 0 = no interaction (for automated scripts)
+            session_proxy
+                .install_package_name(&package_name_refs, 0)
                 .await
                 .map_err(|e| {
-                    DotfilesError::Path(format!("Failed to start install transaction: {}", e))
+                    let error_str = e.to_string();
+                    DotfilesError::Path(format!(
+                        "Failed to install packages via PackageKit session helper: {}\n  💡 The session helper handles authentication automatically. Make sure you're in a desktop session with PackageKit session helper running (gpk-update-icon on GNOME, apper on KDE).",
+                        error_str
+                    ))
                 })?;
-
-            // Wait for transaction to complete
-            let transaction_result = self
-                .wait_for_transaction(&connection, &transaction_path)
-                .await?;
-
-            if !transaction_result.success {
-                return Err(DotfilesError::Path(
-                    transaction_result
-                        .error
-                        .unwrap_or_else(|| "Installation failed".to_string()),
-                ));
-            }
 
             Ok(())
         })
@@ -848,50 +1268,33 @@ impl PackageManager for PackageKitPackageManager {
         }
 
         self.block_on(async {
-            let connection = self.get_connection_async().await?;
-            let proxy = self.get_proxy_async().await?;
+            let session_proxy = self.get_session_proxy_async().await?;
 
-            // Convert package names to PackageKit IDs
-            let package_ids: Vec<String> = packages
-                .iter()
-                .map(|name| self.package_name_to_id(name, None))
-                .collect();
-
-            let package_id_refs: Vec<&str> = package_ids.iter().map(|s| s.as_str()).collect();
-
-            // Start transaction and get transaction path
-            let transaction_path = proxy
-                .remove_packages(
-                    TRANSACTION_FLAG_NONE,
-                    &package_id_refs,
-                    false, // allow_deps
-                )
+            // Use session helper's RemovePackageName method
+            // The session helper handles all complexity automatically
+            // interact: 0 = no interaction (for automated scripts)
+            session_proxy
+                .remove_package_name(packages, 0)
                 .await
                 .map_err(|e| {
-                    DotfilesError::Path(format!("Failed to start remove transaction: {}", e))
+                    let error_str = e.to_string();
+                    DotfilesError::Path(format!(
+                        "Failed to remove packages via PackageKit session helper: {}\n  💡 The session helper handles authentication automatically. Make sure you're in a desktop session with PackageKit session helper running (gpk-update-icon on GNOME, apper on KDE).",
+                        error_str
+                    ))
                 })?;
-
-            // Wait for transaction to complete
-            let transaction_result = self
-                .wait_for_transaction(&connection, &transaction_path)
-                .await?;
-
-            if !transaction_result.success {
-                return Err(DotfilesError::Path(
-                    transaction_result
-                        .error
-                        .unwrap_or_else(|| "Removal failed".to_string()),
-                ));
-            }
 
             Ok(())
         })
     }
 
     fn update(&self, packages: &[&str]) -> Result<()> {
+        // Note: Session helper doesn't have a direct update method
+        // We'll need to use the system service for updates, or install the latest version
+        // For now, we'll fall back to system service for updates
         self.block_on(async {
-            let connection = self.get_connection_async().await?;
-            let proxy = self.get_proxy_async().await?;
+            let connection = self.get_system_connection_async().await?;
+            let proxy = self.get_proxy_from_connection(&connection).await?;
 
             if packages.is_empty() {
                 // Update all packages - PackageKit doesn't have a direct "update all"
@@ -936,10 +1339,7 @@ impl PackageManager for PackageKitPackageManager {
 
     fn list_installed(&self) -> Result<Vec<InstalledPackage>> {
         self.block_on(async {
-            let proxy = self.get_proxy_async().await?;
-            let packages = proxy.get_packages(FILTER_INSTALLED).await.map_err(|e| {
-                DotfilesError::Path(format!("Failed to get installed packages: {}", e))
-            })?;
+            let packages = self.get_installed_packages_async().await?;
 
             let mut installed = Vec::new();
 
@@ -965,7 +1365,7 @@ impl PackageManager for PackageKitPackageManager {
 
     fn search(&self, query: &str) -> Result<Vec<PackageInfo>> {
         self.block_on(async {
-            let proxy = self.get_proxy_async().await?;
+            let proxy = self.get_system_proxy_async().await?;
 
             // Search for packages by name
             let _transaction_path = proxy
@@ -982,7 +1382,7 @@ impl PackageManager for PackageKitPackageManager {
 
     fn check_conflicts(&self, packages: &[&str]) -> Result<Vec<String>> {
         self.block_on(async {
-            let proxy = self.get_proxy_async().await?;
+            let proxy = self.get_system_proxy_async().await?;
             let mut conflicts = Vec::new();
 
             for package in packages {

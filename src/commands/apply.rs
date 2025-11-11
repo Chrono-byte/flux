@@ -1,8 +1,6 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
-use crate::services::{
-    FileOperation, PackageManagerType, Transaction,
-};
+use crate::services::{FileOperation, PackageManagerType, Transaction};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
@@ -58,9 +56,7 @@ impl StateDiff {
     }
 
     pub fn total_changes(&self) -> usize {
-        self.files_to_sync.len()
-            + self.packages_to_install.len()
-            + self.packages_to_remove.len()
+        self.files_to_sync.len() + self.packages_to_install.len() + self.packages_to_remove.len()
     }
 }
 

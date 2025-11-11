@@ -11,5 +11,5 @@ pub use git::{
     add_remote, commit_changes, detect_changes, init_repo, list_remotes, push_to_remote,
     remove_remote, set_remote_url, stage_changes,
 };
-pub use package_manager::{DnfPackageManager, PackageManager, PackageManagerType};
+pub use package_manager::{PackageManager, PackageManagerType};
 pub use transactions::{FileOperation, Transaction};

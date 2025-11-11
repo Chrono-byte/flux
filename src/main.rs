@@ -12,10 +12,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use commands::{
     add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_packages,
-    compare_states, display_backups, display_discrepancies,
-    display_preview, display_status, display_validation, find_discrepancies,
-    list_backups, list_packages, migrate_files, restore_backup,
-    show_declared_packages, validate_config,
+    compare_states, display_backups, display_discrepancies, display_preview, display_status,
+    display_validation, find_discrepancies, list_backups, list_packages, migrate_files,
+    restore_backup, show_declared_packages, validate_config,
 };
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use config::{Config, EnvironmentConfig};
@@ -364,7 +363,6 @@ enum ConfigCommands {
         dry_run: bool,
     },
 }
-
 
 fn main() {
     // Load and validate environment configuration early
@@ -824,7 +822,6 @@ fn handle_package_command(command: PackageCommands) -> Result<()> {
     }
     Ok(())
 }
-
 
 fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
     match command {
