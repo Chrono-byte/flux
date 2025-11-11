@@ -1,5 +1,5 @@
-use crate::utils::error::{DotfilesError, Result};
 use crate::types::FileChange;
+use crate::utils::error::{DotfilesError, Result};
 use colored::Colorize;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use std::path::Path;

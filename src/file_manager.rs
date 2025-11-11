@@ -1,9 +1,9 @@
 use crate::config::Config;
+use crate::types::{SymlinkResolution, TrackedFile};
 use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::prompt::{ConflictResolution, prompt_conflict};
 use crate::utils::security;
-use crate::types::{SymlinkResolution, TrackedFile};
 use chrono::Local;
 use colored::Colorize;
 use log::{debug, warn};

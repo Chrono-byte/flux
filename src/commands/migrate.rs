@@ -1,9 +1,9 @@
+use crate::commands::untracked::IssueType;
 use crate::config::Config;
-use crate::utils::dry_run::DryRun;
-use crate::utils::error::{DotfilesError, Result};
 use crate::file_manager::FileSystemManager;
 use crate::types::{SymlinkResolution, TrackedFile};
-use crate::commands::untracked::IssueType;
+use crate::utils::dry_run::DryRun;
+use crate::utils::error::{DotfilesError, Result};
 use colored::Colorize;
 use std::fs;
 use std::path::Path;
@@ -242,9 +242,8 @@ fn compute_link_target(
                 .unwrap_or_else(|| file.repo_path.clone())
         }
         SymlinkResolution::Relative => {
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap()).ok_or_else(
-                || DotfilesError::Path("Cannot create relative symlink".to_string()),
-            )?
+            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
+                .ok_or_else(|| DotfilesError::Path("Cannot create relative symlink".to_string()))?
         }
         SymlinkResolution::Absolute => file.repo_path.clone(),
         SymlinkResolution::Follow => {

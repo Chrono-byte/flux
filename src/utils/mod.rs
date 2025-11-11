@@ -7,4 +7,3 @@ pub mod security;
 
 pub use dry_run::DryRun;
 pub use error::{DotfilesError, Result};
-

@@ -1,6 +1,6 @@
 use crate::config::Config;
-use crate::utils::error::Result;
 use crate::types::TrackedFile;
+use crate::utils::error::Result;
 use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};

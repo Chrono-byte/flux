@@ -1,7 +1,7 @@
 use crate::config::Config;
+use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
-use crate::types::TrackedFile;
 use chrono::DateTime;
 use colored::Colorize;
 use std::fs;

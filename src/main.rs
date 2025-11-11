@@ -1,5 +1,5 @@
-mod config;
 mod commands;
+mod config;
 mod file_manager;
 mod services;
 mod types;
@@ -8,27 +8,27 @@ mod utils;
 #[cfg(test)]
 mod tests;
 
-use commands::{
-    migrate_files, add_backup_to_repo, cleanup_backups, display_backups, list_backups,
-    restore_backup, check_status, display_status, display_discrepancies, find_discrepancies,
-    display_validation, validate_config,
-    compare_packages, list_packages, show_declared_packages,
-    compare_services, disable_service, enable_service, list_services, show_service_status,
-    start_service, stop_service,
-};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use config::{Config, EnvironmentConfig};
-use services::{
-    detect_alacritty_configs, detect_firefox_profiles, detect_starship_configs,
-    detect_zen_profiles, get_browser_profile_files, add_remote, commit_changes, detect_changes,
-    init_repo, list_remotes, push_to_remote, remove_remote, set_remote_url, stage_changes,
+use commands::{
+    add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_packages,
+    compare_services, compare_states, disable_service, display_backups, display_discrepancies,
+    display_preview, display_status, display_validation, enable_service, find_discrepancies,
+    list_backups, list_packages, list_services, migrate_files, restore_backup,
+    show_declared_packages, show_service_status, start_service, stop_service, validate_config,
 };
-use services::git;
-use utils::{DryRun, DotfilesError, Result, logging};
-use file_manager::{add_file, backup_all_files, remove_file, sync_files};
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
+use config::{Config, EnvironmentConfig};
+use file_manager::{add_file, backup_all_files, remove_file, sync_files};
+use services::PackageManagerType;
+use services::git;
+use services::{
+    add_remote, commit_changes, detect_alacritty_configs, detect_changes, detect_firefox_profiles,
+    detect_starship_configs, detect_zen_profiles, get_browser_profile_files, init_repo,
+    list_remotes, push_to_remote, remove_remote, set_remote_url, stage_changes,
+};
 use utils::prompt::{prompt_commit_message, prompt_yes_no};
+use utils::{DotfilesError, DryRun, Result, logging};
 
 #[derive(Parser)]
 #[command(name = "flux")]
@@ -95,6 +95,30 @@ enum Commands {
     Service {
         #[command(subcommand)]
         command: ServiceCommands,
+    },
+    /// Apply configuration declaratively (NixOS-like)
+    Apply {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
+        /// Dry run mode (preview changes without applying)
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip confirmation prompts
+        #[arg(long)]
+        yes: bool,
+        /// Use sudo for system-wide package operations
+        #[arg(long)]
+        sudo: bool,
+        /// Manage system services instead of user services
+        #[arg(long)]
+        system: bool,
+        /// Description for this generation
+        #[arg(long)]
+        description: Option<String>,
+        /// Package manager to use (dnf, packagekit, auto)
+        #[arg(long, default_value = "auto")]
+        package_manager: String,
     },
 }
 
@@ -829,7 +853,7 @@ fn handle_service_command(command: ServiceCommands) -> Result<()> {
     match command {
         ServiceCommands::List { system } => {
             let config = Config::load()?;
-            list_services(&config, !system)?;  // user_mode is inverse of system flag
+            list_services(&config, !system)?; // user_mode is inverse of system flag
         }
         ServiceCommands::Status { name, system } => {
             let config = Config::load()?;
@@ -1081,6 +1105,49 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         }
         Commands::Service { command } => {
             return handle_service_command(command);
+        }
+        Commands::Apply {
+            profile,
+            dry_run,
+            yes,
+            sudo,
+            system,
+            description,
+            package_manager,
+        } => {
+            let config = Config::load()?;
+
+            // Parse package manager type
+            let pm_type = match package_manager.to_lowercase().as_str() {
+                "dnf" => PackageManagerType::Dnf,
+                "packagekit" | "pk" => PackageManagerType::PackageKit,
+                "auto" => PackageManagerType::Auto,
+                _ => {
+                    eprintln!(
+                        "{} Invalid package manager: {}. Use 'dnf', 'packagekit', or 'auto'",
+                        "Error:".red().bold(),
+                        package_manager
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            if dry_run {
+                // In dry-run mode, just show preview
+                let diff = compare_states(&config, profile.as_deref(), sudo, !system, pm_type)?;
+                display_preview(&diff);
+            } else {
+                apply_config(
+                    &config,
+                    profile.as_deref(),
+                    dry_run,
+                    yes,
+                    sudo,
+                    !system,
+                    description.as_deref(),
+                    pm_type,
+                )?;
+            }
         }
     }
 

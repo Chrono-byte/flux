@@ -119,35 +119,41 @@ mod config_validation_tests {
     fn test_config_validation_primary() {
         let config = Config::default();
         let result = config.validate();
-        
+
         // Primary: default config should validate successfully
         assert!(result.is_ok(), "Default config should validate");
-        
+
         // Analogous: manually created config should also validate
         let mut manual_config = Config::default();
         manual_config.general.repo_path = "~/.dotfiles".to_string();
         manual_config.general.current_profile = "default".to_string();
-        
+
         let manual_result = manual_config.validate();
-        assert!(manual_result.is_ok(), "Manually created config should validate");
-        
+        assert!(
+            manual_result.is_ok(),
+            "Manually created config should validate"
+        );
+
         // Backwards compatibility: old configs without optional fields should work
         manual_config.general.default_remote = None;
         manual_config.general.default_branch = None;
-        
+
         let legacy_result = manual_config.validate();
-        assert!(legacy_result.is_ok(), "Config without optional fields should validate");
+        assert!(
+            legacy_result.is_ok(),
+            "Config without optional fields should validate"
+        );
     }
 
     /// Test symlink resolution validation - valid modes
     #[test]
     fn test_symlink_resolution_valid() {
         let valid_modes = vec!["auto", "relative", "absolute", "follow", "replace"];
-        
+
         for mode in valid_modes {
             let mut config = Config::default();
             config.general.symlink_resolution = mode.to_string();
-            
+
             assert!(
                 config.validate().is_ok(),
                 "Symlink mode '{}' should be valid",
@@ -164,11 +170,11 @@ mod config_validation_tests {
             ("Relative", "relative"),
             ("ABSOLUTE", "absolute"),
         ];
-        
+
         for (input, expected) in variations {
             let mut config = Config::default();
             config.general.symlink_resolution = input.to_string();
-            
+
             config.validate().unwrap();
             assert_eq!(
                 config.general.symlink_resolution, expected,
@@ -184,12 +190,12 @@ mod config_validation_tests {
         let mut config = Config::default();
         config.general.repo_path = String::new();
         assert!(config.validate().is_err(), "Empty repo_path should fail");
-        
+
         // Test empty backup_dir
         let mut config = Config::default();
         config.general.backup_dir = String::new();
         assert!(config.validate().is_err(), "Empty backup_dir should fail");
-        
+
         // Test empty profile
         let mut config = Config::default();
         config.general.current_profile = String::new();
@@ -200,11 +206,11 @@ mod config_validation_tests {
     #[test]
     fn test_profile_names_valid() {
         let valid_names = vec!["default", "work", "home", "laptop-1", "profile_test"];
-        
+
         for name in valid_names {
             let mut config = Config::default();
             config.general.current_profile = name.to_string();
-            
+
             assert!(
                 config.validate().is_ok(),
                 "Profile name '{}' should be valid",
@@ -222,11 +228,11 @@ mod config_validation_tests {
             "profile/home",
             "profile:main",
         ];
-        
+
         for name in invalid_names {
             let mut config = Config::default();
             config.general.current_profile = name.to_string();
-            
+
             assert!(
                 config.validate().is_err(),
                 "Profile name '{}' should be invalid",
@@ -239,27 +245,42 @@ mod config_validation_tests {
     #[test]
     fn test_add_file_to_config() {
         let mut config = Config::default();
-        
+
         // Primary: add single file
         config
-            .add_file_to_tool("sway", "config", std::path::Path::new(".config/sway/config"), None)
+            .add_file_to_tool(
+                "sway",
+                "config",
+                std::path::Path::new(".config/sway/config"),
+                None,
+            )
             .unwrap();
 
         assert!(config.tools.contains_key("sway"));
         assert_eq!(config.tools.get("sway").unwrap().files.len(), 1);
-        
+
         // Analogous: add to same tool creates multiple entries
         config
-            .add_file_to_tool("sway", "config.d", std::path::Path::new(".config/sway/config.d"), None)
+            .add_file_to_tool(
+                "sway",
+                "config.d",
+                std::path::Path::new(".config/sway/config.d"),
+                None,
+            )
             .unwrap();
-        
+
         assert_eq!(config.tools.get("sway").unwrap().files.len(), 2);
-        
+
         // Backwards compatible: profile-specific entries
         config
-            .add_file_to_tool("sway", "work", std::path::Path::new(".config/sway/config"), Some("work"))
+            .add_file_to_tool(
+                "sway",
+                "work",
+                std::path::Path::new(".config/sway/config"),
+                Some("work"),
+            )
             .unwrap();
-        
+
         assert_eq!(config.tools.get("sway").unwrap().files.len(), 3);
     }
 }
@@ -337,11 +358,11 @@ mod error_handling_extended_tests {
     fn test_error_creation_and_context() {
         // Primary: create error
         let error = DotfilesError::Path("File not found".to_string());
-        
+
         // Analogous: add context
         let contextualized = error.with_context("during sync");
         let msg = contextualized.to_string();
-        
+
         // Backwards compatible: message contains original and context
         assert!(msg.contains("File not found"));
         assert!(msg.contains("during sync"));
@@ -469,7 +490,7 @@ mod dry_run_extended_tests {
 }
 
 // ============================================================================
-// File Entry Type - Extended Tests  
+// File Entry Type - Extended Tests
 // ============================================================================
 
 #[cfg(test)]
@@ -531,10 +552,10 @@ mod path_handling_tests {
     #[test]
     fn test_basic_path_operations() {
         let path = PathBuf::from("/home/user/.config");
-        
+
         assert!(path.has_root());
         assert_eq!(path.file_name().unwrap(), ".config");
-        
+
         let parent = path.parent().unwrap();
         assert_eq!(parent, PathBuf::from("/home/user"));
     }
@@ -543,7 +564,7 @@ mod path_handling_tests {
     #[test]
     fn test_relative_paths() {
         let rel_path = PathBuf::from(".config/app/config");
-        
+
         assert!(!rel_path.is_absolute());
         assert_eq!(rel_path.file_name().unwrap(), "config");
     }
@@ -554,7 +575,7 @@ mod path_handling_tests {
         let base = PathBuf::from("/home/user");
         let relative = ".config";
         let joined = base.join(relative);
-        
+
         assert_eq!(joined, PathBuf::from("/home/user/.config"));
     }
 }

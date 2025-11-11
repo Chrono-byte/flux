@@ -24,19 +24,19 @@ pub struct PackageSpec {
     /// Package name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     /// Version constraint (e.g., "latest", "1.9.0", "~1.9")
     #[serde(default = "default_latest")]
     pub version: String,
-    
+
     /// Optional: minimum version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_version: Option<String>,
-    
+
     /// Optional: maximum version
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_version: Option<String>,
-    
+
     /// Description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -47,6 +47,7 @@ fn default_latest() -> String {
 }
 
 impl PackageSpec {
+    #[allow(dead_code)]
     pub fn new(name: String) -> Self {
         Self {
             name: Some(name),
@@ -56,7 +57,8 @@ impl PackageSpec {
             description: None,
         }
     }
-    
+
+    #[allow(dead_code)]
     pub fn with_version(name: String, version: String) -> Self {
         Self {
             name: Some(name),
@@ -72,9 +74,11 @@ impl PackageSpec {
 pub struct InstalledPackage {
     pub name: String,
     pub version: String,
+    #[allow(dead_code)]
     pub source: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PackageInfo {
     pub name: String,
@@ -83,6 +87,7 @@ pub struct PackageInfo {
     pub source: PackageSource,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum PackageSource {
     Fedora,
@@ -111,25 +116,26 @@ pub struct ServiceSpec {
     /// Service name (derived from key if not specified)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    
+
     /// Package that provides this service (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package: Option<String>,
-    
+
     /// Should be enabled/started at boot
     #[serde(default)]
     pub enabled: bool,
-    
+
     /// Should be running now
     #[serde(skip_serializing_if = "Option::is_none")]
     pub running: Option<bool>,
-    
+
     /// Autostart on user login
     #[serde(default)]
     pub autostart: bool,
 }
 
 impl ServiceSpec {
+    #[allow(dead_code)]
     pub fn new(name: String) -> Self {
         Self {
             name: Some(name),
@@ -148,7 +154,7 @@ pub struct EnvironmentSpec {
     /// Environment variables to set
     #[serde(default)]
     pub variables: HashMap<String, String>,
-    
+
     /// Shell to use
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<String>,

@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::types::{EnvironmentSpec, FileEntry, PackageSpec, ServiceSpec};
 use crate::utils::error::{DotfilesError, Result};
-use crate::types::{FileEntry, PackageSpec, ServiceSpec, EnvironmentSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
@@ -42,27 +42,25 @@ pub struct ToolConfig {
     pub files: Vec<FileEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     pub general: GeneralConfig,
     #[serde(default)]
     pub tools: HashMap<String, ToolConfig>,
-    
+
     // ==================== New Declarative System Layer ====================
     /// Package declarations (e.g., [packages.git])
     #[serde(default)]
     pub packages: HashMap<String, PackageSpec>,
-    
+
     /// Service declarations (e.g., [services.ssh])
     #[serde(default)]
     pub services: HashMap<String, ServiceSpec>,
-    
+
     /// Environment configuration (e.g., [environment])
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<EnvironmentSpec>,
 }
-
 
 impl Config {
     pub fn load() -> Result<Self> {
@@ -178,16 +176,17 @@ impl Config {
 
         self.tools
             .entry(tool.to_string())
-            .or_insert(ToolConfig {
-                files: Vec::new(),
-            })
+            .or_insert(ToolConfig { files: Vec::new() })
             .files
             .push(entry);
 
         Ok(())
     }
 
-    pub fn get_tracked_files(&self, profile: Option<&str>) -> Result<Vec<crate::types::TrackedFile>> {
+    pub fn get_tracked_files(
+        &self,
+        profile: Option<&str>,
+    ) -> Result<Vec<crate::types::TrackedFile>> {
         let repo_path = self.get_repo_path()?;
         let current_profile = profile.unwrap_or(&self.general.current_profile);
 
@@ -196,7 +195,8 @@ impl Config {
         for (tool, tool_config) in &self.tools {
             for file in &tool_config.files {
                 // Include if no profile specified, or if profile matches current_profile or is None
-                let include = file.profile.is_none() || file.profile.as_deref() == Some(current_profile);
+                let include =
+                    file.profile.is_none() || file.profile.as_deref() == Some(current_profile);
 
                 if include {
                     let repo_path = repo_path.join(tool).join(&file.repo);
