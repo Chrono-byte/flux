@@ -11,15 +11,14 @@ mod tests;
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use commands::{
-    add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_packages,
-    compare_states, display_backups, display_discrepancies, display_preview, display_status,
-    display_validation, find_discrepancies, list_backups, list_packages, migrate_files,
-    restore_backup, show_declared_packages, validate_config,
+    add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_states,
+    display_backups, display_discrepancies, display_preview, display_status,
+    display_validation, find_discrepancies, list_backups, migrate_files,
+    restore_backup, validate_config,
 };
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use config::{Config, EnvironmentConfig};
 use file_manager::{add_file, backup_all_files, remove_file, sync_files};
-use services::PackageManagerType;
 use services::git;
 use services::{
     add_remote, commit_changes, detect_alacritty_configs, detect_changes, detect_firefox_profiles,
@@ -61,15 +60,9 @@ enum Commands {
         /// Skip confirmation prompts
         #[arg(long)]
         yes: bool,
-        /// Use sudo for system-wide package operations
-        #[arg(long)]
-        sudo: bool,
         /// Description for this generation
         #[arg(long)]
         description: Option<String>,
-        /// Package manager to use (dnf, packagekit, auto)
-        #[arg(long, default_value = "auto")]
-        package_manager: String,
     },
     /// Profile management
     Profile {
@@ -85,11 +78,6 @@ enum Commands {
     Backup {
         #[command(subcommand)]
         command: BackupCommands,
-    },
-    /// Package management operations
-    Package {
-        #[command(subcommand)]
-        command: PackageCommands,
     },
     /// Manage remote repositories
     Remote {
@@ -330,23 +318,6 @@ enum RemoteCommands {
     },
 }
 
-#[derive(Subcommand)]
-enum PackageCommands {
-    /// Show packages declared in configuration
-    Show,
-    /// List all installed packages on the system
-    List {
-        /// Use sudo for system-wide package queries
-        #[arg(long)]
-        sudo: bool,
-    },
-    /// Compare declared packages vs installed packages
-    Status {
-        /// Use sudo for system-wide package queries
-        #[arg(long)]
-        sudo: bool,
-    },
-}
 
 #[derive(Subcommand)]
 enum ConfigCommands {
@@ -805,23 +776,6 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
     Ok(())
 }
 
-fn handle_package_command(command: PackageCommands) -> Result<()> {
-    match command {
-        PackageCommands::Show => {
-            let config = Config::load()?;
-            show_declared_packages(&config)?;
-        }
-        PackageCommands::List { sudo } => {
-            let config = Config::load()?;
-            list_packages(&config, sudo)?;
-        }
-        PackageCommands::Status { sudo } => {
-            let config = Config::load()?;
-            compare_packages(&config, sudo)?;
-        }
-    }
-    Ok(())
-}
 
 fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
     match command {
@@ -943,30 +897,13 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             profile,
             dry_run,
             yes,
-            sudo,
             description,
-            package_manager,
         } => {
             let config = Config::load()?;
 
-            // Parse package manager type
-            let pm_type = match package_manager.to_lowercase().as_str() {
-                "dnf" => PackageManagerType::Dnf,
-                "packagekit" | "pk" => PackageManagerType::PackageKit,
-                "auto" => PackageManagerType::Auto,
-                _ => {
-                    eprintln!(
-                        "{} Invalid package manager: {}. Use 'dnf', 'packagekit', or 'auto'",
-                        "Error:".red().bold(),
-                        package_manager
-                    );
-                    std::process::exit(1);
-                }
-            };
-
             if dry_run {
                 // In dry-run mode, just show preview
-                let diff = compare_states(&config, profile.as_deref(), sudo, pm_type)?;
+                let diff = compare_states(&config, profile.as_deref())?;
                 display_preview(&diff);
             } else {
                 use crate::commands::ApplyOptions;
@@ -975,9 +912,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     profile: profile.as_deref(),
                     dry_run,
                     yes,
-                    use_sudo: sudo,
                     description: description.as_deref(),
-                    package_manager_type: pm_type,
                 })?;
             }
         }
@@ -1052,9 +987,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         },
         Commands::Backup { command } => {
             return handle_backup_command(command);
-        }
-        Commands::Package { command } => {
-            return handle_package_command(command);
         }
         Commands::Remote { command } => {
             let config = Config::load()?;

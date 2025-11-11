@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
-use crate::services::{FileOperation, PackageManagerType, Transaction};
+use crate::services::{FileOperation, Transaction};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
@@ -21,12 +21,8 @@ pub struct ApplyOptions<'a> {
     pub dry_run: bool,
     /// Auto-confirm without prompting
     pub yes: bool,
-    /// Use sudo for operations requiring elevated privileges
-    pub use_sudo: bool,
     /// Optional description for this apply operation
     pub description: Option<&'a str>,
-    /// Package manager type to use
-    pub package_manager_type: PackageManagerType,
 }
 
 /// State comparison result showing what needs to change
@@ -34,29 +30,21 @@ pub struct ApplyOptions<'a> {
 pub struct StateDiff {
     /// Files that need to be synced
     pub files_to_sync: Vec<TrackedFile>,
-    /// Packages that need to be installed
-    pub packages_to_install: Vec<(String, String)>,
-    /// Packages that need to be removed
-    pub packages_to_remove: Vec<String>,
 }
 
 impl StateDiff {
     pub fn new() -> Self {
         Self {
             files_to_sync: Vec::new(),
-            packages_to_install: Vec::new(),
-            packages_to_remove: Vec::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.files_to_sync.is_empty()
-            && self.packages_to_install.is_empty()
-            && self.packages_to_remove.is_empty()
     }
 
     pub fn total_changes(&self) -> usize {
-        self.files_to_sync.len() + self.packages_to_install.len() + self.packages_to_remove.len()
+        self.files_to_sync.len()
     }
 }
 
@@ -64,8 +52,6 @@ impl StateDiff {
 pub fn compare_states(
     config: &Config,
     profile: Option<&str>,
-    use_sudo: bool,
-    package_manager_type: PackageManagerType,
 ) -> Result<StateDiff> {
     let mut diff = StateDiff::new();
 
@@ -74,33 +60,6 @@ pub fn compare_states(
     for file in tracked_files {
         if needs_sync(&file)? {
             diff.files_to_sync.push(file);
-        }
-    }
-
-    // Compare packages
-    let package_manager = package_manager_type.create_manager(use_sudo);
-    for (name, spec) in &config.packages {
-        let package_name = spec.name.as_ref().unwrap_or(name);
-        match package_manager.is_installed(package_name) {
-            Ok(false) => {
-                diff.packages_to_install
-                    .push((package_name.clone(), spec.version.clone()));
-            }
-            Ok(true) => {
-                // Check version if specified
-                if spec.version != "latest"
-                    && let Ok(Some(installed_version)) = package_manager.get_version(package_name)
-                {
-                    // Simple version comparison (could be enhanced)
-                    if installed_version != spec.version {
-                        diff.packages_to_install
-                            .push((package_name.clone(), spec.version.clone()));
-                    }
-                }
-            }
-            Err(_) => {
-                // Package manager unavailable, skip
-            }
         }
     }
 
@@ -170,10 +129,7 @@ fn files_differ(path1: &Path, path2: &Path) -> Result<bool> {
 pub fn display_preview(diff: &StateDiff) {
     println!("\n{} Preview of changes:", "→".cyan().bold());
 
-    if diff.files_to_sync.is_empty()
-        && diff.packages_to_install.is_empty()
-        && diff.packages_to_remove.is_empty()
-    {
+    if diff.files_to_sync.is_empty() {
         println!(
             "  {} System is already in sync with configuration",
             "✓".green()
@@ -192,28 +148,6 @@ pub fn display_preview(diff: &StateDiff) {
         }
     }
 
-    if !diff.packages_to_install.is_empty() {
-        println!(
-            "\n  {} Packages to install ({}):",
-            "📦".cyan(),
-            diff.packages_to_install.len()
-        );
-        for (name, version) in &diff.packages_to_install {
-            println!("    • {} ({})", name, version);
-        }
-    }
-
-    if !diff.packages_to_remove.is_empty() {
-        println!(
-            "\n  {} Packages to remove ({}):",
-            "🗑️".cyan(),
-            diff.packages_to_remove.len()
-        );
-        for name in &diff.packages_to_remove {
-            println!("    • {}", name);
-        }
-    }
-
     println!("\n  {} Total changes: {}", "→".cyan(), diff.total_changes());
 }
 
@@ -225,8 +159,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     let diff = compare_states(
         options.config,
         options.profile,
-        options.use_sudo,
-        options.package_manager_type,
     )?;
 
     if diff.is_empty() {
@@ -258,8 +190,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     let temp_dir = TempDir::new()?.path().to_path_buf();
     let mut transaction = Transaction::begin(
         temp_dir.clone(),
-        options.use_sudo,
-        options.package_manager_type,
     )?;
 
     // Add metadata
@@ -309,18 +239,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
                 resolution: symlink_resolution,
             });
         }
-    }
-
-    // Add package operations
-    for (name, version) in &diff.packages_to_install {
-        transaction.add_operation(FileOperation::InstallPackage {
-            name: name.clone(),
-            version: version.clone(),
-        });
-    }
-
-    for name in &diff.packages_to_remove {
-        transaction.add_operation(FileOperation::RemovePackage { name: name.clone() });
     }
 
     // Execute transaction

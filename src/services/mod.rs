@@ -1,6 +1,5 @@
 pub mod browser;
 pub mod git;
-pub mod package_manager;
 pub mod transactions;
 
 pub use browser::{
@@ -11,5 +10,4 @@ pub use git::{
     add_remote, commit_changes, detect_changes, init_repo, list_remotes, push_to_remote,
     remove_remote, set_remote_url, stage_changes,
 };
-pub use package_manager::{PackageManager, PackageManagerType};
 pub use transactions::{FileOperation, Transaction};

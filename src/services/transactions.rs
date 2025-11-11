@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
-use crate::services::{PackageManager, PackageManagerType};
 use crate::types::SymlinkResolution;
 use crate::utils::error::{DotfilesError, Result};
 use std::collections::HashMap;
@@ -41,10 +40,6 @@ pub enum FileOperation {
         backup_path: PathBuf,
         resolution: SymlinkResolution,
     },
-    /// Install a package
-    InstallPackage { name: String, version: String },
-    /// Remove a package
-    RemovePackage { name: String },
 }
 
 /// Result of executing an operation
@@ -71,16 +66,12 @@ pub struct Transaction {
     pub backups: Vec<PathBuf>,
     /// Metadata for the transaction
     pub metadata: HashMap<String, String>,
-    /// Package manager instance (boxed trait object)
-    package_manager: Option<Box<dyn PackageManager>>,
 }
 
 impl Transaction {
     /// Begin a new transaction
     pub fn begin(
         temp_dir: PathBuf,
-        use_sudo: bool,
-        package_manager_type: PackageManagerType,
     ) -> Result<Self> {
         let id = Uuid::new_v4().to_string();
 
@@ -88,10 +79,6 @@ impl Transaction {
         if !temp_dir.exists() {
             fs::create_dir_all(&temp_dir)?;
         }
-
-        // Create package manager based on type
-        let package_manager: Option<Box<dyn PackageManager>> =
-            Some(package_manager_type.create_manager(use_sudo));
 
         Ok(Self {
             id,
@@ -101,7 +88,6 @@ impl Transaction {
             results: Vec::new(),
             backups: Vec::new(),
             metadata: HashMap::new(),
-            package_manager,
         })
     }
 
@@ -161,21 +147,6 @@ impl Transaction {
                         // Will be created during prepare
                     }
                 }
-                FileOperation::InstallPackage { name, .. } => {
-                    // Package validation happens during execution
-                    if name.is_empty() {
-                        return Err(DotfilesError::Config(
-                            "Package name cannot be empty".to_string(),
-                        ));
-                    }
-                }
-                FileOperation::RemovePackage { name } => {
-                    if name.is_empty() {
-                        return Err(DotfilesError::Config(
-                            "Package name cannot be empty".to_string(),
-                        ));
-                    }
-                }
             }
         }
 
@@ -228,10 +199,6 @@ impl Transaction {
                     config,
                     fs_manager,
                 ),
-                FileOperation::InstallPackage { name, version } => {
-                    self.execute_install_package(name, version)?
-                }
-                FileOperation::RemovePackage { name } => self.execute_remove_package(name)?,
             };
 
             self.results.push(result.clone());
@@ -285,45 +252,6 @@ impl Transaction {
                         )));
                     }
                 }
-                FileOperation::InstallPackage { name, .. } => {
-                    if let Some(ref pm) = self.package_manager {
-                        match pm.is_installed(name) {
-                            Ok(true) => {
-                                // Package is installed, verification passed
-                            }
-                            Ok(false) => {
-                                return Err(DotfilesError::Config(format!(
-                                    "Verification failed: package {} is not installed",
-                                    name
-                                )));
-                            }
-                            Err(e) => {
-                                // Package manager error, but don't fail verification
-                                // (might be unavailable in some environments)
-                                log::warn!("Could not verify package installation: {}", e);
-                            }
-                        }
-                    }
-                }
-                FileOperation::RemovePackage { name } => {
-                    if let Some(ref pm) = self.package_manager {
-                        match pm.is_installed(name) {
-                            Ok(false) => {
-                                // Package is not installed, verification passed
-                            }
-                            Ok(true) => {
-                                return Err(DotfilesError::Config(format!(
-                                    "Verification failed: package {} is still installed",
-                                    name
-                                )));
-                            }
-                            Err(e) => {
-                                // Package manager error, but don't fail verification
-                                log::warn!("Could not verify package removal: {}", e);
-                            }
-                        }
-                    }
-                }
                 _ => {
                     // Other operations verified by their success flag
                 }
@@ -368,26 +296,6 @@ impl Transaction {
                                 let _ = fs_manager.copy_dir_all(backup_path, target);
                             } else {
                                 let _ = fs_manager.copy(backup_path, target);
-                            }
-                        }
-                    }
-                    FileOperation::InstallPackage { name, .. } => {
-                        // Rollback: remove the package we installed
-                        if let Some(ref pm) = self.package_manager {
-                            // Check if still installed before attempting removal
-                            if let Ok(true) = pm.is_installed(name) {
-                                let _ = pm.remove(&[name]);
-                            }
-                        }
-                    }
-                    FileOperation::RemovePackage { name, .. } => {
-                        // Rollback: reinstall the package we removed
-                        // Note: We don't know the exact version that was installed,
-                        // so we'll install the latest version
-                        if let Some(ref pm) = self.package_manager {
-                            // Check if not installed before attempting installation
-                            if let Ok(false) = pm.is_installed(name) {
-                                let _ = pm.install(&[(name, "latest")]);
                             }
                         }
                     }
@@ -624,141 +532,6 @@ impl Transaction {
             },
             success: true,
             error: None,
-        }
-    }
-
-    fn execute_install_package(&mut self, name: &str, version: &str) -> Result<OperationResult> {
-        let package_name = name.to_string();
-        let package_version = version.to_string();
-
-        if let Some(ref pm) = self.package_manager {
-            // Check if already installed
-            match pm.is_installed(&package_name) {
-                Ok(true) => {
-                    // Already installed, check version if specified
-                    if package_version != "latest" {
-                        if let Ok(Some(installed_version)) = pm.get_version(&package_name)
-                            && installed_version == package_version
-                        {
-                            // Already at correct version
-                            return Ok(OperationResult {
-                                operation: FileOperation::InstallPackage {
-                                    name: package_name,
-                                    version: package_version,
-                                },
-                                success: true,
-                                error: None,
-                            });
-                        }
-                    } else {
-                        // Already installed, no version specified
-                        return Ok(OperationResult {
-                            operation: FileOperation::InstallPackage {
-                                name: package_name,
-                                version: package_version,
-                            },
-                            success: true,
-                            error: None,
-                        });
-                    }
-                }
-                Ok(false) => {
-                    // Not installed, proceed with installation
-                }
-                Err(e) => {
-                    // Package manager error
-                    return Ok(OperationResult {
-                        operation: FileOperation::InstallPackage {
-                            name: package_name.clone(),
-                            version: package_version.clone(),
-                        },
-                        success: false,
-                        error: Some(format!("Failed to check if package is installed: {}", e)),
-                    });
-                }
-            }
-
-            // Install the package
-            match pm.install(&[(&package_name, &package_version)]) {
-                Ok(()) => Ok(OperationResult {
-                    operation: FileOperation::InstallPackage {
-                        name: package_name,
-                        version: package_version,
-                    },
-                    success: true,
-                    error: None,
-                }),
-                Err(e) => Ok(OperationResult {
-                    operation: FileOperation::InstallPackage {
-                        name: package_name,
-                        version: package_version,
-                    },
-                    success: false,
-                    error: Some(format!("Failed to install package: {}", e)),
-                }),
-            }
-        } else {
-            // No package manager available
-            Ok(OperationResult {
-                operation: FileOperation::InstallPackage {
-                    name: package_name,
-                    version: package_version,
-                },
-                success: false,
-                error: Some("Package manager not available".to_string()),
-            })
-        }
-    }
-
-    fn execute_remove_package(&mut self, name: &str) -> Result<OperationResult> {
-        let package_name = name.to_string();
-
-        if let Some(ref pm) = self.package_manager {
-            // Check if installed
-            match pm.is_installed(&package_name) {
-                Ok(false) => {
-                    // Not installed, nothing to do
-                    return Ok(OperationResult {
-                        operation: FileOperation::RemovePackage { name: package_name },
-                        success: true,
-                        error: None,
-                    });
-                }
-                Ok(true) => {
-                    // Installed, proceed with removal
-                }
-                Err(e) => {
-                    // Package manager error
-                    return Ok(OperationResult {
-                        operation: FileOperation::RemovePackage {
-                            name: package_name.clone(),
-                        },
-                        success: false,
-                        error: Some(format!("Failed to check if package is installed: {}", e)),
-                    });
-                }
-            }
-
-            // Remove the package
-            match pm.remove(&[&package_name]) {
-                Ok(()) => Ok(OperationResult {
-                    operation: FileOperation::RemovePackage { name: package_name },
-                    success: true,
-                    error: None,
-                }),
-                Err(e) => Ok(OperationResult {
-                    operation: FileOperation::RemovePackage { name: package_name },
-                    success: false,
-                    error: Some(format!("Failed to remove package: {}", e)),
-                }),
-            }
-        } else {
-            // No package manager available
-            Ok(OperationResult {
-                operation: FileOperation::RemovePackage { name: package_name },
-                success: false,
-                error: Some("Package manager not available".to_string()),
-            })
         }
     }
 }

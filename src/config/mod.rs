@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::{EnvironmentSpec, FileEntry, PackageSpec, SymlinkResolution};
+use crate::types::{EnvironmentSpec, FileEntry, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,10 +59,6 @@ pub struct Config {
     pub tools: HashMap<String, ToolConfig>,
 
     // ==================== New Declarative System Layer ====================
-    /// Package declarations (e.g., [packages.git])
-    #[serde(default)]
-    pub packages: HashMap<String, PackageSpec>,
-
     /// Environment configuration (e.g., [environment])
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<EnvironmentSpec>,

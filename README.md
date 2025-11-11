@@ -90,15 +90,9 @@ flux file status
 
 - `flux config sync [--dry-run]` - Sync XDG config to repo
 
-### Package Management
-
-- `flux package show` - Show declared packages
-- `flux package list [--sudo]` - List installed packages
-- `flux package status [--sudo]` - Compare declared vs installed packages
-
 ### Apply Configuration
 
-- `flux apply [--profile NAME] [--dry-run] [--yes] [--sudo]` - Apply configuration declaratively (packages and files)
+- `flux apply [--profile NAME] [--dry-run] [--yes]` - Apply configuration declaratively (files)
 
 ### Git Operations
 
@@ -150,10 +144,6 @@ files = [
 files = [
     { repo = "settings.json", dest = ".config/Cursor/User/settings.json" }
 ]
-
-[packages]
-sway = { name = "sway", version = "latest" }
-firefox = { name = "firefox", version = "latest" }
 ```
 
 ### Symlink Resolution
@@ -254,14 +244,11 @@ flux file sync
 ### Declarative Configuration
 
 ```bash
-# Apply packages and files
+# Apply files
 flux apply
 
 # Preview changes
 flux apply --dry-run
-
-# Apply with sudo for system packages
-flux apply --sudo
 ```
 
 ## Troubleshooting
