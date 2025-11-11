@@ -313,7 +313,10 @@ pub struct FileSystemManager<'a> {
 impl<'a> FileSystemManager<'a> {
     /// Create a new FileSystemManager.
     pub fn new(dry_run: &'a mut DryRun, is_dry_run: bool) -> Self {
-        Self { dry_run, is_dry_run }
+        Self {
+            dry_run,
+            is_dry_run,
+        }
     }
 
     pub fn create_dir_all(&mut self, path: &Path) -> Result<()> {
@@ -338,7 +341,11 @@ impl<'a> FileSystemManager<'a> {
         }
 
         if self.is_dry_run {
-            println!("  [DRY RUN] Would copy file: {} -> {}", from.display(), to.display());
+            println!(
+                "  [DRY RUN] Would copy file: {} -> {}",
+                from.display(),
+                to.display()
+            );
             self.dry_run.log_operation(Operation::CopyFile {
                 from: from.to_path_buf(),
                 to: to.to_path_buf(),
@@ -558,8 +565,8 @@ fn determine_sync_action(file: &TrackedFile) -> Result<SyncAction> {
     println!("  Destination exists");
 
     // Check if it's a symlink and already correctly linked
-    if file.dest_path.is_symlink() {
-        if let Ok(link_target) = fs::read_link(&file.dest_path) {
+    if file.dest_path.is_symlink()
+        && let Ok(link_target) = fs::read_link(&file.dest_path) {
             println!("  Is symlink pointing to: {}", link_target.display());
             let resolved_target = if link_target.is_absolute() {
                 link_target
@@ -580,7 +587,6 @@ fn determine_sync_action(file: &TrackedFile) -> Result<SyncAction> {
                 return Ok(SyncAction::ResolveConflict);
             }
         }
-    }
 
     println!("  Is regular file/directory (not symlink)");
 
@@ -712,9 +718,8 @@ fn create_symlink_managed(
                 .unwrap_or_else(|| file.repo_path.clone())
         }
         SymlinkResolution::Relative => {
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap()).ok_or_else(
-                || DotfilesError::Path("Cannot create relative symlink".to_string()),
-            )?
+            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
+                .ok_or_else(|| DotfilesError::Path("Cannot create relative symlink".to_string()))?
         }
         SymlinkResolution::Absolute => file.repo_path.clone(),
         SymlinkResolution::Follow => {

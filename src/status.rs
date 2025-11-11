@@ -4,7 +4,7 @@ use crate::file_manager::is_file_locked;
 use crate::types::TrackedFile;
 use colored::Colorize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub enum FileStatus {
@@ -63,7 +63,21 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
         }
 
         // Check if symlink points to correct location
-        if link_target != file.repo_path {
+        // Resolve relative symlink targets to absolute paths for comparison
+        let resolved_target = if link_target.is_absolute() {
+            link_target
+        } else {
+            file.dest_path
+                .parent()
+                .map(|p| p.join(&link_target))
+                .unwrap_or(link_target)
+        };
+
+        // Normalize both paths before comparing
+        let normalized_target = normalize_path(&resolved_target);
+        let normalized_repo = normalize_path(&file.repo_path);
+
+        if normalized_target != normalized_repo {
             return Ok(FileStatus::OutOfSync);
         }
 
@@ -170,4 +184,10 @@ pub fn display_status(reports: &[StatusReport]) {
         synced_count.to_string().green(),
         issues_count.to_string().yellow()
     );
+}
+
+/// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails
+fn normalize_path(path: &Path) -> PathBuf {
+    // Try to canonicalize, but fall back to the path itself if it fails
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }

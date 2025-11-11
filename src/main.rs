@@ -231,7 +231,8 @@ fn run(cli: Cli) -> Result<()> {
         } => {
             let mut config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
-            let mut fs_manager = file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
+            let mut fs_manager =
+                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
 
             let source_path = std::path::Path::new(&file);
             if !source_path.exists() {
@@ -270,7 +271,8 @@ fn run(cli: Cli) -> Result<()> {
         Commands::AddBrowser { browser, dry_run } => {
             let mut config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
-            let mut fs_manager = file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
+            let mut fs_manager =
+                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
             let mut added_count = 0;
 
             if browser == "all" || browser == "firefox" {
@@ -612,7 +614,8 @@ fn run(cli: Cli) -> Result<()> {
         } => {
             let mut config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
-            let mut fs_manager = file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
+            let mut fs_manager =
+                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
             remove_file(&mut config, &tool, &file, &mut fs_manager)?;
 
             if dry_run {

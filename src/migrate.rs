@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::dry_run::DryRun;
 use crate::error::Result;
-use crate::file_manager::{is_file_locked, FileSystemManager};
+use crate::file_manager::{FileSystemManager, is_file_locked};
 use crate::types::{SymlinkResolution, TrackedFile};
 use crate::untracked::IssueType;
 use colored::Colorize;
@@ -210,13 +210,11 @@ fn migrate_file(
                 if !fs_manager.is_dry_run {
                     println!("  {} Copied to repo", "✓".green());
                 }
-            } else {
-                if !fs_manager.is_dry_run {
-                    println!(
-                        "  {} Warning: Cannot read source file, repo may be empty",
-                        "⚠".yellow()
-                    );
-                }
+            } else if !fs_manager.is_dry_run {
+                println!(
+                    "  {} Warning: Cannot read source file, repo may be empty",
+                    "⚠".yellow()
+                );
             }
 
             // Remove old symlink/file (fs_manager handles dry run)

@@ -77,7 +77,12 @@ fn collect_backup_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 /// - Logs all operations (directory creation, file removal, file copy) to the `dry_run` tracker
 /// - Returns early without performing any file system operations
 /// - No files are modified or restored
-pub fn restore_backup(backup: &BackupInfo, target_path: &Path, dry_run: &mut DryRun, is_dry_run_mode: bool) -> Result<()> {
+pub fn restore_backup(
+    backup: &BackupInfo,
+    target_path: &Path,
+    dry_run: &mut DryRun,
+    is_dry_run_mode: bool,
+) -> Result<()> {
     use crate::dry_run::Operation;
 
     // Find the corresponding file in backup

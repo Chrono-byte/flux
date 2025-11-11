@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::types::TrackedFile;
 use colored::Colorize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub enum ValidationIssue {
@@ -42,11 +42,28 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
         }
 
         // Check if destination is a symlink
-        if file.dest_path.exists()
-            && let Ok(link_target) = fs::read_link(&file.dest_path)
-        {
-            // Check if symlink points to correct location
-            if link_target != file.repo_path {
+        if file.dest_path.exists() && file.dest_path.is_symlink() {
+            if let Ok(link_target) = fs::read_link(&file.dest_path) {
+                // Check if symlink points to correct location
+                // Resolve relative symlink targets to absolute paths for comparison
+                let resolved_target = if link_target.is_absolute() {
+                    link_target
+                } else {
+                    file.dest_path
+                        .parent()
+                        .map(|p| p.join(&link_target))
+                        .unwrap_or(link_target)
+                };
+
+                // Normalize both paths before comparing
+                let normalized_target = normalize_path(&resolved_target);
+                let normalized_repo = normalize_path(&file.repo_path);
+
+                if normalized_target != normalized_repo {
+                    issues.push(ValidationIssue::InvalidSymlink(file.clone()));
+                }
+            } else {
+                // It's a symlink but we can't read it (broken)
                 issues.push(ValidationIssue::InvalidSymlink(file.clone()));
             }
         }
@@ -183,4 +200,10 @@ pub fn display_validation(report: &ValidationReport) {
         "Summary:".bold(),
         report.issues.len().to_string().red()
     );
+}
+
+/// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails
+fn normalize_path(path: &Path) -> PathBuf {
+    // Try to canonicalize, but fall back to the path itself if it fails
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }

@@ -61,7 +61,6 @@ impl Config {
     /// - Returns early without writing to disk
     /// - Configuration changes remain in memory only
     pub fn save(&self, is_dry_run: bool) -> Result<()> {
-
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?
             .join("dotfiles-manager");
