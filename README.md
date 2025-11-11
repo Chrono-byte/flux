@@ -1,155 +1,140 @@
 # Flux
 
-A powerful, symlink-based dotfiles manager written in Rust. Manage your
-configuration files across multiple machines and profiles with ease.
+A symlink-based dotfiles manager written in Rust. Manage your configuration files across multiple machines and profiles with ease.
 
 ## Features
 
-- **Symlink-based sync**: Files stored in repository, symlinked to home
-  directory
+- **Symlink-based sync**: Files stored in repository, symlinked to home directory
 - **Profile support**: Multiple profiles with per-file overrides
-- **Browser integration**: Auto-detect and backup Firefox and Zen browser
-  settings
-- **Git integration**: Automatic commit with user-prompted messages, remote
-  management, and push support
-- **Remote management**: Add, remove, and manage git remotes (GitHub, GitLab,
-  Gitea, etc.)
-- **Push to remote**: Push your dotfiles with support for SSH and HTTPS
-  authentication
-- **File locking detection**: Skips locked files with warnings (using `flock`)
+- **Browser integration**: Auto-detect and backup Firefox and Zen browser settings
+- **Git integration**: Automatic commits, remote management, and push support (SSH/HTTPS)
+- **File locking detection**: Skips locked files with warnings
 - **Dry-run mode**: Preview changes before applying
-- **Status checking**: See sync status of all tracked files
 - **Backup & restore**: Automatic backups with restore capability
 - **Validation**: Check configuration integrity
 
 ## Installation
 
+### From Source
+
 ```bash
 git clone <repository-url>
 cd flux
+cargo install --path .
+```
+
+Installs to `~/.cargo/bin/flux`. Ensure `~/.cargo/bin` is in your PATH.
+
+### Alternatives
+
+**From Git:**
+
+```bash
+cargo install --git <repository-url>
+```
+
+**From crates.io (if published):**
+
+```bash
+cargo install flux
+```
+
+**System-wide (manual):**
+
+```bash
 cargo build --release
 sudo cp target/release/flux /usr/local/bin/
 ```
 
 ## Quick Start
 
-1. **Initialize repository**:
+```bash
+# Initialize repository
+flux init
 
-   ```bash
-   flux init
-   ```
+# Add a file
+flux file add sway ~/.config/sway/config --dest .config/sway/config
 
-2. **Add a file**:
+# Sync files (create symlinks)
+flux file sync
 
-   ```bash
-   flux add sway ~/.config/sway/config --dest .config/sway/config
-   ```
-
-3. **Sync files**:
-
-   ```bash
-   flux sync
-   ```
-
-4. **Check status**:
-
-   ```bash
-   flux status
-   ```
+# Check status
+flux file status
+```
 
 ## Commands
 
-### `init [--repo-path PATH]`
+### File Management
 
-Initialize dotfiles repository. Creates config directory and sets up repository
-structure.
+- `flux file add <tool> <file> [--dest PATH] [--profile NAME]` - Add file to tracking
+- `flux file add-browser [browser]` - Auto-detect and add browser profiles (firefox, zen, alacritty, starship, or all)
+- `flux file sync [--profile NAME] [--dry-run]` - Sync tracked files (create symlinks)
+- `flux file status [--profile NAME]` - Show sync status of all tracked files
+- `flux file list [--profile NAME]` - List all tracked files
+- `flux file remove <tool> <file>` - Remove file from tracking
 
-### `add <tool> <file> [--dest PATH] [--profile NAME]`
+### Profiles
 
-Add a file to tracking under a tool section.
+- `flux profile list` - List all profiles
+- `flux profile create <name>` - Create a new profile
+- `flux profile switch <name>` - Switch to a different profile
 
-**Examples**:
+### Backup & Restore
 
-```bash
-flux add sway ~/.config/sway/config
-flux add cursor ~/.config/Cursor/User/settings.json --dest .config/Cursor/User/settings.json
-```
+- `flux backup create [--profile NAME]` - Create backup of tracked files
+- `flux backup restore [backup] [--file PATH]` - Restore from backup (use `latest` or index)
+- `flux backup list` - List available backups
+- `flux backup cleanup [--keep N] [--days N]` - Clean up old backups
 
-### `add-browser [browser]`
+### Configuration Management Commands
 
-Auto-detect and add browser profiles (Firefox and Zen). Defaults to `all`.
+- `flux config sync [--dry-run]` - Sync XDG config to repo
 
-**Examples**:
+### Package & Service Management
 
-```bash
-flux add-browser
-flux add-browser firefox
-flux add-browser zen
-```
+- `flux package show` - Show declared packages
+- `flux package list [--sudo]` - List installed packages
+- `flux package status [--sudo]` - Compare declared vs installed packages
+- `flux service list [--system]` - List declared services
+- `flux service status <name> [--system]` - Show service status
+- `flux service compare [--system]` - Compare declared vs actual service states
+- `flux service enable <name> [--system]` - Enable a service
+- `flux service start <name> [--system]` - Start a service
+- `flux service disable <name> [--system]` - Disable a service
+- `flux service stop <name> [--system]` - Stop a service
 
-### `sync [--profile NAME] [--dry-run]`
+### Apply Configuration
 
-Sync tracked files (create symlinks). Use `--dry-run` to preview changes.
+- `flux apply [--profile NAME] [--dry-run] [--yes] [--sudo] [--system]` - Apply configuration declaratively (packages, services, files)
 
-**Examples**:
+### Git Operations
 
-```bash
-flux sync
-flux sync --profile work
-flux sync --dry-run
-```
+- `flux remote list` - List remotes
+- `flux remote add <name> <url>` - Add remote
+- `flux remote remove <name>` - Remove remote
+- `flux remote set-url <name> <url>` - Change remote URL
+- `flux push [--remote NAME] [--branch NAME] [--set-upstream]` - Push to remote
 
-### `status [--profile NAME]`
+### Maintenance
 
-Show sync status of all tracked files.
+- `flux maintain check [--profile NAME]` - Check for discrepancies
+- `flux maintain validate` - Validate configuration integrity
+- `flux maintain migrate [--profile NAME]` - Migrate files with discrepancies
+- `flux maintain gitignore` - Generate .gitignore file
 
-### `list [--profile NAME]`
+### Completions
 
-List all tracked files.
-
-### `remove <tool> <file>`
-
-Remove a file from tracking.
-
-### `restore [backup] [--file PATH]`
-
-Restore files from backup. Use `latest` or backup index number.
-
-**Examples**:
-
-```bash
-flux restore latest
-flux restore 1
-flux restore latest --file ~/.config/sway/config
-```
-
-### `validate`
-
-Validate configuration integrity. Checks for missing files, broken symlinks, and
-orphaned entries.
-
-### `profile create <name>`
-
-Create a new profile.
-
-### `profile switch <name>`
-
-Switch to a different profile.
-
-### `profile list`
-
-List all available profiles.
+- `flux completion <shell>` - Generate shell completions (zsh, bash, fish, etc.)
 
 ## Configuration
 
-Configuration can be stored in one of several locations, checked in this order:
+Configuration is checked in this order:
 
-1. **Environment variable** - Set `DOTFILES_CONFIG=/path/to/config.toml`
-2. **Repository** - `~/.dotfiles/config.toml` (allows keeping config with dotfiles)
-3. **System config** - `~/.config/flux/config.toml` (XDG standard location)
+1. Environment variable: `DOTFILES_CONFIG=/path/to/config.toml`
+2. Repository: `~/.dotfiles/config.toml`
+3. System config: `~/.config/flux/config.toml` (XDG standard)
 
-The first found configuration file is used. This means you can optionally keep your
-configuration file in your dotfiles repository for easier portability and version control.
+The first found file is used.
 
 ### Example Configuration
 
@@ -157,8 +142,10 @@ configuration file in your dotfiles repository for easier portability and versio
 [general]
 repo_path = "~/.dotfiles"
 current_profile = "default"
-backup_dir = "~/.dotfiles/.backups"
+backup_dir = "~/.dotfiles-backups"
 symlink_resolution = "auto"  # auto, relative, absolute, follow, replace
+default_remote = "origin"
+default_branch = "main"
 
 [tools.sway]
 files = [
@@ -171,26 +158,25 @@ files = [
     { repo = "settings.json", dest = ".config/Cursor/User/settings.json" }
 ]
 
-[tools.firefox]
-files = [
-    { repo = "prefs.js", dest = ".mozilla/firefox/xxxxx.default/prefs.js" },
-    { repo = "extensions", dest = ".mozilla/firefox/xxxxx.default/extensions" }
-]
+[packages]
+sway = { name = "sway", version = "latest" }
+firefox = { name = "firefox", version = "latest" }
+
+[services]
+sway = { enabled = true, started = true }
 ```
 
-### Symlink Resolution Options
+### Symlink Resolution
 
-- `auto`: Use relative if possible, absolute if needed (default)
-- `relative`: Always create relative symlinks
-- `absolute`: Always create absolute symlinks
-- `follow`: Follow existing symlinks, replace target
-- `replace`: Replace symlinks with actual files (copy)
+- `auto` - Use relative if possible, absolute if needed (default)
+- `relative` - Always create relative symlinks
+- `absolute` - Always create absolute symlinks
+- `follow` - Follow existing symlinks, replace target
+- `replace` - Replace symlinks with actual files (copy)
 
 ## Browser Support
 
-### Firefox
-
-Automatically detects default Firefox profile and backs up:
+Auto-detects and backs up Firefox and Zen browser profiles:
 
 - `prefs.js` - Preferences
 - `user.js` - User overrides
@@ -198,258 +184,107 @@ Automatically detects default Firefox profile and backs up:
 - `extensions/` - Installed extensions
 - `storage/` - Extension storage
 
-### Zen Browser
-
-Automatically detects default Zen profile and backs up the same files.
-
-**Usage**:
-
 ```bash
-flux add-browser
-flux sync
+flux file add-browser
+flux file sync
 ```
 
-## Profiles
+## Profiles Commands
 
-Profiles allow you to have different configurations for different machines or
-use cases.
-
-### Creating a Profile
+Profiles allow different configurations for different machines or use cases. Profile-specific files override base files for the same destination.
 
 ```bash
 flux profile create work
-```
-
-### Profile Overrides
-
-Profile-specific files override base files for the same destination. Base files
-are used if not overridden.
-
-**Example**:
-
-- Base: `sway/config` → `.config/sway/config`
-- Profile "work": `profiles/work/sway/config` → `.config/sway/config` (overrides
-  base)
-
-## File Locking
-
-The tool uses `flock` to detect locked files. If a file is locked (e.g., browser
-is running), it will be skipped with a warning:
-
-```md
-⚠ Warning: /path/to/file is locked (may be in use), skipping
-```
-
-## Backups
-
-Backups are automatically created in `~/.dotfiles/.backups/` when conflicts are
-resolved. Each backup is timestamped.
-
-**Restore from backup**:
-
-```bash
-flux restore latest
-flux restore 1 --file ~/.config/sway/config
+flux file add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
+flux profile switch work
+flux file sync
 ```
 
 ## Git Integration
 
-The tool automatically initializes a git repository and commits changes after
-sync operations. You'll be prompted for commit messages per changed file.
+Flux automatically initializes a git repository and commits changes after sync operations.
 
-### Remote Management and Pushing
-
-You can manage git remotes and push your dotfiles to GitHub, GitLab, Gitea, or
-any other git hosting service.
-
-#### Add a Remote
+### Remote Setup
 
 ```bash
-# Add origin remote (SSH)
+# Add remote (SSH recommended)
 flux remote add origin git@github.com:username/dotfiles.git
 
-# Add origin remote (HTTPS)
-flux remote add origin https://github.com/username/dotfiles.git
-
-# Add with dry-run to preview
-flux remote add origin git@github.com:username/dotfiles.git --dry-run
-```
-
-#### Remove a Remote
-
-```bash
-flux remote remove origin
-flux remote remove upstream --dry-run
-```
-
-#### Change Remote URL
-
-```bash
-flux remote set-url origin git@github.com:username/dotfiles.git
-flux remote set-url origin https://github.com/username/dotfiles.git
-```
-
-#### List Remotes
-
-```bash
-flux remote list
-```
-
-#### Push to Remote
-
-Push your dotfiles to a remote repository:
-
-```bash
-# Push with default settings (origin, current branch)
-flux push
-
-# Push to specific remote
-flux push --remote upstream
-
-# Push specific branch
-flux push --branch main
-
-# Set upstream branch after push
+# Push to remote
 flux push --set-upstream
 
-# Preview with dry-run
-flux push --dry-run
-
-# Combined options
-flux push --remote origin --branch main --set-upstream
-```
-
-#### Default Remote and Branch Configuration
-
-You can set default remote and branch in your config to avoid repeated flags:
-
-```toml
+# Or set defaults in config
 [general]
-# ... other settings ...
 default_remote = "origin"
 default_branch = "main"
 ```
 
-#### GitHub Setup
+### Authentication
 
-1. Create a repository on GitHub
-2. Add SSH key to GitHub (or use HTTPS with PAT)
-3. Add remote:
-
-   ```bash
-   flux remote add origin git@github.com:username/dotfiles.git
-   ```
-
-4. Push:
-
-   ```bash
-   flux push --set-upstream
-   ```
-
-#### GitLab Setup
-
-Similar to GitHub, but use GitLab's git URLs:
+**SSH** (recommended): Uses SSH agent automatically. Ensure your key is added:
 
 ```bash
-flux remote add origin git@gitlab.com:username/dotfiles.git
-flux push --set-upstream
+ssh-add ~/.ssh/id_ed25519
 ```
 
-#### Gitea Setup
-
-For self-hosted Gitea instances:
+**HTTPS**: Set environment variables:
 
 ```bash
-flux remote add origin git@gitea.example.com:username/dotfiles.git
-flux push --set-upstream
+export GIT_USERNAME=your_username
+export GIT_PASSWORD=your_personal_access_token
+flux push
 ```
-
-#### Authentication
-
-The tool supports two authentication methods:
-
-**SSH** (Recommended):
-
-- Uses SSH agent automatically
-- Ensure your SSH key is added to the agent: `ssh-add ~/.ssh/id_ed25519`
-
-**HTTPS with Personal Access Token**:
-
-- Set environment variables:
-
-  ```bash
-  export GIT_USERNAME=your_username
-  export GIT_PASSWORD=your_personal_access_token
-  flux push
-  ```
 
 ## Examples
 
-### Setting up Sway WM
+### Basic Setup
 
 ```bash
-# Initialize
 flux init
-
-# Add sway config
-flux add sway ~/.config/sway/config
-
-# Sync
-flux sync
+flux file add sway ~/.config/sway/config
+flux file sync
 ```
 
-### Managing Browser Settings
+### Browser Settings
 
 ```bash
-# Auto-detect and add browser profiles
-flux add-browser
-
-# Sync (will skip if browser is running)
-flux sync
-
-# Check status
-flux status
+flux file add-browser
+flux file sync  # Skips if browser is running
 ```
 
-### Using Profiles
+### How to use Profiles
 
 ```bash
-# Create work profile
 flux profile create work
-
-# Add work-specific config
-flux add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
-
-# Switch to work profile
+flux file add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
 flux profile switch work
+flux file sync
+```
 
-# Sync work profile
-flux sync
+### Declarative Configuration
+
+```bash
+# Apply packages, services, and files
+flux apply
+
+# Preview changes
+flux apply --dry-run
+
+# Apply with sudo for system packages
+flux apply --sudo
 ```
 
 ## Troubleshooting
 
-### Files are being skipped
+**Files being skipped**: Check if files are locked (browser/application running). Use `flux file status` for details.
 
-- Check if files are locked (browser/application running)
-- Use `status` command to see details
-- Close applications and try again
+**Symlinks not working**: Check `symlink_resolution` in config. Use `flux maintain validate` to check for issues.
 
-### Symlinks not working
-
-- Check `symlink_resolution` in config
-- Use `validate` to check for issues
-- Ensure repository path is correct
-
-### Profile not working
-
-- Verify profile exists: `flux profile list`
-- Check profile directory exists in repository
-- Use `validate` to check configuration
+**Profile not working**: Verify with `flux profile list`. Check profile directory exists in repository.
 
 ## Versioning
 
-Flux uses **Epoch Semantic Versioning**, an extension of Semantic Versioning that provides better communication about the scale of changes. For detailed information about our versioning scheme, see [VERSIONING.md](VERSIONING.md).
+Flux uses **Epoch Semantic Versioning**. See [VERSIONING.md](VERSIONING.md) for details.
 
 ## License
 
