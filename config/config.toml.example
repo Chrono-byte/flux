@@ -10,7 +10,7 @@ repo_path = "~/.dotfiles"
 current_profile = "default"
 
 # Directory for backups (created automatically on conflicts)
-backup_dir = "~/.dotfiles/.backups"
+backup_dir = "~/.dotfiles-backups"
 
 # Symlink resolution strategy: auto, relative, absolute, follow, replace
 # - auto: Use relative if possible, absolute if needed (recommended)

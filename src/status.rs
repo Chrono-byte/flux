@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::error::Result;
-use crate::file_manager::is_file_locked;
 use crate::types::TrackedFile;
 use colored::Colorize;
 use std::fs;
@@ -12,7 +11,6 @@ pub enum FileStatus {
     MissingSymlink,
     BrokenSymlink,
     OutOfSync,
-    Locked,
     MissingRepo,
 }
 
@@ -45,11 +43,6 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
         return Ok(FileStatus::MissingRepo);
     }
 
-    // Check if file is locked
-    if is_file_locked(&file.dest_path) || is_file_locked(&file.repo_path) {
-        return Ok(FileStatus::Locked);
-    }
-
     // Check if destination exists
     if !file.dest_path.exists() {
         return Ok(FileStatus::MissingSymlink);
@@ -57,12 +50,6 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
 
     // Check if it's a symlink
     if let Ok(link_target) = fs::read_link(&file.dest_path) {
-        // Check if symlink is broken
-        if !link_target.exists() {
-            return Ok(FileStatus::BrokenSymlink);
-        }
-
-        // Check if symlink points to correct location
         // Resolve relative symlink targets to absolute paths for comparison
         let resolved_target = if link_target.is_absolute() {
             link_target
@@ -72,6 +59,13 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
                 .map(|p| p.join(&link_target))
                 .unwrap_or(link_target)
         };
+
+        // Check if symlink is broken
+        if !resolved_target.exists() {
+            return Ok(FileStatus::BrokenSymlink);
+        }
+
+        // Check if symlink points to correct location
 
         // Normalize both paths before comparing
         let normalized_target = normalize_path(&resolved_target);
@@ -115,7 +109,6 @@ fn status_message(file: &TrackedFile, status: &FileStatus) -> String {
         FileStatus::MissingSymlink => format!("⊘ Missing: {}", file.dest_path.display()),
         FileStatus::BrokenSymlink => format!("⚠ Broken symlink: {}", file.dest_path.display()),
         FileStatus::OutOfSync => format!("↻ Out of sync: {}", file.dest_path.display()),
-        FileStatus::Locked => format!("🔒 Locked: {}", file.dest_path.display()),
         FileStatus::MissingRepo => format!("✗ Missing repo file: {}", file.repo_path.display()),
     }
 }
@@ -163,7 +156,6 @@ pub fn display_status(reports: &[StatusReport]) {
                 FileStatus::MissingSymlink => "⊘".yellow(),
                 FileStatus::BrokenSymlink => "⚠".yellow(),
                 FileStatus::OutOfSync => "↻".yellow(),
-                FileStatus::Locked => "🔒".yellow(),
                 FileStatus::MissingRepo => "✗".red(),
             };
 

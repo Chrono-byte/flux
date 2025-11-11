@@ -194,7 +194,7 @@ impl Default for Config {
             general: GeneralConfig {
                 repo_path: "~/.dotfiles".to_string(),
                 current_profile: "default".to_string(),
-                backup_dir: "~/.dotfiles/.backups".to_string(),
+                backup_dir: "~/.dotfiles-backups".to_string(),
                 symlink_resolution: "auto".to_string(),
             },
             tools: HashMap::new(),

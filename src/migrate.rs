@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::dry_run::DryRun;
 use crate::error::Result;
-use crate::file_manager::{FileSystemManager, is_file_locked};
+use crate::file_manager::FileSystemManager;
 use crate::types::{SymlinkResolution, TrackedFile};
 use crate::untracked::IssueType;
 use colored::Colorize;
@@ -91,13 +91,6 @@ fn migrate_file(
     config: &Config,
     fs_manager: &mut FileSystemManager,
 ) -> Result<MigrationResult> {
-    // Check if file is locked
-    if is_file_locked(&file.dest_path) || is_file_locked(&file.repo_path) {
-        return Ok(MigrationResult::Skipped(
-            "File is locked (may be in use)".to_string(),
-        ));
-    }
-
     match issue {
         IssueType::Missing => {
             // File doesn't exist - just create symlink (repo should exist)

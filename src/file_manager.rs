@@ -5,9 +5,7 @@ use crate::prompt::{ConflictResolution, prompt_conflict};
 use crate::types::{SymlinkResolution, TrackedFile};
 use chrono::Local;
 use colored::Colorize;
-use fslock::LockFile;
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 // #############################################################################
@@ -23,13 +21,6 @@ pub fn add_file(
     profile: Option<&str>,
     fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
-    if is_file_locked(source_path) {
-        return Err(DotfilesError::Path(format!(
-            "Source file {} is locked (may be in use), cannot add",
-            source_path.display()
-        )));
-    }
-
     // BACKUP: Create backup of destination file if it exists BEFORE any changes
     let home = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
@@ -172,16 +163,6 @@ pub fn backup_all_files(
                 continue;
             }
         };
-
-        if is_file_locked(&file_to_backup) {
-            println!(
-                "  {} Skipping {} (file is locked, may be in use)",
-                "⚠".yellow(),
-                file_to_backup.display()
-            );
-            skipped_count += 1;
-            continue;
-        }
 
         // SAFETY CHECK: Ensure source is not inside backup directory
         let canonical_source = normalize_path(&file_to_backup);
@@ -398,6 +379,24 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
+    pub fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
+        if self.is_dry_run {
+            println!(
+                "  [DRY RUN] Would rename: {} -> {}",
+                from.display(),
+                to.display()
+            );
+            self.dry_run.log_operation(Operation::CopyFile {
+                // You may want to add a Rename operation
+                from: from.to_path_buf(),
+                to: to.to_path_buf(),
+            });
+            Ok(())
+        } else {
+            fs::rename(from, to).map_err(Into::into)
+        }
+    }
+
     pub fn symlink(&mut self, from: &Path, to: &Path) -> Result<()> {
         if self.is_dry_run {
             println!(
@@ -411,7 +410,29 @@ impl<'a> FileSystemManager<'a> {
             });
             Ok(())
         } else {
-            symlink(from, to).map_err(Into::into)
+            // START: Cross-platform symlink logic
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+                symlink(from, to).map_err(Into::into)
+            }
+            #[cfg(windows)]
+            {
+                // Windows requires knowing if the target is a file or directory
+                if from.is_dir() {
+                    std::os::windows::fs::symlink_dir(from, to).map_err(Into::into)
+                } else {
+                    std::os::windows::fs::symlink_file(from, to).map_err(Into::into)
+                }
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                Err(DotfilesError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "Symlinking is not supported on this platform",
+                )))
+            }
+            // END: Cross-platform symlink logic
         }
     }
 
@@ -484,22 +505,6 @@ fn sync_file(
     println!("  Dest: {}", file.dest_path.display());
 
     // --- 1. Precondition Checks ---
-    if is_file_locked(&file.dest_path) {
-        println!(
-            "  {} Warning: {} is locked (may be in use), skipping",
-            "⚠".yellow(),
-            file.dest_path.display()
-        );
-        return Ok(());
-    }
-    if is_file_locked(&file.repo_path) {
-        println!(
-            "  {} Warning: {} is locked (may be in use), skipping",
-            "⚠".yellow(),
-            file.repo_path.display()
-        );
-        return Ok(());
-    }
     if !file.repo_path.exists() {
         println!("  {} Repo file does not exist, skipping", "⊘".yellow());
         return Ok(());
@@ -566,27 +571,28 @@ fn determine_sync_action(file: &TrackedFile) -> Result<SyncAction> {
 
     // Check if it's a symlink and already correctly linked
     if file.dest_path.is_symlink()
-        && let Ok(link_target) = fs::read_link(&file.dest_path) {
-            println!("  Is symlink pointing to: {}", link_target.display());
-            let resolved_target = if link_target.is_absolute() {
-                link_target
-            } else {
-                file.dest_path
-                    .parent()
-                    .map(|p| p.join(&link_target))
-                    .unwrap_or(link_target)
-            };
-            let normalized_target = normalize_path(&resolved_target);
-            let normalized_repo = normalize_path(&file.repo_path);
+        && let Ok(link_target) = fs::read_link(&file.dest_path)
+    {
+        println!("  Is symlink pointing to: {}", link_target.display());
+        let resolved_target = if link_target.is_absolute() {
+            link_target
+        } else {
+            file.dest_path
+                .parent()
+                .map(|p| p.join(&link_target))
+                .unwrap_or(link_target)
+        };
+        let normalized_target = normalize_path(&resolved_target);
+        let normalized_repo = normalize_path(&file.repo_path);
 
-            if normalized_target == normalized_repo {
-                println!("  {} Already correctly linked", "✓".green());
-                return Ok(SyncAction::DoNothing);
-            } else {
-                println!("  {} Symlink points to wrong location", "⚠".yellow());
-                return Ok(SyncAction::ResolveConflict);
-            }
+        if normalized_target == normalized_repo {
+            println!("  {} Already correctly linked", "✓".green());
+            return Ok(SyncAction::DoNothing);
+        } else {
+            println!("  {} Symlink points to wrong location", "⚠".yellow());
+            return Ok(SyncAction::ResolveConflict);
         }
+    }
 
     println!("  Is regular file/directory (not symlink)");
 
@@ -686,20 +692,18 @@ fn create_symlink_managed(
 ) -> Result<()> {
     // 1. Create parent directory if needed
     if let Some(parent) = file.dest_path.parent() {
-        // In dry-run, create_dir_all will log and return Ok
-        // In normal mode, it will only create if it doesn't exist
         fs_manager.create_dir_all(parent)?;
     }
 
-    // 2. Remove existing file/symlink (backup was already done by caller)
-    // fs_manager.remove_file() handles dry run internally
-    println!("    Removing existing file/symlink...");
-    fs_manager.remove_file(&file.dest_path)?;
-
     // 3. Handle the "Replace" (copy) case
     if *resolution == SymlinkResolution::Replace {
+        // ... (This logic is OK, but we must use atomic rename)
+        let temp_path = file.dest_path.with_extension("dotfiles-manager-temp-copy");
         println!("    Copying file instead of symlinking (Replace strategy)...");
-        fs_manager.copy(&file.repo_path, &file.dest_path)?;
+
+        fs_manager.copy(&file.repo_path, &temp_path)?;
+        fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
+
         if !fs_manager.is_dry_run {
             println!(
                 "{} Copied {} -> {}",
@@ -713,6 +717,7 @@ fn create_symlink_managed(
 
     // 4. Handle regular symlinking
     let link_target = match resolution {
+        // ... (this logic is fine)
         SymlinkResolution::Auto => {
             pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
                 .unwrap_or_else(|| file.repo_path.clone())
@@ -723,9 +728,6 @@ fn create_symlink_managed(
         }
         SymlinkResolution::Absolute => file.repo_path.clone(),
         SymlinkResolution::Follow => {
-            // The original 'Follow' logic was dangerous as it tried to remove the
-            // symlink's target. The new backup logic is safer. We now
-            // treat 'Follow' as 'Auto' for link creation.
             println!("    'Follow' resolution strategy is treated as 'Auto'.");
             pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
                 .unwrap_or_else(|| file.repo_path.clone())
@@ -733,12 +735,31 @@ fn create_symlink_managed(
         SymlinkResolution::Replace => unreachable!(), // Handled above
     };
 
+    // 5. NEW ATOMIC SYMLINK LOGIC
+    // Create the symlink at a temporary path
+    let temp_link_path = file.dest_path.with_extension(format!(
+        "{}.dotfiles-manager-temp",
+        file.dest_path
+            .extension()
+            .map_or("", |s| s.to_str().unwrap_or(""))
+    ));
+
     println!(
-        "    Creating symlink: {} -> {}",
-        file.dest_path.display(),
+        "    Creating temp symlink: {} -> {}",
+        temp_link_path.display(),
         link_target.display()
     );
-    fs_manager.symlink(&link_target, &file.dest_path)?;
+    // Ensure old temp link is gone (in case of failed previous run)
+    let _ = fs_manager.remove_file(&temp_link_path);
+    fs_manager.symlink(&link_target, &temp_link_path)?;
+
+    // Atomically rename the temp symlink to the final destination
+    println!(
+        "    Atomically moving link: {} -> {}",
+        temp_link_path.display(),
+        file.dest_path.display()
+    );
+    fs_manager.rename(&temp_link_path, &file.dest_path)?;
 
     if !fs_manager.is_dry_run {
         println!(
@@ -759,17 +780,6 @@ fn create_symlink_managed(
 /// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails
 fn normalize_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-/// Check if a file is locked by another process.
-pub fn is_file_locked(file_path: &Path) -> bool {
-    if let Ok(mut lock) = LockFile::open(file_path) {
-        if lock.try_lock().is_err() {
-            return true; // File is locked
-        }
-        let _ = lock.unlock();
-    }
-    false
 }
 
 /// Resolves the actual file to be backed up.
