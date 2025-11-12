@@ -22,7 +22,8 @@ use services::git;
 use services::{
     add_remote, commit_changes, detect_alacritty_configs, detect_changes, detect_firefox_profiles,
     detect_starship_configs, detect_zen_profiles, get_browser_profile_files, init_repo,
-    list_remotes, pull_from_remote, push_to_remote, remove_remote, set_remote_url, stage_changes,
+    list_remotes, pull_from_remote, push_to_remote, remove_remote, set_remote_url, show_git_status,
+    stage_changes,
 };
 use utils::prompt::{prompt_commit_message, prompt_yes_no};
 use utils::{DotfilesError, DryRun, Result, logging};
@@ -118,6 +119,12 @@ enum Commands {
         /// Timeout in seconds (default: 60 or config push_timeout)
         #[arg(long)]
         timeout: Option<u64>,
+    },
+    /// Show repository and file sync status
+    Status {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
     },
     /// Maintenance and repair operations
     Maintain {
@@ -1178,6 +1185,19 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             if dry_run {
                 dry_run_tracker.display_summary();
             }
+        }
+        Commands::Status { profile } => {
+            let config = Config::load()?;
+            let repo_path = config.get_repo_path()?;
+
+            // Show git repository status
+            if let Ok(repo) = init_repo(&repo_path) {
+                show_git_status(&repo)?;
+            }
+
+            // Show file sync status
+            let reports = check_status(&config, profile.as_deref())?;
+            display_status(&reports);
         }
         Commands::Maintain { command } => {
             return handle_maintain_command(command);

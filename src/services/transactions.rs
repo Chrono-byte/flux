@@ -234,9 +234,10 @@ impl Transaction {
                         target: create_target,
                         ..
                     } = &next_result.operation
-                        && target == create_target {
-                            targets_created_after_removal.insert(target.clone());
-                        }
+                    && target == create_target
+                {
+                    targets_created_after_removal.insert(target.clone());
+                }
             }
         }
 
@@ -262,12 +263,13 @@ impl Transaction {
                 FileOperation::RemoveSymlink { target } => {
                     // Skip verification if this target is immediately recreated
                     if !targets_created_after_removal.contains(target)
-                        && (target.exists() || target.is_symlink()) {
-                            return Err(DotfilesError::Path(format!(
-                                "Verification failed: symlink still exists: {}",
-                                target.display()
-                            )));
-                        }
+                        && (target.exists() || target.is_symlink())
+                    {
+                        return Err(DotfilesError::Path(format!(
+                            "Verification failed: symlink still exists: {}",
+                            target.display()
+                        )));
+                    }
                 }
                 _ => {
                     // Other operations verified by their success flag
