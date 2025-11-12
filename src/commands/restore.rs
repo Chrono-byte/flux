@@ -403,7 +403,7 @@ pub fn cleanup_backups(
         for (idx, backup) in backups.iter().enumerate() {
             let size = calculate_dir_size(&backup.path).unwrap_or(0);
 
-            // Check if backup is too small (likely from old buggy behavior)
+            // Check if backup is too small (may indicate incomplete or failed backup)
             // Small backups are always deleted, regardless of age or count
             if size < min_size {
                 small_backups += 1;

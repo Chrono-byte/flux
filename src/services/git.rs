@@ -421,9 +421,8 @@ pub fn push_to_remote(
         .ok()
         .and_then(|r| r.target());
 
-    // Set up push options with credential callbacks (not used directly, but kept for consistency)
-    let _push_options = git2::PushOptions::new();
-    let _callbacks = setup_credential_callbacks();
+    // Note: Push options are created in the thread where the operation executes
+    // to avoid Send trait issues with Repository
 
     // Prepare refspec
     let refspec = format!("refs/heads/{}:refs/heads/{}", branch_name, branch_name);
@@ -589,9 +588,8 @@ pub fn pull_from_remote(
         }
     }
 
-    // Set up fetch options with credential callbacks (not used directly, but kept for consistency)
-    let _fetch_options = FetchOptions::new();
-    let _callbacks = setup_credential_callbacks();
+    // Note: Fetch options are created in the thread where the operation executes
+    // to avoid Send trait issues with Repository
 
     // Fetch from remote with timeout
     // Clone necessary data to move into thread (Repository is not Send)
@@ -655,12 +653,8 @@ pub fn pull_from_remote(
                 return Ok(());
             }
 
-            // Check for untracked files that would be overwritten
-            // This is a simplified check - in practice, git checks more carefully
-            if !untracked_files.is_empty() {
-                // Try to merge and see if it fails due to untracked files
-                // We'll detect this in the merge error handling
-            }
+            // Note: Untracked files check is simplified here
+            // Git will detect conflicts during merge and we handle them below
 
             // Perform merge
             let annotated_commit = repo.reference_to_annotated_commit(&remote_branch)?;
@@ -710,8 +704,8 @@ pub fn pull_from_remote(
                     }
                 }
 
-                // Check for untracked files that would be overwritten
-                // This happens when merge tries to create a file that exists as untracked
+                // Check for untracked files that would be overwritten by merge
+                // This occurs when merge attempts to create a file that already exists as untracked
                 let statuses = repo.statuses(Some(
                     &mut git2::StatusOptions::new().include_untracked(true),
                 ))?;

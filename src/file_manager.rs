@@ -23,7 +23,7 @@ pub fn add_file(
     profile: Option<&str>,
     fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
-    // BACKUP: Create backup of destination file if it exists BEFORE any changes
+    // Create backup of destination file if it exists before making any changes
     let home = dirs::home_dir().ok_or_else(crate::utils::error_utils::home_dir_not_found)?;
 
     // Validate destination path is within home directory
@@ -47,7 +47,7 @@ pub fn add_file(
         ))
     })?);
 
-    // Copy file or directory to repo
+    // Copy source file or directory to repository
     fs_manager.create_dir_all(&tool_dir)?;
 
     if source_path.is_dir() {
@@ -56,7 +56,7 @@ pub fn add_file(
         fs_manager.copy(source_path, &repo_file)?;
     }
 
-    // Add to config (in memory)
+    // Register file in configuration (in-memory, will be saved later)
     let repo_relative = repo_file
         .strip_prefix(&repo_path)
         .map_err(|e| {
@@ -101,10 +101,11 @@ pub fn sync_files(
     let tracked_files = config.get_tracked_files(profile)?;
     let symlink_resolution = config.general.symlink_resolution;
 
-    // Create the FileSystemManager here. It will be passed down.
+    // Create FileSystemManager to handle all file operations with dry-run support
     let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
 
     // Create a single timestamped backup directory for all files in this sync operation
+    // This ensures all backups from one sync are grouped together
     let backup_dir = config
         .get_backup_dir()?
         .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
@@ -136,7 +137,7 @@ pub fn sync_files(
         stats.update(result);
     }
 
-    // Print summary
+    // Display sync operation summary
     if verbose {
         println!("\n{} Sync complete", "✓".green());
     } else {
@@ -208,7 +209,7 @@ pub fn backup_all_files(
         tracked_files.len()
     );
 
-    // Create a manager for this operation
+    // Create FileSystemManager to handle backup operations with dry-run support
     let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
 
     if is_dry_run_mode {
@@ -218,7 +219,7 @@ pub fn backup_all_files(
         );
     }
 
-    // Create a single timestamped backup directory for all files
+    // Create a single timestamped backup directory for all files in this backup operation
     let backup_dir = config
         .get_backup_dir()?
         .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
@@ -232,7 +233,7 @@ pub fn backup_all_files(
     let mut skipped_count = 0;
 
     for file in &tracked_files {
-        // Use the centralized helper to find what to back up
+        // Use centralized helper to determine what file to back up (handles symlinks)
         let file_to_backup = match get_path_to_backup(&file.dest_path) {
             Some(path) => path,
             None => {
@@ -246,7 +247,7 @@ pub fn backup_all_files(
             }
         };
 
-        // SAFETY CHECK: Ensure source is not inside backup directory
+        // Safety check: prevent backing up files from within the backup directory itself
         let canonical_source = normalize_path(&file_to_backup);
         if canonical_source.starts_with(&canonical_backup_dir) {
             println!(
@@ -258,25 +259,25 @@ pub fn backup_all_files(
             continue;
         }
 
-        // Calculate backup path
+        // Calculate backup path preserving directory structure relative to home
         let relative_path = canonical_source
             .strip_prefix(&canonical_home)
             .unwrap_or(&canonical_source);
         let backup_path = backup_dir.join(relative_path);
 
-        // Create parent directory
+        // Create parent directories for backup path if needed
         if let Some(parent) = backup_path.parent() {
             fs_manager.create_dir_all(parent)?;
         }
 
-        // Copy file or directory using the manager
+        // Copy file or directory using FileSystemManager (handles dry-run)
         if file_to_backup.is_dir() {
             fs_manager.copy_dir_all(&file_to_backup, &backup_path)?;
         } else {
             fs_manager.copy(&file_to_backup, &backup_path)?;
         }
 
-        // Log progress (fs_manager already logged the dry-run op)
+        // Log progress (FileSystemManager already logged dry-run operations)
         if !is_dry_run_mode {
             println!(
                 "  {} Backed up {} -> {}",
@@ -328,28 +329,28 @@ pub fn remove_file(
         .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
         .join(&file_entry.dest);
 
-    // BACKUP: Create backup before removing
+    // Create backup before removing file from filesystem
     if let Some(path_to_backup) = get_path_to_backup(&dest_path) {
         println!("  Creating backup before removal...");
         fs_manager.backup_file(&path_to_backup, config, None)?;
     }
 
-    // Remove symlink/file from destination
+    // Remove symlink or file from destination location
     fs_manager.remove_file(&dest_path)?;
 
-    // Remove from repo
+    // Remove file from repository
     let repo_path = config.get_repo_path()?;
-    // Handle both cases: file may or may not include the tool name prefix
+    // Handle both path formats: file may or may not include the tool name prefix
     let repo_file = if file.starts_with(&format!("{}/", tool)) {
-        // file already includes tool name (e.g., "cursor/settings.json")
+        // File path already includes tool name (e.g., "cursor/settings.json")
         repo_path.join(file)
     } else {
-        // file doesn't include tool name (e.g., "config")
+        // File path doesn't include tool name (e.g., "config")
         repo_path.join(tool).join(file)
     };
     fs_manager.remove_file(&repo_file)?;
 
-    // Remove from config (in memory)
+    // Remove file entry from configuration (in-memory, will be saved later)
     if let Some(tool_config) = config.tools.get_mut(tool) {
         tool_config.files.retain(|e| e.repo != file);
         if tool_config.files.is_empty() {
@@ -357,7 +358,7 @@ pub fn remove_file(
         }
     }
 
-    // Only save config if not in dry run mode
+    // Save configuration to disk only if not in dry run mode
     if !fs_manager.is_dry_run {
         config.save(fs_manager.is_dry_run)?;
         println!("{} Removed {} from {} tool", "✓".green(), file, tool);
@@ -459,7 +460,7 @@ impl<'a> FileSystemManager<'a> {
             });
             Ok(())
         } else {
-            // Check if it exists (as file) or is a symlink (which might be broken)
+            // Check if path exists as file or is a symlink (may be broken)
             if path.exists() || path.is_symlink() {
                 fs::remove_file(path).map_err(Into::into)
             } else {
@@ -476,7 +477,7 @@ impl<'a> FileSystemManager<'a> {
                 to.display()
             );
             self.dry_run.log_operation(Operation::CopyFile {
-                // You may want to add a Rename operation
+                // Note: Using CopyFile operation for rename (could add dedicated Rename operation)
                 from: from.to_path_buf(),
                 to: to.to_path_buf(),
             });
@@ -499,7 +500,7 @@ impl<'a> FileSystemManager<'a> {
             });
             Ok(())
         } else {
-            // START: Cross-platform symlink logic
+            // Cross-platform symlink creation
             #[cfg(unix)]
             {
                 use std::os::unix::fs::symlink;
@@ -507,7 +508,7 @@ impl<'a> FileSystemManager<'a> {
             }
             #[cfg(windows)]
             {
-                // Windows requires knowing if the target is a file or directory
+                // Windows requires separate functions for file vs directory symlinks
                 if from.is_dir() {
                     std::os::windows::fs::symlink_dir(from, to).map_err(Into::into)
                 } else {
@@ -521,7 +522,6 @@ impl<'a> FileSystemManager<'a> {
                     "Symlinking is not supported on this platform",
                 )))
             }
-            // END: Cross-platform symlink logic
         }
     }
 
@@ -616,7 +616,7 @@ fn sync_file(
         println!("  Dest: {}", file.dest_path.display());
     }
 
-    // --- 1. Precondition Checks ---
+    // Step 1: Precondition checks
     if !file.repo_path.exists() {
         if verbose {
             println!("  {} Repo file does not exist, skipping", "⊘".yellow());
@@ -666,9 +666,9 @@ fn sync_file(
         }
     }
 
-    // --- 2. Backup ---
-    // Backup *before* determining action, as any action (except DoNothing)
-    // might modify the destination. This simplifies all downstream logic.
+    // Step 2: Create backup before any modifications
+    // Backup is created before determining action to simplify downstream logic,
+    // since any action (except DoNothing) might modify the destination.
     if let Some(path_to_backup) = get_path_to_backup(&file.dest_path) {
         if verbose {
             println!("  Creating backup before any modifications...");
@@ -676,10 +676,10 @@ fn sync_file(
         fs_manager.backup_file(&path_to_backup, config, backup_dir)?;
     }
 
-    // --- 3. Determine Action ---
+    // Step 3: Determine what action to take
     let action = determine_sync_action(file, verbose)?;
 
-    // --- 4. Execute Action ---
+    // Step 4: Execute the determined action
     match action {
         SyncAction::DoNothing => {
             Ok(SyncResult::Skipped) // Already correctly linked
@@ -776,7 +776,7 @@ fn determine_sync_action(file: &TrackedFile, verbose: bool) -> Result<SyncAction
         println!("  Is regular file/directory (not symlink)");
     }
 
-    // SAFETY CHECK: Don't overwrite non-empty destination with empty repo file
+    // Safety check: prevent overwriting non-empty destination with empty repo file
     let repo_is_empty = if file.repo_path.is_file() {
         fs::metadata(&file.repo_path).map(|m| m.len()).unwrap_or(0) == 0
     } else {
@@ -911,9 +911,9 @@ fn create_symlink_managed(
         fs_manager.create_dir_all(parent)?;
     }
 
-    // 3. Handle the "Replace" (copy) case
+    // Handle "Replace" strategy: copy file instead of creating symlink
     if *resolution == SymlinkResolution::Replace {
-        // ... (This logic is OK, but we must use atomic rename)
+        // Use atomic rename for safe file replacement
         let temp_path = file.dest_path.with_extension("flux-temp-copy");
         if verbose {
             println!("    Copying file instead of symlinking (Replace strategy)...");
@@ -933,9 +933,9 @@ fn create_symlink_managed(
         return Ok(());
     }
 
-    // 4. Handle regular symlinking
+    // Handle regular symlink creation (non-Replace strategies)
     let link_target = match resolution {
-        // ... (this logic is fine)
+        // Compute symlink target based on resolution strategy
         SymlinkResolution::Auto => {
             pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
                 .unwrap_or_else(|| file.repo_path.clone())
@@ -955,8 +955,8 @@ fn create_symlink_managed(
         SymlinkResolution::Replace => unreachable!(), // Handled above
     };
 
-    // 5. NEW ATOMIC SYMLINK LOGIC
-    // Create the symlink at a temporary path
+    // Create symlink atomically using temporary path
+    // This prevents broken symlinks if the operation is interrupted
     let temp_link_path = file.dest_path.with_extension(format!(
         "{}.flux-temp",
         file.dest_path
@@ -971,11 +971,11 @@ fn create_symlink_managed(
             link_target.display()
         );
     }
-    // Ensure old temp link is gone (in case of failed previous run)
+    // Remove any existing temporary symlink from previous failed operations
     let _ = fs_manager.remove_file(&temp_link_path);
     fs_manager.symlink(&link_target, &temp_link_path)?;
 
-    // Atomically rename the temp symlink to the final destination
+    // Atomically rename temporary symlink to final destination
     if verbose {
         println!(
             "    Atomically moving link: {} -> {}",

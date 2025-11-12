@@ -400,7 +400,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 return Ok(());
             }
 
-            // If no backup specified, show list and let user choose
+            // If backup is "latest" and no specific file, show list and prompt user
             let selected_backup = if backup == "latest" && file.is_none() {
                 display_backups(&backups);
                 if !yes && !prompt_yes_no("Restore from latest backup?")? {
@@ -446,7 +446,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                     println!("{} Restored {}", "✓".green(), target_file);
                 }
             } else {
-                // Restore all files from backup
+                // Restore all files from the selected backup
                 if !dry_run
                     && !yes
                     && !prompt_yes_no(&format!(
@@ -489,7 +489,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 return Ok(());
             }
 
-            // Select backup
+            // Select the backup to use
             let selected_backup = if backup == "latest" {
                 &backups[0]
             } else if backup == "list" {
@@ -659,7 +659,7 @@ desktop.ini
 
 fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
     // Note: env_config is validated at startup for early error detection.
-    // It's now used for custom config file paths and git auth.
+    // It's used for custom config file paths and git authentication.
     match cli.command {
         Commands::Init { repo_path } => {
             let mut config = Config::load()?;
@@ -700,7 +700,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
 
             if from_repo {
-                // File already exists in repo - just register it
+                // File already exists in repo - register it without copying
                 let repo_path = config.get_repo_path()?;
                 let repo_file = repo_path.join(&tool).join(&file);
 
@@ -714,11 +714,11 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 let dest_path = if let Some(dest) = dest {
                     std::path::Path::new(&dest).to_path_buf()
                 } else {
-                    // Default to same name in home
+                    // Default destination is same filename in home directory
                     std::path::Path::new(&file).to_path_buf()
                 };
 
-                // Just add to config without copying
+                // Register file in config without copying (file already in repo)
                 let repo_relative = repo_file
                     .strip_prefix(&repo_path)
                     .map_err(|_| {
@@ -743,7 +743,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     );
                 }
             } else {
-                // Normal flow: copy file to repo
+                // Standard flow: copy source file to repository
                 let source_path = std::path::Path::new(&file);
                 if !source_path.exists() {
                     return Err(DotfilesError::Path(format!(
@@ -755,7 +755,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 let dest_path = if let Some(dest) = dest {
                     std::path::Path::new(&dest).to_path_buf()
                 } else {
-                    // Use source path relative to home
+                    // Use source path relative to home directory
                     let home = dirs::home_dir().ok_or_else(|| {
                         DotfilesError::Config("Could not find home directory".to_string())
                     })?;
@@ -799,7 +799,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             if dry_run {
                 dry_run_tracker.display_summary();
             } else {
-                // Auto-commit changes
+                // Automatically commit any changes to the repository
                 let repo_path = config.get_repo_path()?;
                 let repo = init_repo(&repo_path)?;
                 let changes = detect_changes(&repo)?;
@@ -853,7 +853,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let config = Config::load()?;
 
             if dry_run {
-                // In dry-run mode, just show preview
+                // In dry-run mode, only show preview without applying changes
                 let diff = compare_states(&config, profile.as_deref(), force)?;
                 display_preview(&diff);
             } else {
@@ -924,10 +924,10 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     return Ok(());
                 }
 
-                // Load config (will load from XDG if it exists)
+                // Load config (prefers XDG location if it exists)
                 let config = Config::load()?;
 
-                // Save it back (will save to XDG and format it)
+                // Save formatted config back to XDG location
                 config.save(true)?;
 
                 println!(
@@ -982,18 +982,18 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let repo = init_repo(&repo_path)?;
             let mut dry_run_tracker = DryRun::new();
 
-            // Resolve remote: --remote flag > config default_remote > "origin"
+            // Resolve remote with precedence: CLI flag > config default_remote > "origin"
             let resolved_remote = remote
                 .or_else(|| config.general.default_remote.clone())
                 .unwrap_or_else(|| "origin".to_string());
 
-            // Resolve branch: --branch flag > current HEAD > config default_branch > "main"
+            // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
             let resolved_branch = branch
                 .or_else(|| git::get_current_branch(&repo).ok())
                 .or_else(|| config.general.default_branch.clone())
                 .unwrap_or_else(|| "main".to_string());
 
-            // Resolve timeout: --timeout flag > config push_timeout > 60 seconds
+            // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
             let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
 
             push_to_remote(
@@ -1021,18 +1021,18 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let repo = init_repo(&repo_path)?;
             let mut dry_run_tracker = DryRun::new();
 
-            // Resolve remote: --remote flag > config default_remote > "origin"
+            // Resolve remote with precedence: CLI flag > config default_remote > "origin"
             let resolved_remote = remote
                 .or_else(|| config.general.default_remote.clone())
                 .unwrap_or_else(|| "origin".to_string());
 
-            // Resolve branch: --branch flag > current HEAD > config default_branch > "main"
+            // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
             let resolved_branch = branch
                 .or_else(|| git::get_current_branch(&repo).ok())
                 .or_else(|| config.general.default_branch.clone())
                 .unwrap_or_else(|| "main".to_string());
 
-            // Resolve timeout: --timeout flag > config push_timeout > 60 seconds
+            // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
             let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
 
             pull_from_remote(
@@ -1052,12 +1052,12 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let config = Config::load()?;
             let repo_path = config.get_repo_path()?;
 
-            // Show git repository status
+            // Display git repository status
             if let Ok(repo) = init_repo(&repo_path) {
                 show_git_status(&repo)?;
             }
 
-            // Show file sync status
+            // Display file synchronization status
             let reports = check_status(&config, profile.as_deref())?;
             display_status(&reports);
         }
