@@ -20,10 +20,8 @@ use config::{Config, EnvironmentConfig};
 use file_manager::{add_file, backup_all_files, remove_file, sync_files};
 use services::git;
 use services::{
-    add_remote, commit_changes, detect_alacritty_configs, detect_changes, detect_firefox_profiles,
-    detect_starship_configs, detect_zen_profiles, get_browser_profile_files, init_repo,
-    list_remotes, pull_from_remote, push_to_remote, remove_remote, set_remote_url, show_git_status,
-    stage_changes,
+    add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
+    push_to_remote, remove_remote, set_remote_url, show_git_status, stage_changes,
 };
 use utils::prompt::{prompt_commit_message, prompt_yes_no};
 use utils::{DotfilesError, DryRun, Result, logging};
@@ -44,10 +42,54 @@ enum Commands {
         #[arg(long)]
         repo_path: Option<String>,
     },
-    /// File management operations
-    File {
-        #[command(subcommand)]
-        command: FileCommands,
+    /// Add a file to tracking (git-like syntax)
+    Add {
+        /// Tool name (e.g., sway, waybar, cursor, firefox, zen)
+        tool: String,
+        /// Source file path
+        file: String,
+        /// Destination path in home directory
+        #[arg(long)]
+        dest: Option<String>,
+        /// Profile name (optional)
+        #[arg(long)]
+        profile: Option<String>,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+        /// File already exists in repo - just register it, don't copy
+        #[arg(long)]
+        from_repo: bool,
+    },
+    /// Sync tracked files and commit changes (git-like syntax)
+    Commit {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
+        /// Commit message (optional, will prompt if not provided)
+        #[arg(long)]
+        message: Option<String>,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove a file from tracking (git-like syntax)
+    #[command(visible_alias = "rm")]
+    Rm {
+        /// Tool name
+        tool: String,
+        /// File name in repository
+        file: String,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// List tracked files (git-like syntax)
+    #[command(visible_alias = "ls-files")]
+    LsFiles {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
     },
     /// Apply configuration declaratively (NixOS-like)
     Apply {
@@ -135,73 +177,6 @@ enum Commands {
     Completion {
         /// Shell type (zsh, bash, fish, etc.)
         shell: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum FileCommands {
-    /// List tracked files
-    List {
-        /// Profile name (default: current profile)
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Show sync status of tracked files
-    Status {
-        /// Profile name (default: current profile)
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Add a file to tracking
-    Add {
-        /// Tool name (e.g., sway, waybar, cursor, firefox, zen)
-        tool: String,
-        /// Source file path
-        file: String,
-        /// Destination path in home directory
-        #[arg(long)]
-        dest: Option<String>,
-        /// Profile name (optional)
-        #[arg(long)]
-        profile: Option<String>,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-        /// File already exists in repo - just register it, don't copy
-        #[arg(long)]
-        from_repo: bool,
-    },
-    /// Auto-detect and add browser profiles (Firefox and Zen) or terminal/prompt configs (Alacritty, Starship)
-    AddBrowser {
-        /// Browser/terminal/prompt name (firefox, zen, alacritty, starship, or all)
-        #[arg(default_value = "all")]
-        browser: String,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Sync tracked files
-    Sync {
-        /// Profile name (default: current profile)
-        #[arg(long)]
-        profile: Option<String>,
-        /// Commit message (optional, will prompt if not provided)
-        #[arg(long)]
-        message: Option<String>,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Remove a file from tracking
-    #[command(visible_alias = "rm")]
-    Remove {
-        /// Tool name
-        tool: String,
-        /// File name in repository
-        file: String,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
     },
 }
 
@@ -397,275 +372,6 @@ fn main() {
         eprintln!("{} {}", "Error:".red().bold(), e);
         std::process::exit(1);
     }
-}
-
-fn handle_file_command(command: FileCommands) -> Result<()> {
-    match command {
-        FileCommands::List { profile } => {
-            let config = Config::load()?;
-            let files = config.get_tracked_files(profile.as_deref())?;
-
-            println!("\n{}", "Tracked files:".bold().cyan());
-            for file in files {
-                println!(
-                    "  {} -> {}",
-                    file.repo_path.display(),
-                    file.dest_path.display()
-                );
-            }
-        }
-        FileCommands::Status { profile } => {
-            let config = Config::load()?;
-            let reports = check_status(&config, profile.as_deref())?;
-            display_status(&reports);
-        }
-        FileCommands::Add {
-            tool,
-            file,
-            dest,
-            profile,
-            dry_run,
-            from_repo,
-        } => {
-            let mut config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
-            let mut fs_manager =
-                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
-
-            if from_repo {
-                // File already exists in repo - just register it
-                let repo_path = config.get_repo_path()?;
-                let repo_file = repo_path.join(&tool).join(&file);
-
-                if !repo_file.exists() {
-                    return Err(DotfilesError::Path(format!(
-                        "File does not exist in repo: {}",
-                        repo_file.display()
-                    )));
-                }
-
-                let dest_path = if let Some(dest) = dest {
-                    std::path::Path::new(&dest).to_path_buf()
-                } else {
-                    // Default to same name in home
-                    std::path::Path::new(&file).to_path_buf()
-                };
-
-                // Just add to config without copying
-                let repo_relative = repo_file
-                    .strip_prefix(&repo_path)
-                    .map_err(|_| {
-                        DotfilesError::Path("Could not compute repo relative path".to_string())
-                    })?
-                    .to_string_lossy()
-                    .to_string();
-
-                config.add_file_to_tool(&tool, &repo_relative, &dest_path, profile.as_deref())?;
-
-                if !dry_run {
-                    config.save(false)?;
-                    println!(
-                        "{} Registered {} from repo (no copy needed)",
-                        "✓".green(),
-                        repo_file.display()
-                    );
-                } else {
-                    println!(
-                        "  [DRY RUN] Would register {} from repo",
-                        repo_file.display()
-                    );
-                }
-            } else {
-                // Normal flow: copy file to repo
-                let source_path = std::path::Path::new(&file);
-                if !source_path.exists() {
-                    return Err(DotfilesError::Path(format!(
-                        "Source file does not exist: {}",
-                        file
-                    )));
-                }
-
-                let dest_path = if let Some(dest) = dest {
-                    std::path::Path::new(&dest).to_path_buf()
-                } else {
-                    // Use source path relative to home
-                    let home = dirs::home_dir().ok_or_else(|| {
-                        DotfilesError::Config("Could not find home directory".to_string())
-                    })?;
-                    source_path
-                        .strip_prefix(&home)
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|_| source_path.to_path_buf())
-                };
-
-                add_file(
-                    &mut config,
-                    &tool,
-                    source_path,
-                    &dest_path,
-                    profile.as_deref(),
-                    &mut fs_manager,
-                )?;
-            }
-
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        FileCommands::AddBrowser { browser, dry_run } => {
-            let mut config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
-            let mut fs_manager =
-                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
-            let mut added_count = 0;
-
-            if browser == "all" || browser == "firefox" {
-                let firefox_profiles = detect_firefox_profiles()?;
-                for profile in firefox_profiles {
-                    let files = get_browser_profile_files(&profile);
-                    for (source_path, dest_str) in files {
-                        if source_path.exists() {
-                            let dest_path = std::path::Path::new(&dest_str);
-                            // Use add_file() to properly copy files to repo and handle backups
-                            add_file(
-                                &mut config,
-                                "firefox",
-                                &source_path,
-                                dest_path,
-                                None,
-                                &mut fs_manager,
-                            )?;
-                            added_count += 1;
-                        }
-                    }
-                }
-            }
-
-            if browser == "all" || browser == "zen" {
-                let zen_profiles = detect_zen_profiles()?;
-                for profile in zen_profiles {
-                    let files = get_browser_profile_files(&profile);
-                    for (source_path, dest_str) in files {
-                        if source_path.exists() {
-                            let dest_path = std::path::Path::new(&dest_str);
-                            // Use add_file() to properly copy files to repo and handle backups
-                            add_file(
-                                &mut config,
-                                "zen",
-                                &source_path,
-                                dest_path,
-                                None,
-                                &mut fs_manager,
-                            )?;
-                            added_count += 1;
-                        }
-                    }
-                }
-            }
-
-            if browser == "all" || browser == "alacritty" {
-                let alacritty_configs = detect_alacritty_configs()?;
-                for (source_path, dest_str) in alacritty_configs {
-                    if source_path.exists() {
-                        let dest_path = std::path::Path::new(&dest_str);
-                        // Use add_file() to properly copy files to repo and handle backups
-                        add_file(
-                            &mut config,
-                            "alacritty",
-                            &source_path,
-                            dest_path,
-                            None,
-                            &mut fs_manager,
-                        )?;
-                        added_count += 1;
-                    }
-                }
-            }
-
-            if browser == "all" || browser == "starship" {
-                let starship_configs = detect_starship_configs()?;
-                for (source_path, dest_str) in starship_configs {
-                    if source_path.exists() {
-                        let dest_path = std::path::Path::new(&dest_str);
-                        // Use add_file() to properly copy files to repo and handle backups
-                        add_file(
-                            &mut config,
-                            "starship",
-                            &source_path,
-                            dest_path,
-                            None,
-                            &mut fs_manager,
-                        )?;
-                        added_count += 1;
-                    }
-                }
-            }
-
-            if dry_run {
-                dry_run_tracker.display_summary();
-            } else if added_count > 0 {
-                // config.save() is already called by add_file() for each file
-                println!(
-                    "\n{} Added {} file(s) to tracking",
-                    "✓".green(),
-                    added_count
-                );
-            } else {
-                println!(
-                    "{} No browser profiles or terminal configs found",
-                    "⊘".yellow()
-                );
-            }
-        }
-        FileCommands::Remove {
-            tool,
-            file,
-            dry_run,
-        } => {
-            let mut config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
-            let mut fs_manager =
-                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
-            remove_file(&mut config, &tool, &file, &mut fs_manager)?;
-
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        FileCommands::Sync {
-            profile,
-            message,
-            dry_run,
-        } => {
-            let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
-
-            // If dry_run is true, we'll track operations but not execute them
-            // The is_empty() check in file_manager will determine execution
-
-            sync_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
-
-            if dry_run {
-                dry_run_tracker.display_summary();
-            } else {
-                // Auto-commit changes
-                let repo_path = config.get_repo_path()?;
-                let repo = init_repo(&repo_path)?;
-                let changes = detect_changes(&repo)?;
-
-                if !changes.is_empty() {
-                    let commit_message = if let Some(msg) = message {
-                        msg
-                    } else {
-                        prompt_commit_message(&changes)?
-                    };
-                    stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
-                    commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 fn handle_backup_command(command: BackupCommands) -> Result<()> {
@@ -978,8 +684,155 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 }
             );
         }
-        Commands::File { command } => {
-            return handle_file_command(command);
+        Commands::Add {
+            tool,
+            file,
+            dest,
+            profile,
+            dry_run,
+            from_repo,
+        } => {
+            let mut config = Config::load()?;
+            let mut dry_run_tracker = DryRun::new();
+            let mut fs_manager =
+                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
+
+            if from_repo {
+                // File already exists in repo - just register it
+                let repo_path = config.get_repo_path()?;
+                let repo_file = repo_path.join(&tool).join(&file);
+
+                if !repo_file.exists() {
+                    return Err(DotfilesError::Path(format!(
+                        "File does not exist in repo: {}",
+                        repo_file.display()
+                    )));
+                }
+
+                let dest_path = if let Some(dest) = dest {
+                    std::path::Path::new(&dest).to_path_buf()
+                } else {
+                    // Default to same name in home
+                    std::path::Path::new(&file).to_path_buf()
+                };
+
+                // Just add to config without copying
+                let repo_relative = repo_file
+                    .strip_prefix(&repo_path)
+                    .map_err(|_| {
+                        DotfilesError::Path("Could not compute repo relative path".to_string())
+                    })?
+                    .to_string_lossy()
+                    .to_string();
+
+                config.add_file_to_tool(&tool, &repo_relative, &dest_path, profile.as_deref())?;
+
+                if !dry_run {
+                    config.save(false)?;
+                    println!(
+                        "{} Registered {} from repo (no copy needed)",
+                        "✓".green(),
+                        repo_file.display()
+                    );
+                } else {
+                    println!(
+                        "  [DRY RUN] Would register {} from repo",
+                        repo_file.display()
+                    );
+                }
+            } else {
+                // Normal flow: copy file to repo
+                let source_path = std::path::Path::new(&file);
+                if !source_path.exists() {
+                    return Err(DotfilesError::Path(format!(
+                        "Source file does not exist: {}",
+                        file
+                    )));
+                }
+
+                let dest_path = if let Some(dest) = dest {
+                    std::path::Path::new(&dest).to_path_buf()
+                } else {
+                    // Use source path relative to home
+                    let home = dirs::home_dir().ok_or_else(|| {
+                        DotfilesError::Config("Could not find home directory".to_string())
+                    })?;
+                    source_path
+                        .strip_prefix(&home)
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|_| source_path.to_path_buf())
+                };
+
+                add_file(
+                    &mut config,
+                    &tool,
+                    source_path,
+                    &dest_path,
+                    profile.as_deref(),
+                    &mut fs_manager,
+                )?;
+            }
+
+            if dry_run {
+                dry_run_tracker.display_summary();
+            }
+        }
+        Commands::Commit {
+            profile,
+            message,
+            dry_run,
+        } => {
+            let config = Config::load()?;
+            let mut dry_run_tracker = DryRun::new();
+
+            sync_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
+
+            if dry_run {
+                dry_run_tracker.display_summary();
+            } else {
+                // Auto-commit changes
+                let repo_path = config.get_repo_path()?;
+                let repo = init_repo(&repo_path)?;
+                let changes = detect_changes(&repo)?;
+
+                if !changes.is_empty() {
+                    let commit_message = if let Some(msg) = message {
+                        msg
+                    } else {
+                        prompt_commit_message(&changes)?
+                    };
+                    stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
+                    commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
+                }
+            }
+        }
+        Commands::Rm {
+            tool,
+            file,
+            dry_run,
+        } => {
+            let mut config = Config::load()?;
+            let mut dry_run_tracker = DryRun::new();
+            let mut fs_manager =
+                file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
+            remove_file(&mut config, &tool, &file, &mut fs_manager)?;
+
+            if dry_run {
+                dry_run_tracker.display_summary();
+            }
+        }
+        Commands::LsFiles { profile } => {
+            let config = Config::load()?;
+            let files = config.get_tracked_files(profile.as_deref())?;
+
+            println!("\n{}", "Tracked files:".bold().cyan());
+            for file in files {
+                println!(
+                    "  {} -> {}",
+                    file.repo_path.display(),
+                    file.dest_path.display()
+                );
+            }
         }
         Commands::Apply {
             profile,

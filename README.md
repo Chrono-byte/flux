@@ -53,25 +53,24 @@ sudo cp target/release/flux /usr/local/bin/
 flux init
 
 # Add a file
-flux file add sway ~/.config/sway/config --dest .config/sway/config
+flux add sway ~/.config/sway/config --dest .config/sway/config
 
-# Sync files (create symlinks)
-flux file sync
+# Commit files (sync and create symlinks)
+flux commit
 
 # Check status
-flux file status
+flux status
 ```
 
 ## Commands
 
-### File Management
+### File Management (Git-like Syntax)
 
-- `flux file add <tool> <file> [--dest PATH] [--profile NAME] [--from-repo]` - Add file to tracking (use `--from-repo` to register a file that already exists in repo without copying)
-- `flux file add-browser [browser]` - Auto-detect and add browser profiles (firefox, zen, alacritty, starship, or all)
-- `flux file sync [--profile NAME] [--dry-run]` - Sync tracked files (create symlinks)
-- `flux file status [--profile NAME]` - Show sync status of all tracked files
-- `flux file list [--profile NAME]` - List all tracked files
-- `flux file remove <tool> <file>` - Remove file from tracking
+- `flux add <tool> <file> [--dest PATH] [--profile NAME] [--from-repo]` - Add file to tracking (use `--from-repo` to register a file that already exists in repo without copying)
+- `flux commit [--profile NAME] [--message MSG] [--dry-run]` - Sync tracked files (create symlinks) and commit changes
+- `flux rm <tool> <file> [--dry-run]` - Remove file from tracking
+- `flux ls-files [--profile NAME]` - List all tracked files (alias: `flux list`)
+- `flux status [--profile NAME]` - Show sync status of all tracked files
 
 ### Profiles
 
@@ -166,8 +165,9 @@ Auto-detects and backs up Firefox and Zen browser profiles:
 - `storage/` - Extension storage
 
 ```bash
-flux file add-browser
-flux file sync
+# Add browser profiles manually using flux add
+flux add firefox ~/.mozilla/firefox/profile/prefs.js --dest .mozilla/firefox/profile/prefs.js
+flux commit
 ```
 
 ## Profiles Commands
@@ -176,9 +176,9 @@ Profiles allow different configurations for different machines or use cases. Pro
 
 ```bash
 flux profile create work
-flux file add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
+flux add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
 flux profile switch work
-flux file sync
+flux commit
 ```
 
 ## Git Integration
@@ -225,24 +225,25 @@ flux push
 
 ```bash
 flux init
-flux file add sway ~/.config/sway/config
-flux file sync
+flux add sway ~/.config/sway/config
+flux commit
 ```
 
 ### Browser Settings
 
 ```bash
-flux file add-browser
-flux file sync  # Skips if browser is running
+# Add browser profiles manually
+flux add firefox ~/.mozilla/firefox/profile/prefs.js --dest .mozilla/firefox/profile/prefs.js
+flux commit  # Skips if browser is running
 ```
 
 ### How to use Profiles
 
 ```bash
 flux profile create work
-flux file add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
+flux add sway ~/.config/sway/config.work --profile work --dest .config/sway/config
 flux profile switch work
-flux file sync
+flux commit
 ```
 
 ### Declarative Configuration
@@ -257,7 +258,7 @@ flux apply --dry-run
 
 ## Troubleshooting
 
-**Files being skipped**: Check if files are locked (browser/application running). Use `flux file status` for details.
+**Files being skipped**: Check if files are locked (browser/application running). Use `flux status` for details.
 
 **Symlinks not working**: Check `symlink_resolution` in config. Use `flux maintain validate` to check for issues.
 
