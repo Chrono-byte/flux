@@ -96,6 +96,7 @@ pub fn sync_files(
     profile: Option<&str>,
     dry_run_tracker: &mut DryRun,
     is_dry_run_mode: bool,
+    verbose: bool,
 ) -> Result<()> {
     let tracked_files = config.get_tracked_files(profile)?;
     let symlink_resolution = config.general.symlink_resolution;
@@ -108,27 +109,83 @@ pub fn sync_files(
         .get_backup_dir()?
         .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
 
-    println!("{} Syncing {} file(s)...", "→".cyan(), tracked_files.len());
+    if verbose {
+        println!("{} Syncing {} file(s)...", "→".cyan(), tracked_files.len());
+    }
+
+    let mut stats = SyncStats::default();
 
     for (idx, file) in tracked_files.iter().enumerate() {
-        println!(
-            "\n{} [{}/{}] Processing: {}",
-            "→".cyan(),
-            idx + 1,
-            tracked_files.len(),
-            file.dest_path.display()
-        );
-        sync_file(
+        if verbose {
+            println!(
+                "\n{} [{}/{}] Processing: {}",
+                "→".cyan(),
+                idx + 1,
+                tracked_files.len(),
+                file.dest_path.display()
+            );
+        }
+        let result = sync_file(
             file,
             &symlink_resolution,
             config,
             &mut fs_manager,
             Some(&backup_dir),
+            verbose,
         )?;
+        stats.update(result);
     }
 
-    println!("\n{} Sync complete", "✓".green());
+    // Print summary
+    if verbose {
+        println!("\n{} Sync complete", "✓".green());
+    } else {
+        stats.print_summary();
+    }
     Ok(())
+}
+
+#[derive(Default)]
+struct SyncStats {
+    synced: usize,
+    skipped: usize,
+}
+
+impl SyncStats {
+    fn update(&mut self, result: SyncResult) {
+        match result {
+            SyncResult::Synced => self.synced += 1,
+            SyncResult::Skipped => self.skipped += 1,
+        }
+    }
+
+    fn print_summary(&self) {
+        let total = self.synced + self.skipped;
+        if total == 0 {
+            println!("{} No files to sync", "⊘".yellow());
+            return;
+        }
+
+        let mut parts = Vec::new();
+        if self.synced > 0 {
+            parts.push(format!("{} synced", self.synced));
+        }
+        if self.skipped > 0 {
+            parts.push(format!("{} skipped", self.skipped));
+        }
+
+        if parts.is_empty() {
+            println!("{} Sync complete", "✓".green());
+        } else {
+            println!("{} Sync complete: {}", "✓".green(), parts.join(", "));
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SyncResult {
+    Synced,
+    Skipped,
 }
 
 /// Backup all currently tracked files.
@@ -552,14 +609,25 @@ fn sync_file(
     config: &Config,
     fs_manager: &mut FileSystemManager,
     backup_dir: Option<&Path>,
-) -> Result<()> {
-    println!("  Repo: {}", file.repo_path.display());
-    println!("  Dest: {}", file.dest_path.display());
+    verbose: bool,
+) -> Result<SyncResult> {
+    if verbose {
+        println!("  Repo: {}", file.repo_path.display());
+        println!("  Dest: {}", file.dest_path.display());
+    }
 
     // --- 1. Precondition Checks ---
     if !file.repo_path.exists() {
-        println!("  {} Repo file does not exist, skipping", "⊘".yellow());
-        return Ok(());
+        if verbose {
+            println!("  {} Repo file does not exist, skipping", "⊘".yellow());
+        } else {
+            eprintln!(
+                "  {} Skipping {} (repo file does not exist)",
+                "⊘".yellow(),
+                file.dest_path.display()
+            );
+        }
+        return Ok(SyncResult::Skipped);
     }
 
     // Check if destination file is locked (e.g., in use by another process)
@@ -570,11 +638,19 @@ fn sync_file(
                     "File {} is locked (may be in use), skipping",
                     file.dest_path.display()
                 );
-                println!(
-                    "  {} File is locked (may be in use by another application), skipping",
-                    "⚠".yellow()
-                );
-                return Ok(());
+                if verbose {
+                    println!(
+                        "  {} File is locked (may be in use by another application), skipping",
+                        "⚠".yellow()
+                    );
+                } else {
+                    eprintln!(
+                        "  {} Skipping {} (file is locked)",
+                        "⚠".yellow(),
+                        file.dest_path.display()
+                    );
+                }
+                return Ok(SyncResult::Skipped);
             }
             Ok(false) => {
                 debug!("File {} is not locked", file.dest_path.display());
@@ -594,29 +670,41 @@ fn sync_file(
     // Backup *before* determining action, as any action (except DoNothing)
     // might modify the destination. This simplifies all downstream logic.
     if let Some(path_to_backup) = get_path_to_backup(&file.dest_path) {
-        println!("  Creating backup before any modifications...");
+        if verbose {
+            println!("  Creating backup before any modifications...");
+        }
         fs_manager.backup_file(&path_to_backup, config, backup_dir)?;
     }
 
     // --- 3. Determine Action ---
-    let action = determine_sync_action(file)?;
+    let action = determine_sync_action(file, verbose)?;
 
     // --- 4. Execute Action ---
     match action {
         SyncAction::DoNothing => {
-            Ok(()) // Already logged by determine_sync_action
+            Ok(SyncResult::Skipped) // Already correctly linked
         }
         SyncAction::CreateSymlink => {
-            println!("  Destination needs to be symlinked.");
-            create_symlink_managed(file, resolution, fs_manager)?;
-            Ok(())
+            if verbose {
+                println!("  Destination needs to be symlinked.");
+            }
+            create_symlink_managed(file, resolution, fs_manager, verbose)?;
+            Ok(SyncResult::Synced)
         }
         SyncAction::UpdateRepoFromDest => {
-            println!(
-                "{} Repo file {} is empty but destination has content. Updating repo from destination.",
-                "⚠".yellow(),
-                file.repo_path.display()
-            );
+            if verbose {
+                println!(
+                    "{} Repo file {} is empty but destination has content. Updating repo from destination.",
+                    "⚠".yellow(),
+                    file.repo_path.display()
+                );
+            } else {
+                eprintln!(
+                    "  {} Updating {} (repo empty, destination has content)",
+                    "⚠".yellow(),
+                    file.dest_path.display()
+                );
+            }
             if let Some(parent) = file.repo_path.parent() {
                 fs_manager.create_dir_all(parent)?;
             }
@@ -626,34 +714,40 @@ fn sync_file(
                 fs_manager.copy(&file.dest_path, &file.repo_path)?;
             }
 
-            if !fs_manager.is_dry_run {
+            if verbose && !fs_manager.is_dry_run {
                 println!("{} Updated repo file from destination", "✓".green());
             }
             // Now that repo is updated, create the symlink
-            create_symlink_managed(file, resolution, fs_manager)?;
-            Ok(())
+            create_symlink_managed(file, resolution, fs_manager, verbose)?;
+            Ok(SyncResult::Synced)
         }
         SyncAction::ResolveConflict => {
-            handle_file_conflict(file, resolution, fs_manager)?;
-            Ok(())
+            handle_file_conflict(file, resolution, fs_manager, verbose)?;
+            Ok(SyncResult::Synced)
         }
     }
 }
 
 /// Determines what action to take for a file. (No side-effects)
-fn determine_sync_action(file: &TrackedFile) -> Result<SyncAction> {
+fn determine_sync_action(file: &TrackedFile, verbose: bool) -> Result<SyncAction> {
     if !file.dest_path.exists() && !file.dest_path.is_symlink() {
-        println!("  Destination does not exist");
+        if verbose {
+            println!("  Destination does not exist");
+        }
         return Ok(SyncAction::CreateSymlink);
     }
 
-    println!("  Destination exists");
+    if verbose {
+        println!("  Destination exists");
+    }
 
     // Check if it's a symlink and already correctly linked
     if file.dest_path.is_symlink()
         && let Ok(link_target) = fs::read_link(&file.dest_path)
     {
-        println!("  Is symlink pointing to: {}", link_target.display());
+        if verbose {
+            println!("  Is symlink pointing to: {}", link_target.display());
+        }
         let resolved_target = if link_target.is_absolute() {
             link_target
         } else {
@@ -666,15 +760,21 @@ fn determine_sync_action(file: &TrackedFile) -> Result<SyncAction> {
         let normalized_repo = normalize_path(&file.repo_path);
 
         if normalized_target == normalized_repo {
-            println!("  {} Already correctly linked", "✓".green());
+            if verbose {
+                println!("  {} Already correctly linked", "✓".green());
+            }
             return Ok(SyncAction::DoNothing);
         } else {
-            println!("  {} Symlink points to wrong location", "⚠".yellow());
+            if verbose {
+                println!("  {} Symlink points to wrong location", "⚠".yellow());
+            }
             return Ok(SyncAction::ResolveConflict);
         }
     }
 
-    println!("  Is regular file/directory (not symlink)");
+    if verbose {
+        println!("  Is regular file/directory (not symlink)");
+    }
 
     // SAFETY CHECK: Don't overwrite non-empty destination with empty repo file
     let repo_is_empty = if file.repo_path.is_file() {
@@ -689,20 +789,28 @@ fn determine_sync_action(file: &TrackedFile) -> Result<SyncAction> {
     };
 
     if repo_is_empty && dest_has_content {
-        println!(
-            "  {} Safety check: Repo is empty, destination has content",
-            "⚠".yellow()
-        );
+        if verbose {
+            println!(
+                "  {} Safety check: Repo is empty, destination has content",
+                "⚠".yellow()
+            );
+        }
         return Ok(SyncAction::UpdateRepoFromDest);
     }
 
     // Check if files are different
-    println!("  Comparing files...");
+    if verbose {
+        println!("  Comparing files...");
+    }
     if files_differ(&file.repo_path, &file.dest_path)? {
-        println!("  {} Files differ", "↻".yellow());
+        if verbose {
+            println!("  {} Files differ", "↻".yellow());
+        }
         Ok(SyncAction::ResolveConflict)
     } else {
-        println!("  {} Files are identical", "✓".green());
+        if verbose {
+            println!("  {} Files are identical", "✓".green());
+        }
         // Files are identical, but dest is not a symlink. Convert it.
         Ok(SyncAction::CreateSymlink)
     }
@@ -714,10 +822,13 @@ fn handle_file_conflict(
     file: &TrackedFile,
     resolution: &SymlinkResolution,
     fs_manager: &mut FileSystemManager,
+    verbose: bool,
 ) -> Result<()> {
     let conflict_resolution = if fs_manager.is_dry_run {
-        println!("  [DRY RUN] Files differ, would prompt for conflict resolution");
-        println!("  [DRY RUN] Assuming: Backup and Replace");
+        if verbose {
+            println!("  [DRY RUN] Files differ, would prompt for conflict resolution");
+            println!("  [DRY RUN] Assuming: Backup and Replace");
+        }
         ConflictResolution::BackupAndReplace
     } else {
         // Backup was already created in sync_file
@@ -726,11 +837,15 @@ fn handle_file_conflict(
 
     match conflict_resolution {
         ConflictResolution::BackupAndReplace => {
-            println!("  User chose: Backup and Replace");
-            create_symlink_managed(file, resolution, fs_manager)?;
+            if verbose {
+                println!("  User chose: Backup and Replace");
+            }
+            create_symlink_managed(file, resolution, fs_manager, verbose)?;
         }
         ConflictResolution::Skip => {
-            println!("  {} User chose: Skip", "⊘".yellow());
+            if verbose {
+                println!("  {} User chose: Skip", "⊘".yellow());
+            }
             return Ok(());
         }
         ConflictResolution::ViewDiff => {
@@ -740,10 +855,12 @@ fn handle_file_conflict(
                 let post_diff_resolution = prompt_conflict(&file.dest_path)?;
                 match post_diff_resolution {
                     ConflictResolution::BackupAndReplace => {
-                        create_symlink_managed(file, resolution, fs_manager)?;
+                        create_symlink_managed(file, resolution, fs_manager, verbose)?;
                     }
                     ConflictResolution::Skip => {
-                        println!("{} Skipped {}", "⊘".yellow(), file.dest_path.display());
+                        if verbose {
+                            println!("{} Skipped {}", "⊘".yellow(), file.dest_path.display());
+                        }
                     }
                     ConflictResolution::Cancel => {
                         return Err(DotfilesError::Cancelled);
@@ -751,9 +868,11 @@ fn handle_file_conflict(
                     _ => {} // ViewDiff again is not an option here
                 }
             } else {
-                println!("  [DRY RUN] Would show diff and prompt again");
-                println!("  [DRY RUN] Assuming: Backup and Replace");
-                create_symlink_managed(file, resolution, fs_manager)?;
+                if verbose {
+                    println!("  [DRY RUN] Would show diff and prompt again");
+                    println!("  [DRY RUN] Assuming: Backup and Replace");
+                }
+                create_symlink_managed(file, resolution, fs_manager, verbose)?;
             }
         }
         ConflictResolution::Cancel => {
@@ -769,6 +888,7 @@ fn create_symlink_managed(
     file: &TrackedFile,
     resolution: &SymlinkResolution,
     fs_manager: &mut FileSystemManager,
+    verbose: bool,
 ) -> Result<()> {
     // SECURITY: Validate symlink target is within repo
     if let Err(e) = security::validate_symlink_target(&file.repo_path, &file.repo_path) {
@@ -795,12 +915,14 @@ fn create_symlink_managed(
     if *resolution == SymlinkResolution::Replace {
         // ... (This logic is OK, but we must use atomic rename)
         let temp_path = file.dest_path.with_extension("flux-temp-copy");
-        println!("    Copying file instead of symlinking (Replace strategy)...");
+        if verbose {
+            println!("    Copying file instead of symlinking (Replace strategy)...");
+        }
 
         fs_manager.copy(&file.repo_path, &temp_path)?;
         fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
 
-        if !fs_manager.is_dry_run {
+        if verbose && !fs_manager.is_dry_run {
             println!(
                 "{} Copied {} -> {}",
                 "✓".green(),
@@ -824,7 +946,9 @@ fn create_symlink_managed(
         }
         SymlinkResolution::Absolute => file.repo_path.clone(),
         SymlinkResolution::Follow => {
-            println!("    'Follow' resolution strategy is treated as 'Auto'.");
+            if verbose {
+                println!("    'Follow' resolution strategy is treated as 'Auto'.");
+            }
             pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
                 .unwrap_or_else(|| file.repo_path.clone())
         }
@@ -840,24 +964,28 @@ fn create_symlink_managed(
             .map_or("", |s| s.to_str().unwrap_or(""))
     ));
 
-    println!(
-        "    Creating temp symlink: {} -> {}",
-        temp_link_path.display(),
-        link_target.display()
-    );
+    if verbose {
+        println!(
+            "    Creating temp symlink: {} -> {}",
+            temp_link_path.display(),
+            link_target.display()
+        );
+    }
     // Ensure old temp link is gone (in case of failed previous run)
     let _ = fs_manager.remove_file(&temp_link_path);
     fs_manager.symlink(&link_target, &temp_link_path)?;
 
     // Atomically rename the temp symlink to the final destination
-    println!(
-        "    Atomically moving link: {} -> {}",
-        temp_link_path.display(),
-        file.dest_path.display()
-    );
+    if verbose {
+        println!(
+            "    Atomically moving link: {} -> {}",
+            temp_link_path.display(),
+            file.dest_path.display()
+        );
+    }
     fs_manager.rename(&temp_link_path, &file.dest_path)?;
 
-    if !fs_manager.is_dry_run {
+    if verbose && !fs_manager.is_dry_run {
         println!(
             "    {} Linked {} -> {}",
             "✓".green(),

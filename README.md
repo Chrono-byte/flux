@@ -67,7 +67,7 @@ flux status
 ### File Management
 
 - `flux add <tool> <file> [--dest PATH] [--profile NAME] [--from-repo]` - Add file to tracking (use `--from-repo` to register a file that already exists in repo without copying)
-- `flux commit [--profile NAME] [--message MSG] [--dry-run]` - Sync tracked files (create symlinks) and commit changes
+- `flux commit [--profile NAME] [--message MSG] [--dry-run] [--verbose]` - Sync tracked files (create symlinks) and commit changes. Use `--verbose` to show detailed progress for each file.
 - `flux rm <tool> <file> [--dry-run]` - Remove file from tracking
 - `flux ls-files [--profile NAME]` - List all tracked files (alias: `flux list`)
 - `flux status [--profile NAME]` - Show sync status of all tracked files

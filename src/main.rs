@@ -72,9 +72,11 @@ enum Commands {
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
+        /// Verbose output (show detailed progress for each file)
+        #[arg(long, short = 'v')]
+        verbose: bool,
     },
     /// Remove a file from tracking
-    #[command(visible_alias = "rm")]
     Rm {
         /// Tool name
         tool: String,
@@ -85,7 +87,7 @@ enum Commands {
         dry_run: bool,
     },
     /// List all tracked files
-    #[command(visible_alias = "ls-files")]
+    #[command(visible_alias = "list")]
     LsFiles {
         /// Profile name (default: current profile)
         #[arg(long)]
@@ -781,11 +783,18 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             profile,
             message,
             dry_run,
+            verbose,
         } => {
             let config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
 
-            sync_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
+            sync_files(
+                &config,
+                profile.as_deref(),
+                &mut dry_run_tracker,
+                dry_run,
+                verbose,
+            )?;
 
             if dry_run {
                 dry_run_tracker.display_summary();
