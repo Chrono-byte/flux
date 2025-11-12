@@ -23,6 +23,8 @@ pub struct ApplyOptions<'a> {
     pub yes: bool,
     /// Optional description for this apply operation
     pub description: Option<&'a str>,
+    /// Force sync: replace all files that aren't correct symlinks (no backups)
+    pub force: bool,
 }
 
 /// State comparison result showing what needs to change
@@ -49,13 +51,13 @@ impl StateDiff {
 }
 
 /// Compare declared state (from config) with actual system state
-pub fn compare_states(config: &Config, profile: Option<&str>) -> Result<StateDiff> {
+pub fn compare_states(config: &Config, profile: Option<&str>, force: bool) -> Result<StateDiff> {
     let mut diff = StateDiff::new();
 
     // Compare files
     let tracked_files = config.get_tracked_files(profile)?;
     for file in tracked_files {
-        if needs_sync(&file)? {
+        if needs_sync(&file, force)? {
             diff.files_to_sync.push(file);
         }
     }
@@ -64,7 +66,7 @@ pub fn compare_states(config: &Config, profile: Option<&str>) -> Result<StateDif
 }
 
 /// Check if a file needs to be synced
-fn needs_sync(file: &TrackedFile) -> Result<bool> {
+fn needs_sync(file: &TrackedFile, force: bool) -> Result<bool> {
     if !file.repo_path.exists() {
         return Ok(false); // Skip if repo file doesn't exist
     }
@@ -91,7 +93,18 @@ fn needs_sync(file: &TrackedFile) -> Result<bool> {
         if normalized_target != normalized_repo {
             return Ok(true); // Symlink points to wrong location
         }
-        return Ok(false); // Already correctly linked
+
+        // In force mode, we still sync if it's not a symlink, but if it's correctly linked, we're done
+        if !force {
+            return Ok(false); // Already correctly linked
+        }
+        // In force mode, if it's correctly linked, no need to sync
+        return Ok(false);
+    }
+
+    // If force mode, always sync if it's not a correct symlink (don't check content)
+    if force {
+        return Ok(true); // Not a symlink or wrong symlink, force replace
     }
 
     // Check if files differ
@@ -150,10 +163,17 @@ pub fn display_preview(diff: &StateDiff) {
 
 /// Apply configuration changes using atomic transactions
 pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
-    println!("{} Applying configuration...", "→".cyan().bold());
+    if options.force {
+        println!(
+            "{} Force applying configuration (no backups, using repo version)...",
+            "→".cyan().bold()
+        );
+    } else {
+        println!("{} Applying configuration...", "→".cyan().bold());
+    }
 
     // Compare states
-    let diff = compare_states(options.config, options.profile)?;
+    let diff = compare_states(options.config, options.profile, options.force)?;
 
     if diff.is_empty() {
         println!(
@@ -210,26 +230,42 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
         backup_dir.join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
 
     for file in &diff.files_to_sync {
-        // Check if we need to backup
-        if file.dest_path.exists() {
-            let backup_path = transaction_backup_dir.join(
-                file.dest_path
-                    .strip_prefix(&home)
-                    .unwrap_or(&file.dest_path),
-            );
-
-            transaction.add_operation(FileOperation::BackupAndReplace {
-                source: file.repo_path.clone(),
-                target: file.dest_path.clone(),
-                backup_path: backup_path.clone(),
-                resolution: symlink_resolution,
-            });
-        } else {
+        if options.force {
+            // Force mode: no backups, just remove and create symlink
+            if file.dest_path.exists() {
+                // Remove existing file/symlink first
+                transaction.add_operation(FileOperation::RemoveSymlink {
+                    target: file.dest_path.clone(),
+                });
+            }
+            // Then create the symlink
             transaction.add_operation(FileOperation::CreateSymlink {
                 source: file.repo_path.clone(),
                 target: file.dest_path.clone(),
                 resolution: symlink_resolution,
             });
+        } else {
+            // Normal mode: backup existing files
+            if file.dest_path.exists() {
+                let backup_path = transaction_backup_dir.join(
+                    file.dest_path
+                        .strip_prefix(&home)
+                        .unwrap_or(&file.dest_path),
+                );
+
+                transaction.add_operation(FileOperation::BackupAndReplace {
+                    source: file.repo_path.clone(),
+                    target: file.dest_path.clone(),
+                    backup_path: backup_path.clone(),
+                    resolution: symlink_resolution,
+                });
+            } else {
+                transaction.add_operation(FileOperation::CreateSymlink {
+                    source: file.repo_path.clone(),
+                    target: file.dest_path.clone(),
+                    resolution: symlink_resolution,
+                });
+            }
         }
     }
 

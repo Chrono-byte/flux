@@ -13,11 +13,17 @@ use std::fs;
 /// - FileSystemManager handles all operations
 /// - All file operations are logged but not executed
 /// - No files are copied, removed, or symlinked
+///
+/// If `no_backup` is true:
+/// - Skips creating backups
+/// - Skips copying current files to repo
+/// - Just removes existing files and creates symlinks to repo (assumes repo files exist)
 pub fn migrate_files(
     config: &Config,
     profile: Option<&str>,
     dry_run: &mut DryRun,
     is_dry_run_mode: bool,
+    no_backup: bool,
 ) -> Result<()> {
     let mut fs_manager = FileSystemManager::new(dry_run, is_dry_run_mode);
 
@@ -29,6 +35,14 @@ pub fn migrate_files(
             "{} No discrepancies found - all files are correctly configured.",
             "✓".green()
         );
+        if no_backup {
+            println!(
+                "  {} --no-backup flag was specified, but no files need migration.",
+                "⊘".yellow()
+            );
+        }
+        // Don't display dry-run summary here - let the caller handle it
+        // This ensures consistent behavior whether there are discrepancies or not
         return Ok(());
     }
 
@@ -57,6 +71,7 @@ pub fn migrate_files(
             &symlink_resolution,
             config,
             &mut fs_manager,
+            no_backup,
         )? {
             MigrationResult::Migrated => {
                 migrated_count += 1;
@@ -89,6 +104,7 @@ fn migrate_file(
     resolution: &SymlinkResolution,
     config: &Config,
     fs_manager: &mut FileSystemManager,
+    no_backup: bool,
 ) -> Result<MigrationResult> {
     match issue {
         IssueType::Missing => {
@@ -119,6 +135,7 @@ fn migrate_file(
         IssueType::NotSymlink | IssueType::ContentDiffers => {
             // File exists but isn't a symlink or content differs
             // Strategy: Copy current file to repo, then create symlink
+            // OR (if no_backup): Just remove and create symlink (assumes repo file exists)
 
             if !file.dest_path.exists() {
                 return Ok(MigrationResult::Skipped(
@@ -126,35 +143,59 @@ fn migrate_file(
                 ));
             }
 
-            // Backup destination before modifying (fs_manager handles dry run)
-            println!("  Creating backup...");
-            fs_manager.backup_file(&file.dest_path, config, None)?;
+            if no_backup {
+                // Skip backup and copy - just remove and create symlink
+                if !file.repo_path.exists() {
+                    return Ok(MigrationResult::Skipped(
+                        "Repo file does not exist - cannot migrate without backup".to_string(),
+                    ));
+                }
 
-            // Copy current file to repo (fs_manager handles dry run)
-            println!("  Copying current file to repo...");
-            if let Some(parent) = file.repo_path.parent() {
-                fs_manager.create_dir_all(parent)?;
-            }
+                // Remove existing file (fs_manager handles dry run)
+                fs_manager.remove_file(&file.dest_path)?;
+                if !fs_manager.is_dry_run {
+                    println!("  {} Removed existing file", "✓".green());
+                }
 
-            if file.dest_path.is_dir() {
-                fs_manager.copy_dir_all(&file.dest_path, &file.repo_path)?;
+                // Create symlink (fs_manager handles dry run)
+                let link_target = compute_link_target(file, resolution)?;
+                fs_manager.symlink(&link_target, &file.dest_path)?;
+                if !fs_manager.is_dry_run {
+                    println!("  {} Created symlink to repo", "✓".green());
+                }
+                Ok(MigrationResult::Migrated)
             } else {
-                fs_manager.copy(&file.dest_path, &file.repo_path)?;
-            }
-            if !fs_manager.is_dry_run {
-                println!("  {} Copied to repo", "✓".green());
-            }
+                // Normal flow: backup, copy to repo, remove, create symlink
+                // Backup destination before modifying (fs_manager handles dry run)
+                println!("  Creating backup...");
+                fs_manager.backup_file(&file.dest_path, config, None)?;
 
-            // Remove existing file (fs_manager handles dry run)
-            fs_manager.remove_file(&file.dest_path)?;
+                // Copy current file to repo (fs_manager handles dry run)
+                println!("  Copying current file to repo...");
+                if let Some(parent) = file.repo_path.parent() {
+                    fs_manager.create_dir_all(parent)?;
+                }
 
-            // Create symlink (fs_manager handles dry run)
-            let link_target = compute_link_target(file, resolution)?;
-            fs_manager.symlink(&link_target, &file.dest_path)?;
-            if !fs_manager.is_dry_run {
-                println!("  {} Created symlink", "✓".green());
+                if file.dest_path.is_dir() {
+                    fs_manager.copy_dir_all(&file.dest_path, &file.repo_path)?;
+                } else {
+                    fs_manager.copy(&file.dest_path, &file.repo_path)?;
+                }
+                if !fs_manager.is_dry_run {
+                    println!("  {} Copied to repo", "✓".green());
+                }
+
+                // Remove existing file (fs_manager handles dry run)
+                fs_manager.remove_file(&file.dest_path)?;
+
+                // Create symlink (fs_manager handles dry run)
+                let link_target = compute_link_target(file, resolution)?;
+                fs_manager.symlink(&link_target, &file.dest_path)?;
+                if !fs_manager.is_dry_run {
+                    println!("  {} Created symlink", "✓".green());
+                }
+                Ok(MigrationResult::Migrated)
             }
-            Ok(MigrationResult::Migrated)
         }
 
         IssueType::WrongTarget | IssueType::BrokenSymlink => {
@@ -234,63 +275,87 @@ fn migrate_file(
                 None
             };
 
-            // Copy current file content to repo if we have a source
-            if let Some(source) = &source_to_copy {
-                // Check if source is empty
-                let source_is_empty = if source.is_file() {
-                    fs::metadata(source).map(|m| m.len() == 0).unwrap_or(false)
-                } else {
-                    false
-                };
-
-                if source_is_empty {
-                    if !fs_manager.is_dry_run {
-                        println!("  {} Source file is empty - nothing to copy", "⊘".yellow());
-                    }
-                    // Still create the repo file structure even if empty
-                    if let Some(parent) = file.repo_path.parent() {
-                        fs_manager.create_dir_all(parent)?;
-                    }
-                    // Create empty file if it doesn't exist (using copy from empty source)
-                    if !file.repo_path.exists() {
-                        fs_manager.copy(source, &file.repo_path)?;
-                    }
-                } else {
-                    println!("  Creating backup...");
-                    fs_manager.backup_file(source, config, None)?;
-
-                    // Copy current file to repo (fs_manager handles dry run)
-                    println!("  Copying current file to repo...");
-                    if let Some(parent) = file.repo_path.parent() {
-                        fs_manager.create_dir_all(parent)?;
-                    }
-
-                    if source.is_dir() {
-                        fs_manager.copy_dir_all(source, &file.repo_path)?;
-                    } else {
-                        fs_manager.copy(source, &file.repo_path)?;
-                    }
-                    if !fs_manager.is_dry_run {
-                        println!("  {} Copied to repo", "✓".green());
-                    }
+            if no_backup {
+                // Skip backup and copy - just remove and create symlink
+                if !file.repo_path.exists() {
+                    return Ok(MigrationResult::Skipped(
+                        "Repo file does not exist - cannot migrate without backup".to_string(),
+                    ));
                 }
-            } else if !fs_manager.is_dry_run {
-                println!(
-                    "  {} Warning: Cannot read source file, repo may be empty",
-                    "⚠".yellow()
-                );
-            }
 
-            // Remove old symlink/file (fs_manager handles dry run)
-            fs_manager.remove_file(&file.dest_path)?;
+                // Remove old symlink/file (fs_manager handles dry run)
+                fs_manager.remove_file(&file.dest_path)?;
+                if !fs_manager.is_dry_run {
+                    println!("  {} Removed existing file/symlink", "✓".green());
+                }
 
-            // Create new symlink (fs_manager handles dry run)
-            let link_target = compute_link_target(file, resolution)?;
-            fs_manager.symlink(&link_target, &file.dest_path)?;
-            if !fs_manager.is_dry_run {
-                println!("  {} Fixed symlink", "✓".green());
+                // Create new symlink (fs_manager handles dry run)
+                let link_target = compute_link_target(file, resolution)?;
+                fs_manager.symlink(&link_target, &file.dest_path)?;
+                if !fs_manager.is_dry_run {
+                    println!("  {} Created symlink to repo", "✓".green());
+                }
+                Ok(MigrationResult::Migrated)
+            } else {
+                // Normal flow: backup, copy to repo, remove, create symlink
+                // Copy current file content to repo if we have a source
+                if let Some(source) = &source_to_copy {
+                    // Check if source is empty
+                    let source_is_empty = if source.is_file() {
+                        fs::metadata(source).map(|m| m.len() == 0).unwrap_or(false)
+                    } else {
+                        false
+                    };
+
+                    if source_is_empty {
+                        if !fs_manager.is_dry_run {
+                            println!("  {} Source file is empty - nothing to copy", "⊘".yellow());
+                        }
+                        // Still create the repo file structure even if empty
+                        if let Some(parent) = file.repo_path.parent() {
+                            fs_manager.create_dir_all(parent)?;
+                        }
+                        // Create empty file if it doesn't exist (using copy from empty source)
+                        if !file.repo_path.exists() {
+                            fs_manager.copy(source, &file.repo_path)?;
+                        }
+                    } else {
+                        println!("  Creating backup...");
+                        fs_manager.backup_file(source, config, None)?;
+
+                        // Copy current file to repo (fs_manager handles dry run)
+                        println!("  Copying current file to repo...");
+                        if let Some(parent) = file.repo_path.parent() {
+                            fs_manager.create_dir_all(parent)?;
+                        }
+
+                        if source.is_dir() {
+                            fs_manager.copy_dir_all(source, &file.repo_path)?;
+                        } else {
+                            fs_manager.copy(source, &file.repo_path)?;
+                        }
+                        if !fs_manager.is_dry_run {
+                            println!("  {} Copied to repo", "✓".green());
+                        }
+                    }
+                } else if !fs_manager.is_dry_run {
+                    println!(
+                        "  {} Warning: Cannot read source file, repo may be empty",
+                        "⚠".yellow()
+                    );
+                }
+
+                // Remove old symlink/file (fs_manager handles dry run)
+                fs_manager.remove_file(&file.dest_path)?;
+
+                // Create new symlink (fs_manager handles dry run)
+                let link_target = compute_link_target(file, resolution)?;
+                fs_manager.symlink(&link_target, &file.dest_path)?;
+                if !fs_manager.is_dry_run {
+                    println!("  {} Fixed symlink", "✓".green());
+                }
+                Ok(MigrationResult::Migrated)
             }
-            Ok(MigrationResult::Migrated)
         }
 
         IssueType::MissingRepo => {

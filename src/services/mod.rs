@@ -7,7 +7,7 @@ pub use browser::{
     detect_zen_profiles, get_browser_profile_files,
 };
 pub use git::{
-    add_remote, commit_changes, detect_changes, init_repo, list_remotes, push_to_remote,
-    remove_remote, set_remote_url, stage_changes,
+    add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
+    push_to_remote, remove_remote, set_remote_url, stage_changes,
 };
 pub use transactions::{FileOperation, Transaction};

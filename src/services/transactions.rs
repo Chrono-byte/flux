@@ -223,6 +223,23 @@ impl Transaction {
             ));
         }
 
+        // Build a set of targets that are created after being removed
+        // (to skip verification for RemoveSymlink operations that are immediately followed by CreateSymlink)
+        let mut targets_created_after_removal = std::collections::HashSet::new();
+        for (i, result) in self.results.iter().enumerate() {
+            if let FileOperation::RemoveSymlink { target } = &result.operation {
+                // Check if the next operation creates a symlink at the same target
+                if let Some(next_result) = self.results.get(i + 1)
+                    && let FileOperation::CreateSymlink {
+                        target: create_target,
+                        ..
+                    } = &next_result.operation
+                        && target == create_target {
+                            targets_created_after_removal.insert(target.clone());
+                        }
+            }
+        }
+
         // Verify each operation succeeded
         for result in &self.results {
             if !result.success {
@@ -243,12 +260,14 @@ impl Transaction {
                     }
                 }
                 FileOperation::RemoveSymlink { target } => {
-                    if target.exists() || target.is_symlink() {
-                        return Err(DotfilesError::Path(format!(
-                            "Verification failed: symlink still exists: {}",
-                            target.display()
-                        )));
-                    }
+                    // Skip verification if this target is immediately recreated
+                    if !targets_created_after_removal.contains(target)
+                        && (target.exists() || target.is_symlink()) {
+                            return Err(DotfilesError::Path(format!(
+                                "Verification failed: symlink still exists: {}",
+                                target.display()
+                            )));
+                        }
                 }
                 _ => {
                     // Other operations verified by their success flag

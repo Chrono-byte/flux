@@ -381,3 +381,133 @@ pub fn push_to_remote(
 
     Ok(())
 }
+
+/// Pull from a remote repository
+pub fn pull_from_remote(
+    repo: &Repository,
+    remote_name: &str,
+    branch_name: &str,
+    timeout_seconds: u64,
+    dry_run: &mut DryRun,
+    is_dry_run: bool,
+) -> Result<()> {
+    if is_dry_run {
+        dry_run.log_operation(Operation::GitPull {
+            remote: remote_name.to_string(),
+            branch: branch_name.to_string(),
+        });
+        return Ok(());
+    }
+
+    let repo_path = repo
+        .path()
+        .parent()
+        .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
+
+    // Get remote URL for display
+    let remote = repo.find_remote(remote_name)?;
+    let remote_url = remote.url().unwrap_or("unknown");
+
+    // Build git pull command with timeout
+    // Use -k to send SIGKILL after timeout if process doesn't terminate
+    let mut pull_cmd = Command::new("timeout");
+    pull_cmd
+        .arg("-k")
+        .arg("5") // Give 5 seconds after timeout for graceful shutdown
+        .arg(format!("{}", timeout_seconds))
+        .arg("git")
+        .arg("pull")
+        .arg(remote_name)
+        .arg(branch_name)
+        .current_dir(repo_path);
+
+    // Execute the pull command
+    let start_time = std::time::Instant::now();
+    let output = pull_cmd.output().map_err(|e| {
+        error_utils::git_operation_failed(
+            "pull",
+            repo_path,
+            &format!("Failed to execute git pull: {}", e),
+        )
+    })?;
+
+    let elapsed = start_time.elapsed();
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // Check if it was a timeout (exit code 124)
+        if output.status.code() == Some(124) {
+            return Err(DotfilesError::Config(format!(
+                "Pull operation timed out after {} seconds",
+                timeout_seconds
+            )));
+        }
+
+        // Check if it was killed by timeout signal (SIGTERM = 143, SIGKILL = 137)
+        if output.status.code() == Some(143) || output.status.code() == Some(137) {
+            return Err(DotfilesError::Config(format!(
+                "Pull operation timed out after {} seconds",
+                timeout_seconds
+            )));
+        }
+
+        let stderr_str = stderr.to_string();
+        let stdout_str = stdout.to_string();
+
+        // Check for untracked files that would be overwritten
+        if stderr_str.contains("untracked working tree files would be overwritten by merge")
+            || stdout_str.contains("untracked working tree files would be overwritten by merge")
+        {
+            // Extract file names from the error message
+            let files: Vec<&str> = stderr_str
+                .lines()
+                .filter_map(|line| {
+                    if line.trim().starts_with('\t') || line.trim().starts_with("  ") {
+                        Some(line.trim())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let error_msg = if !files.is_empty() {
+                format!(
+                    "Untracked files would be overwritten by merge:\n  {}\n\nTo resolve:\n  1. Backup the files: mv {} <backup-location>\n  2. Run 'flux pull' again\n  3. Compare and merge changes if needed",
+                    files.join("\n  "),
+                    files.join(" ")
+                )
+            } else {
+                "Untracked files would be overwritten by merge. Please move or remove them before pulling.".to_string()
+            };
+
+            return Err(DotfilesError::Config(error_msg));
+        }
+
+        let error_msg = if !stderr_str.is_empty() {
+            stderr_str
+        } else if !stdout_str.is_empty() {
+            stdout_str
+        } else {
+            format!("Git pull failed with exit code: {:?}", output.status.code())
+        };
+
+        return Err(error_utils::git_operation_failed(
+            "pull",
+            repo_path,
+            error_msg.trim(),
+        ));
+    }
+
+    println!(
+        "{} Pulled {} from remote '{}' at {} (took {:.2}s)",
+        "✓".green(),
+        branch_name,
+        remote_name,
+        remote_url,
+        elapsed.as_secs_f64()
+    );
+
+    Ok(())
+}

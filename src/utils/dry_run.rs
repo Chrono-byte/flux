@@ -43,6 +43,10 @@ pub enum Operation {
         branch: String,
         set_upstream: bool,
     },
+    GitPull {
+        remote: String,
+        branch: String,
+    },
 }
 
 pub struct DryRun {
@@ -154,6 +158,14 @@ impl DryRun {
                         } else {
                             "no".yellow()
                         }
+                    );
+                }
+                Operation::GitPull { remote, branch } => {
+                    println!(
+                        "   {} Pull branch '{}' from remote '{}'",
+                        "Git pull:".bright_magenta(),
+                        branch.cyan(),
+                        remote.cyan()
                     );
                 }
             }

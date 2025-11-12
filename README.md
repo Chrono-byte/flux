@@ -66,7 +66,7 @@ flux file status
 
 ### File Management
 
-- `flux file add <tool> <file> [--dest PATH] [--profile NAME]` - Add file to tracking
+- `flux file add <tool> <file> [--dest PATH] [--profile NAME] [--from-repo]` - Add file to tracking (use `--from-repo` to register a file that already exists in repo without copying)
 - `flux file add-browser [browser]` - Auto-detect and add browser profiles (firefox, zen, alacritty, starship, or all)
 - `flux file sync [--profile NAME] [--dry-run]` - Sync tracked files (create symlinks)
 - `flux file status [--profile NAME]` - Show sync status of all tracked files
@@ -92,7 +92,7 @@ flux file status
 
 ### Apply Configuration
 
-- `flux apply [--profile NAME] [--dry-run] [--yes]` - Apply configuration declaratively (files)
+- `flux apply [--profile NAME] [--dry-run] [--yes] [--force]` - Apply configuration declaratively (files). Use `--force` to replace all files that aren't correct symlinks (no backups, uses repo version)
 
 ### Git Operations
 
@@ -101,12 +101,13 @@ flux file status
 - `flux remote remove <name>` - Remove remote
 - `flux remote set-url <name> <url>` - Change remote URL
 - `flux push [--remote NAME] [--branch NAME] [--set-upstream]` - Push to remote
+- `flux pull [--remote NAME] [--branch NAME]` - Pull from remote
 
 ### Maintenance
 
 - `flux maintain check [--profile NAME]` - Check for discrepancies
 - `flux maintain validate` - Validate configuration integrity
-- `flux maintain migrate [--profile NAME]` - Migrate files with discrepancies
+- `flux maintain migrate [--profile NAME] [--no-backup]` - Migrate files with discrepancies (use `--no-backup` to skip backup and copy, just remove and create symlinks)
 - `flux maintain gitignore` - Generate .gitignore file
 
 ### Completions
@@ -189,6 +190,9 @@ Flux automatically initializes a git repository and commits changes after sync o
 ```bash
 # Add remote (SSH recommended)
 flux remote add origin git@github.com:username/dotfiles.git
+
+# Pull from remote
+flux pull
 
 # Push to remote
 flux push --set-upstream

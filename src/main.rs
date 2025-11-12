@@ -22,7 +22,7 @@ use services::git;
 use services::{
     add_remote, commit_changes, detect_alacritty_configs, detect_changes, detect_firefox_profiles,
     detect_starship_configs, detect_zen_profiles, get_browser_profile_files, init_repo,
-    list_remotes, push_to_remote, remove_remote, set_remote_url, stage_changes,
+    list_remotes, pull_from_remote, push_to_remote, remove_remote, set_remote_url, stage_changes,
 };
 use utils::prompt::{prompt_commit_message, prompt_yes_no};
 use utils::{DotfilesError, DryRun, Result, logging};
@@ -62,6 +62,9 @@ enum Commands {
         /// Description for this generation
         #[arg(long)]
         description: Option<String>,
+        /// Force sync: replace all files that aren't correct symlinks (no backups, uses repo version)
+        #[arg(long)]
+        force: bool,
     },
     /// Profile management
     Profile {
@@ -94,6 +97,21 @@ enum Commands {
         /// Set upstream after push
         #[arg(long)]
         set_upstream: bool,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+        /// Timeout in seconds (default: 60 or config push_timeout)
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+    /// Pull changes from remote repository
+    Pull {
+        /// Remote name (default: origin or config default_remote)
+        #[arg(long)]
+        remote: Option<String>,
+        /// Branch name (default: current HEAD or config default_branch)
+        #[arg(long)]
+        branch: Option<String>,
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
@@ -142,6 +160,9 @@ enum FileCommands {
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
+        /// File already exists in repo - just register it, don't copy
+        #[arg(long)]
+        from_repo: bool,
     },
     /// Auto-detect and add browser profiles (Firefox and Zen) or terminal/prompt configs (Alacritty, Starship)
     AddBrowser {
@@ -265,6 +286,9 @@ enum MaintainCommands {
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
+        /// Skip backup and copy - just remove existing files and create symlinks to repo
+        #[arg(long)]
+        no_backup: bool,
     },
     /// Generate a .gitignore file for the repository
     Gitignore,
@@ -394,41 +418,88 @@ fn handle_file_command(command: FileCommands) -> Result<()> {
             dest,
             profile,
             dry_run,
+            from_repo,
         } => {
             let mut config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
             let mut fs_manager =
                 file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
 
-            let source_path = std::path::Path::new(&file);
-            if !source_path.exists() {
-                return Err(DotfilesError::Path(format!(
-                    "Source file does not exist: {}",
-                    file
-                )));
-            }
+            if from_repo {
+                // File already exists in repo - just register it
+                let repo_path = config.get_repo_path()?;
+                let repo_file = repo_path.join(&tool).join(&file);
 
-            let dest_path = if let Some(dest) = dest {
-                std::path::Path::new(&dest).to_path_buf()
+                if !repo_file.exists() {
+                    return Err(DotfilesError::Path(format!(
+                        "File does not exist in repo: {}",
+                        repo_file.display()
+                    )));
+                }
+
+                let dest_path = if let Some(dest) = dest {
+                    std::path::Path::new(&dest).to_path_buf()
+                } else {
+                    // Default to same name in home
+                    std::path::Path::new(&file).to_path_buf()
+                };
+
+                // Just add to config without copying
+                let repo_relative = repo_file
+                    .strip_prefix(&repo_path)
+                    .map_err(|_| {
+                        DotfilesError::Path("Could not compute repo relative path".to_string())
+                    })?
+                    .to_string_lossy()
+                    .to_string();
+
+                config.add_file_to_tool(&tool, &repo_relative, &dest_path, profile.as_deref())?;
+
+                if !dry_run {
+                    config.save(false)?;
+                    println!(
+                        "{} Registered {} from repo (no copy needed)",
+                        "✓".green(),
+                        repo_file.display()
+                    );
+                } else {
+                    println!(
+                        "  [DRY RUN] Would register {} from repo",
+                        repo_file.display()
+                    );
+                }
             } else {
-                // Use source path relative to home
-                let home = dirs::home_dir().ok_or_else(|| {
-                    DotfilesError::Config("Could not find home directory".to_string())
-                })?;
-                source_path
-                    .strip_prefix(&home)
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|_| source_path.to_path_buf())
-            };
+                // Normal flow: copy file to repo
+                let source_path = std::path::Path::new(&file);
+                if !source_path.exists() {
+                    return Err(DotfilesError::Path(format!(
+                        "Source file does not exist: {}",
+                        file
+                    )));
+                }
 
-            add_file(
-                &mut config,
-                &tool,
-                source_path,
-                &dest_path,
-                profile.as_deref(),
-                &mut fs_manager,
-            )?;
+                let dest_path = if let Some(dest) = dest {
+                    std::path::Path::new(&dest).to_path_buf()
+                } else {
+                    // Use source path relative to home
+                    let home = dirs::home_dir().ok_or_else(|| {
+                        DotfilesError::Config("Could not find home directory".to_string())
+                    })?;
+                    source_path
+                        .strip_prefix(&home)
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|_| source_path.to_path_buf())
+                };
+
+                add_file(
+                    &mut config,
+                    &tool,
+                    source_path,
+                    &dest_path,
+                    profile.as_deref(),
+                    &mut fs_manager,
+                )?;
+            }
 
             if dry_run {
                 dry_run_tracker.display_summary();
@@ -796,11 +867,21 @@ fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
                 std::process::exit(1);
             }
         }
-        MaintainCommands::Migrate { profile, dry_run } => {
+        MaintainCommands::Migrate {
+            profile,
+            dry_run,
+            no_backup,
+        } => {
             let config = Config::load()?;
             let mut dry_run_tracker = DryRun::new();
 
-            migrate_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
+            migrate_files(
+                &config,
+                profile.as_deref(),
+                &mut dry_run_tracker,
+                dry_run,
+                no_backup,
+            )?;
 
             if dry_run {
                 dry_run_tracker.display_summary();
@@ -898,12 +979,13 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             dry_run,
             yes,
             description,
+            force,
         } => {
             let config = Config::load()?;
 
             if dry_run {
                 // In dry-run mode, just show preview
-                let diff = compare_states(&config, profile.as_deref())?;
+                let diff = compare_states(&config, profile.as_deref(), force)?;
                 display_preview(&diff);
             } else {
                 use crate::commands::ApplyOptions;
@@ -913,6 +995,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     dry_run,
                     yes,
                     description: description.as_deref(),
+                    force,
                 })?;
             }
         }
@@ -1049,6 +1132,44 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 &resolved_remote,
                 &resolved_branch,
                 set_upstream,
+                resolved_timeout,
+                &mut dry_run_tracker,
+                dry_run,
+            )?;
+
+            if dry_run {
+                dry_run_tracker.display_summary();
+            }
+        }
+        Commands::Pull {
+            remote,
+            branch,
+            dry_run,
+            timeout,
+        } => {
+            let config = Config::load()?;
+            let repo_path = config.get_repo_path()?;
+            let repo = init_repo(&repo_path)?;
+            let mut dry_run_tracker = DryRun::new();
+
+            // Resolve remote: --remote flag > config default_remote > "origin"
+            let resolved_remote = remote
+                .or_else(|| config.general.default_remote.clone())
+                .unwrap_or_else(|| "origin".to_string());
+
+            // Resolve branch: --branch flag > current HEAD > config default_branch > "main"
+            let resolved_branch = branch
+                .or_else(|| git::get_current_branch(&repo).ok())
+                .or_else(|| config.general.default_branch.clone())
+                .unwrap_or_else(|| "main".to_string());
+
+            // Resolve timeout: --timeout flag > config push_timeout > 60 seconds
+            let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
+
+            pull_from_remote(
+                &repo,
+                &resolved_remote,
+                &resolved_branch,
                 resolved_timeout,
                 &mut dry_run_tracker,
                 dry_run,
