@@ -4,10 +4,11 @@ use crate::services::{FileOperation, Transaction};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
 use crate::utils::prompt::prompt_yes_no;
 use colored::Colorize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tempfile::TempDir;
 
 /// Options for applying configuration
@@ -79,18 +80,7 @@ fn needs_sync(file: &TrackedFile, force: bool) -> Result<bool> {
     if file.dest_path.is_symlink()
         && let Ok(link_target) = fs::read_link(&file.dest_path)
     {
-        let resolved_target = if link_target.is_absolute() {
-            link_target
-        } else {
-            file.dest_path
-                .parent()
-                .map(|p| p.join(&link_target))
-                .unwrap_or(link_target)
-        };
-        let normalized_target = normalize_path(&resolved_target);
-        let normalized_repo = normalize_path(&file.repo_path);
-
-        if normalized_target != normalized_repo {
+        if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
             return Ok(true); // Symlink points to wrong location
         }
 
@@ -116,24 +106,6 @@ fn needs_sync(file: &TrackedFile, force: bool) -> Result<bool> {
     Ok(true)
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn files_differ(path1: &Path, path2: &Path) -> Result<bool> {
-    if !path1.exists() || !path2.exists() {
-        return Ok(true);
-    }
-
-    if path1.is_dir() || path2.is_dir() {
-        return Ok(path1.is_dir() != path2.is_dir());
-    }
-
-    let content1 = fs::read(path1)?;
-    let content2 = fs::read(path2)?;
-
-    Ok(content1 != content2)
-}
 
 /// Display a preview of changes that would be applied
 pub fn display_preview(diff: &StateDiff) {
@@ -230,43 +202,14 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
         backup_dir.join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
 
     for file in &diff.files_to_sync {
-        if options.force {
-            // Force mode: no backups, just remove and create symlink
-            if file.dest_path.exists() {
-                // Remove existing file/symlink first
-                transaction.add_operation(FileOperation::RemoveSymlink {
-                    target: file.dest_path.clone(),
-                });
-            }
-            // Then create the symlink
-            transaction.add_operation(FileOperation::CreateSymlink {
-                source: file.repo_path.clone(),
-                target: file.dest_path.clone(),
-                resolution: symlink_resolution,
-            });
-        } else {
-            // Normal mode: backup existing files
-            if file.dest_path.exists() {
-                let backup_path = transaction_backup_dir.join(
-                    file.dest_path
-                        .strip_prefix(&home)
-                        .unwrap_or(&file.dest_path),
-                );
-
-                transaction.add_operation(FileOperation::BackupAndReplace {
-                    source: file.repo_path.clone(),
-                    target: file.dest_path.clone(),
-                    backup_path: backup_path.clone(),
-                    resolution: symlink_resolution,
-                });
-            } else {
-                transaction.add_operation(FileOperation::CreateSymlink {
-                    source: file.repo_path.clone(),
-                    target: file.dest_path.clone(),
-                    resolution: symlink_resolution,
-                });
-            }
-        }
+        add_file_operation_to_transaction(
+            &mut transaction,
+            file,
+            options.force,
+            &symlink_resolution,
+            &home,
+            &transaction_backup_dir,
+        );
     }
 
     // Execute transaction
@@ -292,4 +235,50 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     println!("  Transaction ID: {}", transaction.id);
 
     Ok(())
+}
+
+/// Add file operation to transaction based on force mode and file state.
+fn add_file_operation_to_transaction(
+    transaction: &mut Transaction,
+    file: &TrackedFile,
+    force: bool,
+    symlink_resolution: &crate::types::SymlinkResolution,
+    home: &Path,
+    backup_dir: &Path,
+) {
+    if force {
+        // Force mode: no backups, just remove and create symlink
+        if file.dest_path.exists() {
+            transaction.add_operation(FileOperation::RemoveSymlink {
+                target: file.dest_path.clone(),
+            });
+        }
+        transaction.add_operation(FileOperation::CreateSymlink {
+            source: file.repo_path.clone(),
+            target: file.dest_path.clone(),
+            resolution: *symlink_resolution,
+        });
+    } else {
+        // Normal mode: backup existing files
+        if file.dest_path.exists() {
+            let backup_path = backup_dir.join(
+                file.dest_path
+                    .strip_prefix(home)
+                    .unwrap_or(&file.dest_path),
+            );
+
+            transaction.add_operation(FileOperation::BackupAndReplace {
+                source: file.repo_path.clone(),
+                target: file.dest_path.clone(),
+                backup_path: backup_path.clone(),
+                resolution: *symlink_resolution,
+            });
+        } else {
+            transaction.add_operation(FileOperation::CreateSymlink {
+                source: file.repo_path.clone(),
+                target: file.dest_path.clone(),
+                resolution: *symlink_resolution,
+            });
+        }
+    }
 }

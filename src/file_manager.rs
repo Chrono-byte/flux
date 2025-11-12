@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::types::{SymlinkResolution, TrackedFile};
 use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::path_utils::{files_differ, normalize_path, resolve_symlink_target, symlink_points_to_correct_target};
 use crate::utils::prompt::{ConflictResolution, prompt_conflict};
 use crate::utils::security;
 use chrono::Local;
@@ -631,39 +632,8 @@ fn sync_file(
     }
 
     // Check if destination file is locked (e.g., in use by another process)
-    if file.dest_path.exists() {
-        match security::is_file_locked(&file.dest_path) {
-            Ok(true) => {
-                warn!(
-                    "File {} is locked (may be in use), skipping",
-                    file.dest_path.display()
-                );
-                if verbose {
-                    println!(
-                        "  {} File is locked (may be in use by another application), skipping",
-                        "⚠".yellow()
-                    );
-                } else {
-                    eprintln!(
-                        "  {} Skipping {} (file is locked)",
-                        "⚠".yellow(),
-                        file.dest_path.display()
-                    );
-                }
-                return Ok(SyncResult::Skipped);
-            }
-            Ok(false) => {
-                debug!("File {} is not locked", file.dest_path.display());
-            }
-            Err(e) => {
-                warn!(
-                    "Could not check lock status for {}: {}",
-                    file.dest_path.display(),
-                    e
-                );
-                debug!("Continuing despite lock check error");
-            }
-        }
+    if let Some(skip_reason) = check_file_lock_status(&file.dest_path, verbose)? {
+        return Ok(skip_reason);
     }
 
     // Step 2: Create backup before any modifications
@@ -748,18 +718,7 @@ fn determine_sync_action(file: &TrackedFile, verbose: bool) -> Result<SyncAction
         if verbose {
             println!("  Is symlink pointing to: {}", link_target.display());
         }
-        let resolved_target = if link_target.is_absolute() {
-            link_target
-        } else {
-            file.dest_path
-                .parent()
-                .map(|p| p.join(&link_target))
-                .unwrap_or(link_target)
-        };
-        let normalized_target = normalize_path(&resolved_target);
-        let normalized_repo = normalize_path(&file.repo_path);
-
-        if normalized_target == normalized_repo {
+        if symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
             if verbose {
                 println!("  {} Already correctly linked", "✓".green());
             }
@@ -1001,12 +960,51 @@ fn create_symlink_managed(
 // ## Module-Private Helpers
 // #############################################################################
 
-/// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails
-fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+/// Check if a file is locked and handle the result.
+///
+/// Returns `Some(SyncResult::Skipped)` if the file is locked and should be skipped,
+/// or `None` if the file is not locked or lock check failed (continues processing).
+fn check_file_lock_status(file_path: &Path, verbose: bool) -> Result<Option<SyncResult>> {
+    if !file_path.exists() {
+        return Ok(None);
+    }
+
+    match security::is_file_locked(file_path) {
+        Ok(true) => {
+            warn!("File {} is locked (may be in use), skipping", file_path.display());
+            if verbose {
+                println!(
+                    "  {} File is locked (may be in use by another application), skipping",
+                    "⚠".yellow()
+                );
+            } else {
+                eprintln!(
+                    "  {} Skipping {} (file is locked)",
+                    "⚠".yellow(),
+                    file_path.display()
+                );
+            }
+            Ok(Some(SyncResult::Skipped))
+        }
+        Ok(false) => {
+            debug!("File {} is not locked", file_path.display());
+            Ok(None)
+        }
+        Err(e) => {
+            warn!(
+                "Could not check lock status for {}: {}",
+                file_path.display(),
+                e
+            );
+            debug!("Continuing despite lock check error");
+            Ok(None)
+        }
+    }
 }
 
+
 /// Resolves the actual file to be backed up.
+///
 /// If `path` is a file/dir, returns `Some(path)`.
 /// If `path` is a symlink, returns its *target* path.
 /// If `path` doesn't exist or is a broken symlink, returns `None`.
@@ -1014,11 +1012,7 @@ fn get_path_to_backup(path: &Path) -> Option<PathBuf> {
     if path.is_symlink() {
         match fs::read_link(path) {
             Ok(target) => {
-                let resolved_target = if target.is_absolute() {
-                    target
-                } else {
-                    path.parent().map(|p| p.join(&target)).unwrap_or(target)
-                };
+                let resolved_target = resolve_symlink_target(path, &target);
                 let normalized_target = normalize_path(&resolved_target);
                 if normalized_target.exists() {
                     Some(normalized_target)
@@ -1055,23 +1049,6 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Check if two files have different content.
-fn files_differ(path1: &Path, path2: &Path) -> Result<bool> {
-    if !path1.exists() || !path2.exists() {
-        return Ok(true); // One or both don't exist, so they are "different"
-    }
-
-    // If either is a directory, we can't compare contents directly
-    if path1.is_dir() || path2.is_dir() {
-        // For directories, we consider them different if one is dir and other isn't
-        return Ok(path1.is_dir() != path2.is_dir());
-    }
-
-    let content1 = fs::read(path1)?;
-    let content2 = fs::read(path2)?;
-
-    Ok(content1 != content2)
-}
 
 /// Show a diff between two files using the `diff` command.
 fn show_diff(path1: &Path, path2: &Path) -> Result<()> {

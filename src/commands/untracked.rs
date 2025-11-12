@@ -1,9 +1,9 @@
 use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::error::Result;
+use crate::utils::path_utils::{files_differ, resolve_symlink_target, symlink_points_to_correct_target};
 use colored::Colorize;
 use std::fs;
-use std::path::{Path, PathBuf};
 
 /// A discrepancy found in a tracked file.
 pub struct Discrepancy {
@@ -78,17 +78,9 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
         // Check symlink target
         match fs::read_link(&file.dest_path) {
             Ok(link_target) => {
-                // Resolve relative symlink targets relative to the symlink's parent directory
-                let resolved_target = if link_target.is_absolute() {
-                    link_target.clone()
-                } else {
-                    file.dest_path
-                        .parent()
-                        .map(|p| p.join(&link_target))
-                        .unwrap_or_else(|| link_target.clone())
-                };
+                let resolved_target = resolve_symlink_target(&file.dest_path, &link_target);
 
-                // Check if symlink is broken (target doesn't exist or is empty)
+                // Check if symlink is broken (target doesn't exist)
                 if !resolved_target.exists() {
                     return Ok(Some(Discrepancy {
                         file: file.clone(),
@@ -101,15 +93,8 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
                     }));
                 }
 
-                // Note: Empty files are valid - we don't treat them as broken symlinks
-                // An empty file is a legitimate state for a config file
-
                 // Check if symlink points to correct location
-                // Normalize paths for comparison (use resolved target)
-                let normalized_target = normalize_path(&resolved_target);
-                let normalized_repo = normalize_path(&file.repo_path);
-
-                if normalized_target != normalized_repo {
+                if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
                     return Ok(Some(Discrepancy {
                         file: file.clone(),
                         issue: IssueType::WrongTarget,
@@ -123,7 +108,6 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
                 }
 
                 // For symlinks, we consider them correct if they point to the right place
-                // Content comparison is not needed for symlinks
                 Ok(None)
             }
             Err(e) => {
@@ -163,27 +147,6 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
     }
 }
 
-fn normalize_path(path: &Path) -> PathBuf {
-    // Try to canonicalize, but fall back to the path itself if it fails
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn files_differ(path1: &Path, path2: &Path) -> Result<bool> {
-    if !path1.exists() || !path2.exists() {
-        return Ok(true);
-    }
-
-    // If either is a directory, we can't compare contents directly
-    if path1.is_dir() || path2.is_dir() {
-        // For directories, we consider them different if one is dir and other isn't
-        return Ok(path1.is_dir() != path2.is_dir());
-    }
-
-    let content1 = fs::read(path1)?;
-    let content2 = fs::read(path2)?;
-
-    Ok(content1 != content2)
-}
 
 pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
     if discrepancies.is_empty() {

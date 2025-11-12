@@ -1,9 +1,10 @@
 use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::error::Result;
+use crate::utils::path_utils::symlink_points_to_correct_target;
 use colored::Colorize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// A validation issue found in the configuration.
 #[derive(Debug, Clone)]
@@ -53,22 +54,7 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
         // Check if destination is a symlink
         if file.dest_path.exists() && file.dest_path.is_symlink() {
             if let Ok(link_target) = fs::read_link(&file.dest_path) {
-                // Check if symlink points to correct location
-                // Resolve relative symlink targets to absolute paths for comparison
-                let resolved_target = if link_target.is_absolute() {
-                    link_target
-                } else {
-                    file.dest_path
-                        .parent()
-                        .map(|p| p.join(&link_target))
-                        .unwrap_or(link_target)
-                };
-
-                // Normalize both paths before comparing
-                let normalized_target = normalize_path(&resolved_target);
-                let normalized_repo = normalize_path(&file.repo_path);
-
-                if normalized_target != normalized_repo {
+                if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
                     issues.push(ValidationIssue::InvalidSymlink(file.clone()));
                 }
             } else {
@@ -222,8 +208,3 @@ pub fn display_validation(report: &ValidationReport) {
     );
 }
 
-/// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails
-fn normalize_path(path: &Path) -> PathBuf {
-    // Try to canonicalize, but fall back to the path itself if it fails
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
