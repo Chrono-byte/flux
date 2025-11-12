@@ -1,54 +1,40 @@
 use colored::Colorize;
 use std::path::PathBuf;
 
+/// An operation that can be logged in dry-run mode.
 #[derive(Debug, Clone)]
 pub enum Operation {
-    CreateSymlink {
-        from: PathBuf,
-        to: PathBuf,
-    },
-    CreateBackup {
-        file: PathBuf,
-        backup: PathBuf,
-    },
-    CreateDirectory {
-        path: PathBuf,
-    },
-    CopyFile {
-        from: PathBuf,
-        to: PathBuf,
-    },
-    RemoveFile {
-        path: PathBuf,
-    },
-    GitCommit {
-        message: String,
-    },
-    GitStage {
-        files: Vec<PathBuf>,
-    },
-    GitRemoteAdd {
-        name: String,
-        url: String,
-    },
-    GitRemoteRemove {
-        name: String,
-    },
-    GitRemoteSetUrl {
-        name: String,
-        url: String,
-    },
+    /// Create a symlink
+    CreateSymlink { from: PathBuf, to: PathBuf },
+    /// Create a backup of a file
+    CreateBackup { file: PathBuf, backup: PathBuf },
+    /// Create a directory
+    CreateDirectory { path: PathBuf },
+    /// Copy a file
+    CopyFile { from: PathBuf, to: PathBuf },
+    /// Remove a file
+    RemoveFile { path: PathBuf },
+    /// Git commit operation
+    GitCommit { message: String },
+    /// Git stage operation
+    GitStage { files: Vec<PathBuf> },
+    /// Add a git remote
+    GitRemoteAdd { name: String, url: String },
+    /// Remove a git remote
+    GitRemoteRemove { name: String },
+    /// Set URL for a git remote
+    GitRemoteSetUrl { name: String, url: String },
+    /// Push to git remote
     GitPush {
         remote: String,
         branch: String,
         set_upstream: bool,
     },
-    GitPull {
-        remote: String,
-        branch: String,
-    },
+    /// Pull from git remote
+    GitPull { remote: String, branch: String },
 }
 
+/// Tracks operations for dry-run mode.
 pub struct DryRun {
     operations: Vec<Operation>,
 }

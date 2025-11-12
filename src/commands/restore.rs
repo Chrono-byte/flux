@@ -9,10 +9,14 @@ use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Information about a backup directory.
 #[derive(Clone)]
 pub struct BackupInfo {
+    /// Path to the backup directory
     pub path: PathBuf,
+    /// Timestamp when the backup was created
     pub timestamp: DateTime<chrono::Local>,
+    /// All files contained in this backup
     pub files: Vec<PathBuf>,
 }
 

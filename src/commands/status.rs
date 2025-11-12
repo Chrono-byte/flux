@@ -5,18 +5,28 @@ use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Status of a tracked file.
 #[derive(Debug, Clone)]
 pub enum FileStatus {
+    /// File is correctly synced
     Synced,
+    /// Symlink is missing at destination
     MissingSymlink,
+    /// Symlink exists but target is broken
     BrokenSymlink,
+    /// File is out of sync with repository
     OutOfSync,
+    /// Repository file is missing
     MissingRepo,
 }
 
+/// Status report for a tracked file.
 pub struct StatusReport {
+    /// The tracked file
     pub file: TrackedFile,
+    /// Current status of the file
     pub status: FileStatus,
+    /// Human-readable status message
     pub message: String,
 }
 

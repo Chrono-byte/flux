@@ -373,16 +373,15 @@ pub fn remove_file(
 // ## FileSystemManager Struct
 // #############################################################################
 
-/// Manages all file system operations, respecting dry run mode.
-/// This struct abstracts all file I/O, allowing other functions
-/// to focus on logic rather than implementation details.
+/// Manages file system operations with dry-run support.
 pub struct FileSystemManager<'a> {
     dry_run: &'a mut DryRun,
+    /// Whether operations are in dry-run mode
     pub is_dry_run: bool,
 }
 
 impl<'a> FileSystemManager<'a> {
-    /// Create a new FileSystemManager.
+    /// Create a new `FileSystemManager`.
     pub fn new(dry_run: &'a mut DryRun, is_dry_run: bool) -> Self {
         Self {
             dry_run,
@@ -525,8 +524,9 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
-    /// Creates a backup of a file using the backup directory from config.
-    /// If `backup_dir` is provided, uses that directory; otherwise creates a new timestamped directory.
+    /// Creates a backup of a file.
+    ///
+    /// Uses `backup_dir` if provided, otherwise creates a new timestamped directory.
     pub fn backup_file(
         &mut self,
         file_path: &Path,

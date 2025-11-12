@@ -27,10 +27,10 @@ pub struct ApplyOptions<'a> {
     pub force: bool,
 }
 
-/// State comparison result showing what needs to change
+/// Difference between declared and actual system state.
 #[derive(Debug, Clone)]
 pub struct StateDiff {
-    /// Files that need to be synced
+    /// Files that need to be synced to match configuration
     pub files_to_sync: Vec<TrackedFile>,
 }
 

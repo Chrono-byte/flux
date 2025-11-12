@@ -127,13 +127,10 @@ impl Default for EnvironmentConfig {
 }
 
 impl EnvironmentConfig {
-    /// Load and validate environment configuration
+    /// Load and validate environment configuration.
     ///
-    /// This function:
-    /// 1. Reads all environment variables
-    /// 2. Validates their values
-    /// 3. Returns errors with helpful suggestions for invalid values
-    /// 4. Logs configuration at startup (debug level)
+    /// Reads environment variables, validates values, and returns errors with
+    /// helpful suggestions for invalid values. Logs configuration at debug level.
     ///
     /// # Errors
     ///

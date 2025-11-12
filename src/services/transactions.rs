@@ -42,29 +42,34 @@ pub enum FileOperation {
     },
 }
 
-/// Result of executing an operation
+/// Result of executing an operation.
 #[derive(Debug, Clone)]
 pub struct OperationResult {
+    /// The operation that was executed
     pub operation: FileOperation,
+    /// Whether the operation succeeded
     pub success: bool,
+    /// Error message if the operation failed
     pub error: Option<String>,
 }
 
-/// Main transaction struct that manages atomic operations
+/// Manages atomic file operations within a transaction.
+///
+/// See [`TransactionState`] for the transaction lifecycle.
 pub struct Transaction {
-    /// Unique transaction ID
+    /// Unique transaction identifier
     pub id: String,
-    /// Current state of the transaction
+    /// Current state in the transaction lifecycle
     pub state: TransactionState,
     /// Temporary directory for staging changes
     pub temp_dir: PathBuf,
-    /// List of operations to perform
+    /// Operations to be executed
     pub operations: Vec<FileOperation>,
-    /// Results of executed operations
+    /// Results from executed operations
     pub results: Vec<OperationResult>,
-    /// Backup paths created during transaction
+    /// Backup paths created during this transaction
     pub backups: Vec<PathBuf>,
-    /// Metadata for the transaction
+    /// Additional metadata (description, profile, timestamp, etc.)
     pub metadata: HashMap<String, String>,
 }
 

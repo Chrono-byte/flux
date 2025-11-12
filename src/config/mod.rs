@@ -13,21 +13,28 @@ use std::path::{Path, PathBuf};
 use crate::types::{EnvironmentSpec, FileEntry, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
 
+/// General configuration settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
+    /// Repository path (supports ~ expansion)
     pub repo_path: String,
+    /// Backup directory path (supports ~ expansion)
     pub backup_dir: String,
+    /// Currently active profile name
     pub current_profile: String,
+    /// Symlink resolution strategy
     #[serde(default = "default_symlink_resolution")]
     pub symlink_resolution: SymlinkResolution,
+    /// Default git remote name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_remote: Option<String>,
+    /// Default git branch name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_branch: Option<String>,
     /// Push timeout in seconds (default: 60)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub push_timeout: Option<u64>,
-    /// List of config files to include and merge (later files override earlier ones)
+    /// Config files to include and merge (later files override earlier ones)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<Vec<String>>,
 }
@@ -51,8 +58,10 @@ impl Default for GeneralConfig {
     }
 }
 
+/// Configuration for a single tool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolConfig {
+    /// Files tracked for this tool
     pub files: Vec<FileEntry>,
 }
 
@@ -69,8 +78,10 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load configuration, checking DOTFILES_CONFIG environment variable if set
-    /// XDG config (~/.config/flux/config.toml) is authoritative and will overwrite repo version
+    /// Load configuration from default locations.
+    ///
+    /// Checks `DOTFILES_CONFIG` environment variable first. XDG config
+    /// (`~/.config/flux/config.toml`) is authoritative and overwrites repo version.
     pub fn load() -> Result<Self> {
         // Check for custom config path from environment variable
         let config_path = if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
@@ -106,8 +117,9 @@ impl Config {
         Self::load_from_path(&config_path, &mut Vec::new())
     }
 
-    /// Load configuration from a specific path
-    /// No merging - configs are loaded as-is with precedence order
+    /// Load configuration from a specific path.
+    ///
+    /// No merging - configs are loaded as-is with precedence order.
     fn load_from_path(config_path: &Path, _visited: &mut Vec<PathBuf>) -> Result<Self> {
         let config_path = match config_path.canonicalize() {
             Ok(path) => path,
@@ -218,8 +230,8 @@ impl Config {
         Ok(())
     }
 
-    /// Format tools section to use per-tool format [tools.X] files = [...]
-    /// instead of array-of-tables [[tools.X.files]]
+    /// Format tools section to use per-tool format `[tools.X] files = [...]`
+    /// instead of array-of-tables `[[tools.X.files]]`.
     fn format_tools_section(doc: &mut toml_edit::DocumentMut, tools: &HashMap<String, ToolConfig>) {
         use toml_edit::{Array, Item, Table, Value};
 
@@ -273,7 +285,7 @@ impl Config {
         doc.insert("tools", Item::Table(tools_table));
     }
 
-    /// Remove old array-of-tables format [[tools.X.files]] from document
+    /// Remove old array-of-tables format `[[tools.X.files]]` from document.
     fn remove_old_tools_format(doc: &mut toml_edit::DocumentMut) {
         // Array-of-tables like [[tools.cursor.files]] are represented as arrays
         // in the parsed document. We need to find and remove these.
@@ -295,7 +307,7 @@ impl Config {
         }
     }
 
-    /// Recursively merge two TOML documents, preserving comments from the original
+    /// Recursively merge two TOML documents, preserving comments from the original.
     fn merge_toml_documents(target: &mut toml_edit::DocumentMut, source: &toml_edit::DocumentMut) {
         for (key, source_item) in source.iter() {
             let target_item = target.get_mut(key);
@@ -320,7 +332,7 @@ impl Config {
         }
     }
 
-    /// Recursively merge two TOML tables
+    /// Recursively merge two TOML tables.
     fn merge_toml_tables(target: &mut toml_edit::Table, source: &toml_edit::Table) {
         for (key, source_item) in source.iter() {
             let target_item = target.get_mut(key);
@@ -345,10 +357,10 @@ impl Config {
         }
     }
 
-    /// Get the default config path, checking multiple locations in order:
-    /// 1. Environment variable DOTFILES_CONFIG (handled in load())
-    /// 2. ~/.config/flux/config.toml (XDG standard location) - authoritative
-    /// 3. ~/.dotfiles/config.toml (if repo exists) - fallback
+    /// Get the default config path.
+    ///
+    /// Checks locations in order: `DOTFILES_CONFIG` env var (handled in `load()`),
+    /// `~/.config/flux/config.toml` (authoritative), `~/.dotfiles/config.toml` (fallback).
     pub fn get_config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
@@ -496,8 +508,9 @@ impl Config {
         Ok(tracked_files)
     }
 
-    /// Sync XDG config to repo (overwrite repo config with XDG config)
-    /// This is useful for manually forcing the sync when XDG config is authoritative
+    /// Sync XDG config to repo (overwrite repo config with XDG config).
+    ///
+    /// Useful for manually forcing sync when XDG config is authoritative.
     pub fn sync_xdg_to_repo(dry_run: bool) -> Result<()> {
         let xdg_config = Self::get_xdg_config_path()?;
         let repo_config = Self::get_repo_config_path()?;

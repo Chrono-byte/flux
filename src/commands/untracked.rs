@@ -5,9 +5,13 @@ use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// A discrepancy found in a tracked file.
 pub struct Discrepancy {
+    /// The tracked file with the issue
     pub file: TrackedFile,
+    /// Type of issue detected
     pub issue: IssueType,
+    /// Human-readable description of the issue
     pub message: String,
 }
 

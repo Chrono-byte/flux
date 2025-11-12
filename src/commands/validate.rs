@@ -5,17 +5,26 @@ use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// A validation issue found in the configuration.
 #[derive(Debug, Clone)]
 pub enum ValidationIssue {
+    /// Repository file is missing
     MissingRepoFile(TrackedFile),
+    /// Symlink is invalid or broken
     InvalidSymlink(TrackedFile),
+    /// File exists in repo but not tracked in config
     OrphanedEntry(String, String), // tool, file
+    /// Profile directory is missing
     MissingProfileDir(String),
+    /// Configuration has invalid values
     InvalidConfig(String),
 }
 
+/// Report from configuration validation.
 pub struct ValidationReport {
+    /// All issues found during validation
     pub issues: Vec<ValidationIssue>,
+    /// Whether the configuration is valid (no issues)
     pub is_valid: bool,
 }
 
