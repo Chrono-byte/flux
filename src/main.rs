@@ -42,7 +42,7 @@ enum Commands {
         #[arg(long)]
         repo_path: Option<String>,
     },
-    /// Add a file to tracking (git-like syntax)
+    /// Add a file to tracking
     Add {
         /// Tool name (e.g., sway, waybar, cursor, firefox, zen)
         tool: String,
@@ -61,7 +61,7 @@ enum Commands {
         #[arg(long)]
         from_repo: bool,
     },
-    /// Sync tracked files and commit changes (git-like syntax)
+    /// Sync tracked files (create symlinks) and commit changes to repository
     Commit {
         /// Profile name (default: current profile)
         #[arg(long)]
@@ -73,7 +73,7 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Remove a file from tracking (git-like syntax)
+    /// Remove a file from tracking
     #[command(visible_alias = "rm")]
     Rm {
         /// Tool name
@@ -84,14 +84,14 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
-    /// List tracked files (git-like syntax)
+    /// List all tracked files
     #[command(visible_alias = "ls-files")]
     LsFiles {
         /// Profile name (default: current profile)
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Apply configuration declaratively (NixOS-like)
+    /// Apply configuration declaratively
     Apply {
         /// Profile name (default: current profile)
         #[arg(long)]

@@ -64,7 +64,7 @@ flux status
 
 ## Commands
 
-### File Management (Git-like Syntax)
+### File Management
 
 - `flux add <tool> <file> [--dest PATH] [--profile NAME] [--from-repo]` - Add file to tracking (use `--from-repo` to register a file that already exists in repo without copying)
 - `flux commit [--profile NAME] [--message MSG] [--dry-run]` - Sync tracked files (create symlinks) and commit changes
@@ -91,7 +91,7 @@ flux status
 
 ### Apply Configuration
 
-- `flux apply [--profile NAME] [--dry-run] [--yes] [--force]` - Apply configuration declaratively (files). Use `--force` to replace all files that aren't correct symlinks (no backups, uses repo version)
+- `flux apply [--profile NAME] [--dry-run] [--yes] [--force]` - Apply tracked files to their destinations, creating symlinks. Use `--force` to replace all files that aren't correct symlinks (no backups, uses repo version)
 
 ### Git Operations
 
