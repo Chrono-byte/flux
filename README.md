@@ -33,19 +33,6 @@ Installs to `~/.cargo/bin/flux`. Ensure `~/.cargo/bin` is in your PATH.
 cargo install --git <repository-url>
 ```
 
-**From crates.io (if published):**
-
-```bash
-cargo install flux
-```
-
-**System-wide (manual):**
-
-```bash
-cargo build --release
-sudo cp target/release/flux /usr/local/bin/
-```
-
 ## Quick Start
 
 ```bash
