@@ -450,7 +450,7 @@ mod dry_run_extended_tests {
     /// Test dry-run operation logging
     #[test]
     fn test_dry_run_operations() {
-        let mut dry_run = DryRun::new();
+        let mut dry_run = DryRun::default();
 
         // Log various operations
         dry_run.log_operation(Operation::CreateDirectory {
@@ -474,7 +474,7 @@ mod dry_run_extended_tests {
     /// Test git remote operations
     #[test]
     fn test_git_remote_operations() {
-        let mut dry_run = DryRun::new();
+        let mut dry_run = DryRun::default();
 
         dry_run.log_operation(Operation::GitRemoteAdd {
             name: "origin".to_string(),
@@ -497,7 +497,7 @@ mod dry_run_extended_tests {
     /// Test git push operation
     #[test]
     fn test_git_push_operation() {
-        let mut dry_run = DryRun::new();
+        let mut dry_run = DryRun::default();
 
         dry_run.log_operation(Operation::GitPush {
             remote: "origin".to_string(),

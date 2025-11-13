@@ -73,24 +73,31 @@ pub struct Transaction {
     pub metadata: HashMap<String, String>,
 }
 
+impl Default for Transaction {
+    fn default() -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            state: TransactionState::Started,
+            temp_dir: PathBuf::new(),
+            operations: Vec::new(),
+            results: Vec::new(),
+            backups: Vec::new(),
+            metadata: HashMap::new(),
+        }
+    }
+}
+
 impl Transaction {
     /// Begin a new transaction
     pub fn begin(temp_dir: PathBuf) -> Result<Self> {
-        let id = Uuid::new_v4().to_string();
-
         // Create temp directory if it doesn't exist
         if !temp_dir.exists() {
             fs::create_dir_all(&temp_dir)?;
         }
 
         Ok(Self {
-            id,
-            state: TransactionState::Started,
             temp_dir,
-            operations: Vec::new(),
-            results: Vec::new(),
-            backups: Vec::new(),
-            metadata: HashMap::new(),
+            ..Default::default()
         })
     }
 

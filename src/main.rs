@@ -380,7 +380,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
     match command {
         BackupCommands::Create { profile, dry_run } => {
             let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
             backup_all_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
             if dry_run {
                 dry_run_tracker.display_summary();
@@ -428,7 +428,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 &backups[index - 1]
             };
 
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
 
             if let Some(target_file) = file {
                 let target_path = std::path::Path::new(&target_file);
@@ -510,7 +510,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
                 &backups[index - 1]
             };
 
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
             add_backup_to_repo(
                 selected_backup,
                 &config,
@@ -524,7 +524,7 @@ fn handle_backup_command(command: BackupCommands) -> Result<()> {
         }
         BackupCommands::Commit { message, dry_run } => {
             let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
 
             let repo_path = config.get_repo_path()?;
             let repo = git::init_repo(&repo_path)?;
@@ -588,7 +588,7 @@ fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
             no_backup,
         } => {
             let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
 
             migrate_files(
                 &config,
@@ -695,7 +695,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             from_repo,
         } => {
             let mut config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
             let mut fs_manager =
                 file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
 
@@ -786,7 +786,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             verbose,
         } => {
             let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
 
             sync_files(
                 &config,
@@ -821,7 +821,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             dry_run,
         } => {
             let mut config = Config::load()?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
             let mut fs_manager =
                 file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
             remove_file(&mut config, &tool, &file, &mut fs_manager)?;
@@ -944,7 +944,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let config = Config::load()?;
             let repo_path = config.get_repo_path()?;
             let repo = init_repo(&repo_path)?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
 
             match command {
                 RemoteCommands::List => {
@@ -980,7 +980,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let config = Config::load()?;
             let repo_path = config.get_repo_path()?;
             let repo = init_repo(&repo_path)?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
 
             // Resolve remote with precedence: CLI flag > config default_remote > "origin"
             let resolved_remote = remote
@@ -1019,7 +1019,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let config = Config::load()?;
             let repo_path = config.get_repo_path()?;
             let repo = init_repo(&repo_path)?;
-            let mut dry_run_tracker = DryRun::new();
+            let mut dry_run_tracker = DryRun::default();
 
             // Resolve remote with precedence: CLI flag > config default_remote > "origin"
             let resolved_remote = remote

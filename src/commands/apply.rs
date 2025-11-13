@@ -29,19 +29,13 @@ pub struct ApplyOptions<'a> {
 }
 
 /// Difference between declared and actual system state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StateDiff {
     /// Files that need to be synced to match configuration
     pub files_to_sync: Vec<TrackedFile>,
 }
 
 impl StateDiff {
-    pub fn new() -> Self {
-        Self {
-            files_to_sync: Vec::new(),
-        }
-    }
-
     pub fn is_empty(&self) -> bool {
         self.files_to_sync.is_empty()
     }
@@ -53,7 +47,7 @@ impl StateDiff {
 
 /// Compare declared state (from config) with actual system state
 pub fn compare_states(config: &Config, profile: Option<&str>, force: bool) -> Result<StateDiff> {
-    let mut diff = StateDiff::new();
+    let mut diff = StateDiff::default();
 
     // Compare files
     let tracked_files = config.get_tracked_files(profile)?;
@@ -213,7 +207,7 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     }
 
     // Execute transaction
-    let mut dry_run_tracker = DryRun::new();
+    let mut dry_run_tracker = DryRun::default();
     let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, false);
 
     // Validate
