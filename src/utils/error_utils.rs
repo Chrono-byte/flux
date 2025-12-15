@@ -3,71 +3,6 @@
 use crate::utils::error::DotfilesError;
 use std::path::Path;
 
-/// Format error messages consistently
-/// Pattern: [What happened] [Why it matters] [What to do] [Related elements]
-/// Note: This is primarily for testing, but made available for integration tests
-#[allow(dead_code)]
-pub struct ErrorBuilder {
-    what: String,
-    why: Option<String>,
-    solution: Option<String>,
-    context: Vec<(String, String)>,
-}
-
-impl ErrorBuilder {
-    #[allow(dead_code)]
-    pub fn new(what: impl Into<String>) -> Self {
-        Self {
-            what: what.into(),
-            why: None,
-            solution: None,
-            context: Vec::new(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn why(mut self, why: impl Into<String>) -> Self {
-        self.why = Some(why.into());
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn solution(mut self, solution: impl Into<String>) -> Self {
-        self.solution = Some(solution.into());
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn context(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.context.push((key.into(), value.into()));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn build_path_error(self) -> DotfilesError {
-        DotfilesError::Path(self.format())
-    }
-
-    #[allow(dead_code)]
-    fn format(&self) -> String {
-        let mut msg = format!("What: {}", self.what);
-
-        if let Some(ref why) = self.why {
-            msg.push_str(&format!("\n  Why: {}", why));
-        }
-
-        for (key, value) in &self.context {
-            msg.push_str(&format!("\n  {}: {}", key, value));
-        }
-
-        if let Some(ref solution) = self.solution {
-            msg.push_str(&format!("\n  Solution: {}", solution));
-        }
-
-        msg
-    }
-}
-
 /// Home directory not found error
 pub fn home_dir_not_found() -> DotfilesError {
     DotfilesError::Config(
@@ -201,32 +136,4 @@ pub fn backup_restore_failed(backup_path: &Path, target: &Path, reason: &str) ->
         reason,
         backup_path.display()
     ))
-}
-
-// Macros for common patterns
-
-/// Create a home directory not found error
-#[macro_export]
-macro_rules! err_home_dir_not_found {
-    () => {
-        $crate::error_utils::home_dir_not_found()
-    };
-}
-
-/// Create a config file read error
-#[macro_export]
-macro_rules! err_config_file {
-    ($msg:expr) => {
-        $crate::error::DotfilesError::Config(format!(
-            "What: Configuration error\n  \
-             What: {}\n  \
-             Why: The configuration file is invalid or unreadable\n  \
-             Config location: ~/.config/flux/config.toml\n  \
-             Solution:\n    \
-             - Run `flux validate` to check for issues\n    \
-             - Verify the TOML syntax is correct\n    \
-             - Check file permissions: `ls -la ~/.config/flux/`",
-            $msg
-        ))
-    };
 }

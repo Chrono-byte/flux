@@ -3,18 +3,20 @@
 use flux::config::cli::{EnvironmentConfig, LogFormat, LogLevel};
 
 #[test]
-fn test_log_level_parsing() {
-    assert_eq!(LogLevel::from_env("debug").unwrap(), LogLevel::Debug);
-    assert_eq!(LogLevel::from_env("DEBUG").unwrap(), LogLevel::Debug);
-    assert_eq!(LogLevel::from_env("info").unwrap(), LogLevel::Info);
+fn test_log_level_parsing() -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(LogLevel::from_env("debug")?, LogLevel::Debug);
+    assert_eq!(LogLevel::from_env("DEBUG")?, LogLevel::Debug);
+    assert_eq!(LogLevel::from_env("info")?, LogLevel::Info);
     assert!(LogLevel::from_env("invalid").is_err());
+    Ok(())
 }
 
 #[test]
-fn test_log_format_parsing() {
-    assert_eq!(LogFormat::from_env("json").unwrap(), LogFormat::Json);
-    assert_eq!(LogFormat::from_env("default").unwrap(), LogFormat::Default);
+fn test_log_format_parsing() -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(LogFormat::from_env("json")?, LogFormat::Json);
+    assert_eq!(LogFormat::from_env("default")?, LogFormat::Default);
     assert!(LogFormat::from_env("invalid").is_err());
+    Ok(())
 }
 
 #[test]

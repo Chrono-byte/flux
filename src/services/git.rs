@@ -14,10 +14,7 @@ use std::time::Duration;
 fn setup_credential_callbacks() -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(|_url, username, allowed_types| {
-        let username = match username {
-            Some(u) => u,
-            None => "git",
-        };
+        let username = username.unwrap_or("git");
 
         // For HTTPS authentication
         if allowed_types.contains(CredentialType::USER_PASS_PLAINTEXT) {
@@ -380,10 +377,7 @@ pub fn list_remotes(repo: &Repository) -> Result<()> {
         if let Some(remote_name) = name
             && let Ok(remote) = repo.find_remote(remote_name)
         {
-            let fetch_url = match remote.url() {
-                Some(url) => url,
-                None => "(invalid URL)",
-            };
+            let fetch_url = remote.url().unwrap_or("(invalid URL)");
             let push_url = remote.pushurl();
 
             // Show fetch URL
@@ -427,10 +421,7 @@ pub fn push_to_remote(
 
     // Get remote URL for display
     let remote = repo.find_remote(remote_name)?;
-    let remote_url = match remote.url() {
-        Some(url) => url,
-        None => "unknown",
-    };
+    let remote_url = remote.url().unwrap_or("unknown");
 
     // Get current HEAD before push to detect if anything was pushed
     let head_before = repo.head().ok().and_then(|h| h.target());
@@ -512,14 +503,8 @@ pub fn push_to_remote(
                 if let Ok(head) = repo.head()
                     && let Ok(commit) = head.peel_to_commit()
                 {
-                    let message_raw = match commit.message() {
-                        Some(msg) => msg,
-                        None => "(no message)",
-                    };
-                    let message = match message_raw.lines().next() {
-                        Some(line) => line,
-                        None => "(no message)",
-                    };
+                    let message_raw = commit.message().unwrap_or("(no message)");
+                    let message = message_raw.lines().next().unwrap_or("(no message)");
                     let short_id = commit.id().to_string()[..7].to_string();
                     let author_name = {
                         let author = commit.author();
@@ -598,10 +583,7 @@ pub fn pull_from_remote(
 
     // Get remote URL for display
     let remote = repo.find_remote(remote_name)?;
-    let remote_url = match remote.url() {
-        Some(url) => url,
-        None => "unknown",
-    };
+    let remote_url = remote.url().unwrap_or("unknown");
 
     // Get current HEAD commit before pulling to detect changes
     let head_before = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
@@ -817,14 +799,8 @@ pub fn pull_from_remote(
                             );
                             println!("  {} {} new commit(s):", "→".cyan(), commits.len());
                             for commit in commits.iter().rev() {
-                                let message_raw = match commit.message() {
-                                    Some(msg) => msg,
-                                    None => "(no message)",
-                                };
-                                let message = match message_raw.lines().next() {
-                                    Some(line) => line,
-                                    None => "(no message)",
-                                };
+                                let message_raw = commit.message().unwrap_or("(no message)");
+                                let message = message_raw.lines().next().unwrap_or("(no message)");
                                 let short_id = commit.id().to_string()[..7].to_string();
                                 let author_name = {
                                     let author = commit.author();
@@ -943,14 +919,8 @@ pub fn show_git_status(repo: &Repository) -> Result<()> {
     }
 
     println!("  HEAD: {} {}", short_id.cyan(), {
-        let message_raw = match head_commit.message() {
-            Some(msg) => msg,
-            None => "(no message)",
-        };
-        match message_raw.lines().next() {
-            Some(line) => line,
-            None => "(no message)",
-        }
+        let message_raw = head_commit.message().unwrap_or("(no message)");
+        message_raw.lines().next().unwrap_or("(no message)")
     });
 
     // Show ahead/behind

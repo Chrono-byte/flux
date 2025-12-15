@@ -110,21 +110,18 @@ pub fn set_secure_permissions(path: &Path) -> Result<()> {
 pub fn is_file_locked(path: &Path) -> Result<bool> {
     #[cfg(unix)]
     {
-        use nix::fcntl::{FlockArg, flock};
-        use std::os::unix::io::AsRawFd;
+        use nix::fcntl::{Flock, FlockArg};
 
         match std::fs::OpenOptions::new().read(true).open(path) {
             Ok(file) => {
-                let fd = file.as_raw_fd();
                 // Try to acquire a non-blocking exclusive lock
-                match flock(fd, FlockArg::LockExclusiveNonblock) {
-                    Ok(_) => {
-                        // Successfully locked, now unlock
-                        let _ = flock(fd, FlockArg::Unlock);
+                match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+                    Ok(_lock) => {
+                        // Successfully locked, lock will be automatically released when _lock is dropped
                         Ok(false) // File was not locked
                     }
-                    Err(nix::Error::EAGAIN) => Ok(true), // File is locked
-                    Err(e) => Err(DotfilesError::Path(format!(
+                    Err((_, nix::Error::EAGAIN)) => Ok(true), // File is locked
+                    Err((_, e)) => Err(DotfilesError::Path(format!(
                         "Error checking file lock: {}",
                         e
                     ))),

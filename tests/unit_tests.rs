@@ -34,7 +34,7 @@ mod path_tests {
     #[test]
     fn test_path_expansion() {
         // Test path handling utilities
-        let home = dirs::home_dir().unwrap();
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home/user"));
         assert!(home.exists());
     }
 }
@@ -45,9 +45,9 @@ mod security_tests {
 
     #[test]
     fn test_set_secure_permissions() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("Failed to create temp directory");
         let file_path = dir.path().join("test.txt");
-        std::fs::write(&file_path, "test").unwrap();
+        std::fs::write(&file_path, "test").expect("Failed to write test file");
 
         let result = security::set_secure_permissions(&file_path);
         assert!(result.is_ok());
@@ -398,7 +398,6 @@ mod error_handling_extended_tests {
 
     /// Test Result type operations
     #[test]
-    #[allow(clippy::unnecessary_literal_unwrap)]
     fn test_result_operations() {
         let ok_result: Result<String> = Ok("success".to_string());
         let err_result: Result<String> = Err(DotfilesError::Cancelled);

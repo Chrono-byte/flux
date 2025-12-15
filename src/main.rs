@@ -907,26 +907,26 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             // Run pre-commit hooks (if not dry-run)
             if !dry_run
                 && let Some(hooks_config) = &config.hooks
-                    && let Some(pre_hooks) = &hooks_config.pre_commit {
-                        use crate::services::hooks::execute_hooks;
-                        println!("{} Running pre-commit hooks...", "→".cyan());
-                        let hook_results = execute_hooks(pre_hooks, &config, None, true)?;
-                        for result in hook_results {
-                            if !result.success {
-                                return Err(DotfilesError::Config(format!(
-                                    "Pre-commit hook failed: {} (exit code: {:?})",
-                                    result.command, result.exit_code
-                                )));
-                            }
-                            if !result.stdout.is_empty() {
-                                print!("{}", result.stdout);
-                            }
-                            if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped")
-                            {
-                                eprint!("{}", result.stderr);
-                            }
-                        }
+                && let Some(pre_hooks) = &hooks_config.pre_commit
+            {
+                use crate::services::hooks::execute_hooks;
+                println!("{} Running pre-commit hooks...", "→".cyan());
+                let hook_results = execute_hooks(pre_hooks, &config, None, true)?;
+                for result in hook_results {
+                    if !result.success {
+                        return Err(DotfilesError::Config(format!(
+                            "Pre-commit hook failed: {} (exit code: {:?})",
+                            result.command, result.exit_code
+                        )));
                     }
+                    if !result.stdout.is_empty() {
+                        print!("{}", result.stdout);
+                    }
+                    if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
+                        eprint!("{}", result.stderr);
+                    }
+                }
+            }
 
             sync_files(
                 &config,
@@ -955,29 +955,29 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
 
                     // Run post-commit hooks
                     if let Some(hooks_config) = &config.hooks
-                        && let Some(post_hooks) = &hooks_config.post_commit {
-                            use crate::services::hooks::execute_hooks;
-                            println!("{} Running post-commit hooks...", "→".cyan());
-                            let hook_results = execute_hooks(post_hooks, &config, None, false)?; // Don't fail-fast on post hooks
-                            for result in hook_results {
-                                if !result.success {
-                                    eprintln!(
-                                        "{} Post-commit hook failed (non-fatal): {} (exit code: {:?})",
-                                        "⚠".yellow(),
-                                        result.command,
-                                        result.exit_code
-                                    );
-                                }
-                                if !result.stdout.is_empty() {
-                                    print!("{}", result.stdout);
-                                }
-                                if !result.stderr.is_empty()
-                                    && !result.stderr.contains("Hook skipped")
-                                {
-                                    eprint!("{}", result.stderr);
-                                }
+                        && let Some(post_hooks) = &hooks_config.post_commit
+                    {
+                        use crate::services::hooks::execute_hooks;
+                        println!("{} Running post-commit hooks...", "→".cyan());
+                        let hook_results = execute_hooks(post_hooks, &config, None, false)?; // Don't fail-fast on post hooks
+                        for result in hook_results {
+                            if !result.success {
+                                eprintln!(
+                                    "{} Post-commit hook failed (non-fatal): {} (exit code: {:?})",
+                                    "⚠".yellow(),
+                                    result.command,
+                                    result.exit_code
+                                );
+                            }
+                            if !result.stdout.is_empty() {
+                                print!("{}", result.stdout);
+                            }
+                            if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped")
+                            {
+                                eprint!("{}", result.stderr);
                             }
                         }
+                    }
                 }
             }
         }
@@ -1071,10 +1071,10 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
 
                         println!("\n{} Recent generations:", "→".cyan().bold());
                         for generation in &generations {
-                            let desc = match generation.description.as_deref() {
-                                Some(d) => d,
-                                None => "(no description)",
-                            };
+                            let desc = generation
+                                .description
+                                .as_deref()
+                                .unwrap_or("(no description)");
                             let prof = match generation.profile.as_deref() {
                                 Some(p) => format!(" [profile: {}]", p),
                                 None => String::new(),
@@ -1191,10 +1191,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                         None => String::new(),
                     };
                     let dry = if event.dry_run { " [DRY RUN]" } else { "" };
-                    let summary = match event.summary.as_deref() {
-                        Some(s) => s,
-                        None => "(no summary)",
-                    };
+                    let summary = event.summary.as_deref().unwrap_or("(no summary)");
                     println!(
                         "  {} {} - {}{}{}",
                         "•".cyan(),
@@ -1339,10 +1336,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             };
 
             // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
-            let resolved_timeout = match timeout.or(config.general.push_timeout) {
-                Some(t) => t,
-                None => 60,
-            };
+            let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
 
             push_to_remote(
                 &repo,
@@ -1385,10 +1379,7 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             };
 
             // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
-            let resolved_timeout = match timeout.or(config.general.push_timeout) {
-                Some(t) => t,
-                None => 60,
-            };
+            let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
 
             pull_from_remote(
                 &repo,
@@ -1461,14 +1452,13 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             if !report.is_valid {
                 display_validation(&report);
             }
-            if !diff.is_empty()
-                && !cli.quiet {
-                    println!(
-                        "\n{} System is not in sync with configuration",
-                        "⚠".yellow()
-                    );
-                    display_preview(&diff);
-                }
+            if !diff.is_empty() && !cli.quiet {
+                println!(
+                    "\n{} System is not in sync with configuration",
+                    "⚠".yellow()
+                );
+                display_preview(&diff);
+            }
 
             // Exit code: 1 for validation issues, 2 for sync issues, 3 for both
             let exit_code = if !report.is_valid && !diff.is_empty() {

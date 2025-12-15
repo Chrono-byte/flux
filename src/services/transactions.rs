@@ -227,10 +227,7 @@ impl Transaction {
             // If any operation fails, rollback
             if !result.success {
                 self.rollback(config, fs_manager)?;
-                let error_message = match result.error.as_deref() {
-                    Some(msg) => msg,
-                    None => "Unknown error",
-                };
+                let error_message = result.error.as_deref().unwrap_or("Unknown error");
                 return Err(DotfilesError::Config(format!(
                     "Transaction failed: {}",
                     error_message
@@ -271,10 +268,7 @@ impl Transaction {
         // Verify each operation succeeded
         for result in &self.results {
             if !result.success {
-                let error_message = match result.error.as_deref() {
-                    Some(msg) => msg,
-                    None => "Unknown error",
-                };
+                let error_message = result.error.as_deref().unwrap_or("Unknown error");
                 return Err(DotfilesError::Config(format!(
                     "Verification failed: operation did not succeed: {}",
                     error_message
@@ -451,15 +445,10 @@ impl Transaction {
         };
 
         // Create temp symlink first
-        let ext_str = if let Some(ext) = target.extension() {
-            if let Some(ext_str) = ext.to_str() {
-                ext_str
-            } else {
-                ""
-            }
-        } else {
-            ""
-        };
+        let ext_str = target
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default();
         let temp_link_path = target.with_extension(format!("{}.flux-temp", ext_str));
 
         // Remove old temp link if exists

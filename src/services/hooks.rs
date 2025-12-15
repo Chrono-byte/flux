@@ -36,26 +36,23 @@ pub fn execute_hook(
 
     // Evaluate conditions if present
     if let Some(conditions) = &hook.conditions
-        && !crate::config::Config::conditions_match(conditions) {
-            return Ok(HookResult {
-                command: hook.command.clone(),
-                success: true, // Skipped due to conditions, not a failure
-                exit_code: None,
-                stdout: String::new(),
-                stderr: "Hook skipped: conditions not met".to_string(),
-                duration: start.elapsed(),
-            });
-        }
+        && !crate::config::Config::conditions_match(conditions)
+    {
+        return Ok(HookResult {
+            command: hook.command.clone(),
+            success: true, // Skipped due to conditions, not a failure
+            exit_code: None,
+            stdout: String::new(),
+            stderr: "Hook skipped: conditions not met".to_string(),
+            duration: start.elapsed(),
+        });
+    }
 
     // Determine shell to use
     let shell_cmd = if let Some(s) = shell {
         s
     } else if let Some(env) = config.environment.as_ref() {
-        if let Some(s) = env.shell.as_deref() {
-            s
-        } else {
-            "/bin/sh"
-        }
+        env.shell.as_deref().unwrap_or("/bin/sh")
     } else {
         "/bin/sh"
     };
@@ -67,10 +64,7 @@ pub fn execute_hook(
     cmd.stderr(Stdio::piped());
 
     // Set timeout if specified
-    let timeout = match hook.timeout {
-        Some(t) => t,
-        None => 30,
-    };
+    let timeout = hook.timeout.unwrap_or(30);
     let timeout_duration = Duration::from_secs(timeout);
 
     // Execute with timeout

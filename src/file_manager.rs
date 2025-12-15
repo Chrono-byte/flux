@@ -921,14 +921,16 @@ fn create_symlink_managed(
         fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
 
         // For secret files, tighten permissions on the destination.
-        if file.is_secret && !fs_manager.is_dry_run
-            && let Err(e) = security::set_secure_permissions(&file.dest_path) {
-                warn!(
-                    "Could not set secure permissions on secret file {}: {}",
-                    file.dest_path.display(),
-                    e
-                );
-            }
+        if file.is_secret
+            && !fs_manager.is_dry_run
+            && let Err(e) = security::set_secure_permissions(&file.dest_path)
+        {
+            warn!(
+                "Could not set secure permissions on secret file {}: {}",
+                file.dest_path.display(),
+                e
+            );
+        }
 
         if verbose && !fs_manager.is_dry_run {
             if file.is_secret && file.secret_key.is_some() {
@@ -971,14 +973,16 @@ fn create_symlink_managed(
         }
 
         // For secret files, tighten permissions on the destination.
-        if file.is_secret && !fs_manager.is_dry_run
-            && let Err(e) = security::set_secure_permissions(&file.dest_path) {
-                warn!(
-                    "Could not set secure permissions on secret file {}: {}",
-                    file.dest_path.display(),
-                    e
-                );
-            }
+        if file.is_secret
+            && !fs_manager.is_dry_run
+            && let Err(e) = security::set_secure_permissions(&file.dest_path)
+        {
+            warn!(
+                "Could not set secure permissions on secret file {}: {}",
+                file.dest_path.display(),
+                e
+            );
+        }
 
         if verbose && !fs_manager.is_dry_run {
             println!(
@@ -1029,15 +1033,11 @@ fn create_symlink_managed(
 
     // Create symlink atomically using temporary path
     // This prevents broken symlinks if the operation is interrupted
-    let ext_str = if let Some(ext) = file.dest_path.extension() {
-        if let Some(ext_str) = ext.to_str() {
-            ext_str
-        } else {
-            ""
-        }
-    } else {
-        ""
-    };
+    let ext_str = file
+        .dest_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default();
     let temp_link_path = file
         .dest_path
         .with_extension(format!("{}.flux-temp", ext_str));
@@ -1065,14 +1065,16 @@ fn create_symlink_managed(
 
     // For secret files, tighten permissions on the repository copy which holds
     // the actual secret material.
-    if file.is_secret && !fs_manager.is_dry_run
-        && let Err(e) = security::set_secure_permissions(&file.repo_path) {
-            warn!(
-                "Could not set secure permissions on secret repo file {}: {}",
-                file.repo_path.display(),
-                e
-            );
-        }
+    if file.is_secret
+        && !fs_manager.is_dry_run
+        && let Err(e) = security::set_secure_permissions(&file.repo_path)
+    {
+        warn!(
+            "Could not set secure permissions on secret repo file {}: {}",
+            file.repo_path.display(),
+            e
+        );
+    }
 
     if verbose && !fs_manager.is_dry_run {
         println!(

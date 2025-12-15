@@ -548,9 +548,10 @@ impl Config {
 
                 // Evaluate optional conditions
                 if let Some(conditions) = &file.conditions
-                    && !Self::conditions_match(conditions) {
-                        continue;
-                    }
+                    && !Self::conditions_match(conditions)
+                {
+                    continue;
+                }
 
                 // Render templates in repo and dest paths, if any
                 let rendered_repo =

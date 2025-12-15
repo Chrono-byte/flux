@@ -151,19 +151,20 @@ fn check_config_drift(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<
         // Skip if it's a correctly linked symlink
         if file.dest_path.is_symlink()
             && let Ok(link_target) = fs::read_link(&file.dest_path)
-                && symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path)
-                {
-                    continue;
-                }
+            && symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path)
+        {
+            continue;
+        }
 
         // Check if content differs
         if let Ok(differ) = files_differ(&file.repo_path, &file.dest_path)
-            && differ {
-                issues.push(HealthIssue::ConfigDrift {
-                    file,
-                    summary: "File content differs from repository version".to_string(),
-                });
-            }
+            && differ
+        {
+            issues.push(HealthIssue::ConfigDrift {
+                file,
+                summary: "File content differs from repository version".to_string(),
+            });
+        }
     }
 
     Ok(())
@@ -206,27 +207,28 @@ fn check_git_remotes(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<(
     for name_opt in remotes.iter() {
         if let Some(name) = name_opt
             && let Ok(remote) = repo.find_remote(name)
-                && let Some(url) = remote.url() {
-                    // Basic validation: check if URL looks valid
-                    if url.is_empty() {
-                        issues.push(HealthIssue::BadGitRemote {
-                            remote: name.to_string(),
-                            url: url.to_string(),
-                            reason: "Remote URL is empty".to_string(),
-                        });
-                    } else if !url.starts_with("http://")
-                        && !url.starts_with("https://")
-                        && !url.starts_with("git@")
-                        && !url.starts_with("file://")
-                    {
-                        // Not a comprehensive check, but catches obviously malformed URLs
-                        issues.push(HealthIssue::BadGitRemote {
-                            remote: name.to_string(),
-                            url: url.to_string(),
-                            reason: "Remote URL format looks invalid".to_string(),
-                        });
-                    }
-                }
+            && let Some(url) = remote.url()
+        {
+            // Basic validation: check if URL looks valid
+            if url.is_empty() {
+                issues.push(HealthIssue::BadGitRemote {
+                    remote: name.to_string(),
+                    url: url.to_string(),
+                    reason: "Remote URL is empty".to_string(),
+                });
+            } else if !url.starts_with("http://")
+                && !url.starts_with("https://")
+                && !url.starts_with("git@")
+                && !url.starts_with("file://")
+            {
+                // Not a comprehensive check, but catches obviously malformed URLs
+                issues.push(HealthIssue::BadGitRemote {
+                    remote: name.to_string(),
+                    url: url.to_string(),
+                    reason: "Remote URL format looks invalid".to_string(),
+                });
+            }
+        }
     }
 
     Ok(())
@@ -247,29 +249,31 @@ fn check_unsafe_permissions(config: &Config, issues: &mut Vec<HealthIssue>) -> R
             .iter()
             .any(|dir| file.dest_path.starts_with(home.join(dir)));
 
-        if is_sensitive && file.dest_path.exists()
-            && let Ok(metadata) = fs::metadata(&file.dest_path) {
-                let perms = metadata.permissions();
-                let mode = perms.mode();
-                let file_mode = mode & 0o777;
+        if is_sensitive
+            && file.dest_path.exists()
+            && let Ok(metadata) = fs::metadata(&file.dest_path)
+        {
+            let perms = metadata.permissions();
+            let mode = perms.mode();
+            let file_mode = mode & 0o777;
 
-                // Files in .ssh should be 600, directories 700
-                // Files in .gnupg should be 600, directories 700
-                if file.dest_path.is_file() && file_mode & 0o077 != 0 {
-                    // World or group readable/writable
-                    issues.push(HealthIssue::UnsafePermissions {
-                        path: file.dest_path.clone(),
-                        current_mode: format!("{:o}", file_mode),
-                        recommended_mode: "600".to_string(),
-                    });
-                } else if file.dest_path.is_dir() && file_mode & 0o077 != 0 {
-                    issues.push(HealthIssue::UnsafePermissions {
-                        path: file.dest_path.clone(),
-                        current_mode: format!("{:o}", file_mode),
-                        recommended_mode: "700".to_string(),
-                    });
-                }
+            // Files in .ssh should be 600, directories 700
+            // Files in .gnupg should be 600, directories 700
+            if file.dest_path.is_file() && file_mode & 0o077 != 0 {
+                // World or group readable/writable
+                issues.push(HealthIssue::UnsafePermissions {
+                    path: file.dest_path.clone(),
+                    current_mode: format!("{:o}", file_mode),
+                    recommended_mode: "600".to_string(),
+                });
+            } else if file.dest_path.is_dir() && file_mode & 0o077 != 0 {
+                issues.push(HealthIssue::UnsafePermissions {
+                    path: file.dest_path.clone(),
+                    current_mode: format!("{:o}", file_mode),
+                    recommended_mode: "700".to_string(),
+                });
             }
+        }
     }
 
     Ok(())

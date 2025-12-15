@@ -173,10 +173,7 @@ pub fn display_diffs(diff: &StateDiff) -> Result<()> {
 
     for file in &diff.files_to_sync {
         // Current contents (may not exist yet)
-        let current = match fs::read_to_string(&file.dest_path) {
-            Ok(contents) => contents,
-            Err(_) => String::new(),
-        };
+        let current = fs::read_to_string(&file.dest_path).unwrap_or_default();
 
         // Target contents from repo or secret backend
         let target = if file.is_secret && file.secret_key.is_some() {
@@ -269,25 +266,26 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     // Run pre-apply hooks (if not dry-run)
     if !options.dry_run
         && let Some(hooks_config) = &options.config.hooks
-            && let Some(pre_hooks) = &hooks_config.pre_apply {
-                use crate::services::hooks::execute_hooks;
-                println!("{} Running pre-apply hooks...", "→".cyan());
-                let hook_results = execute_hooks(pre_hooks, options.config, None, true)?;
-                for result in hook_results {
-                    if !result.success {
-                        return Err(DotfilesError::Config(format!(
-                            "Pre-apply hook failed: {} (exit code: {:?})",
-                            result.command, result.exit_code
-                        )));
-                    }
-                    if !result.stdout.is_empty() {
-                        print!("{}", result.stdout);
-                    }
-                    if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
-                        eprint!("{}", result.stderr);
-                    }
-                }
+        && let Some(pre_hooks) = &hooks_config.pre_apply
+    {
+        use crate::services::hooks::execute_hooks;
+        println!("{} Running pre-apply hooks...", "→".cyan());
+        let hook_results = execute_hooks(pre_hooks, options.config, None, true)?;
+        for result in hook_results {
+            if !result.success {
+                return Err(DotfilesError::Config(format!(
+                    "Pre-apply hook failed: {} (exit code: {:?})",
+                    result.command, result.exit_code
+                )));
             }
+            if !result.stdout.is_empty() {
+                print!("{}", result.stdout);
+            }
+            if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
+                eprint!("{}", result.stderr);
+            }
+        }
+    }
 
     // Confirm if not auto-yes
     if !options.dry_run && !options.yes && !prompt_yes_no("Apply these changes?")? {
@@ -367,27 +365,28 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
 
     // Run post-apply hooks
     if let Some(hooks_config) = &options.config.hooks
-        && let Some(post_hooks) = &hooks_config.post_apply {
-            use crate::services::hooks::execute_hooks;
-            println!("{} Running post-apply hooks...", "→".cyan());
-            let hook_results = execute_hooks(post_hooks, options.config, None, false)?; // Don't fail-fast on post hooks
-            for result in hook_results {
-                if !result.success {
-                    eprintln!(
-                        "{} Post-apply hook failed (non-fatal): {} (exit code: {:?})",
-                        "⚠".yellow(),
-                        result.command,
-                        result.exit_code
-                    );
-                }
-                if !result.stdout.is_empty() {
-                    print!("{}", result.stdout);
-                }
-                if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
-                    eprint!("{}", result.stderr);
-                }
+        && let Some(post_hooks) = &hooks_config.post_apply
+    {
+        use crate::services::hooks::execute_hooks;
+        println!("{} Running post-apply hooks...", "→".cyan());
+        let hook_results = execute_hooks(post_hooks, options.config, None, false)?; // Don't fail-fast on post hooks
+        for result in hook_results {
+            if !result.success {
+                eprintln!(
+                    "{} Post-apply hook failed (non-fatal): {} (exit code: {:?})",
+                    "⚠".yellow(),
+                    result.command,
+                    result.exit_code
+                );
+            }
+            if !result.stdout.is_empty() {
+                print!("{}", result.stdout);
+            }
+            if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
+                eprint!("{}", result.stderr);
             }
         }
+    }
 
     // Record history event
     let profile_str = options.profile.map(|p| p.to_string());

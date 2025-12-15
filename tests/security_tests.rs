@@ -19,13 +19,14 @@ fn test_symlink_target_validation() {
 }
 
 #[test]
-fn test_set_secure_permissions() {
+fn test_set_secure_permissions() -> Result<(), Box<dyn std::error::Error>> {
     use tempfile::tempdir;
 
-    let dir = tempdir().unwrap();
+    let dir = tempdir()?;
     let file_path = dir.path().join("test.txt");
-    std::fs::write(&file_path, "test").unwrap();
+    std::fs::write(&file_path, "test")?;
 
     let result = security::set_secure_permissions(&file_path);
     assert!(result.is_ok());
+    Ok(())
 }
