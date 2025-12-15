@@ -216,9 +216,10 @@ impl Transaction {
             // If any operation fails, rollback
             if !result.success {
                 self.rollback(config, fs_manager)?;
+                let error_message = result.error.as_deref().unwrap_or("Unknown error");
                 return Err(DotfilesError::Config(format!(
                     "Transaction failed: {}",
-                    result.error.as_deref().unwrap_or("Unknown error")
+                    error_message
                 )));
             }
         }
@@ -256,9 +257,10 @@ impl Transaction {
         // Verify each operation succeeded
         for result in &self.results {
             if !result.success {
+                let error_message = result.error.as_deref().unwrap_or("Unknown error");
                 return Err(DotfilesError::Config(format!(
                     "Verification failed: operation did not succeed: {}",
-                    result.error.as_deref().unwrap_or("Unknown error")
+                    error_message
                 )));
             }
 
@@ -374,12 +376,26 @@ impl Transaction {
         // Create symlink using atomic approach
         let link_target = match resolution {
             SymlinkResolution::Auto | SymlinkResolution::Relative => {
-                pathdiff::diff_paths(source, target.parent().unwrap())
-                    .unwrap_or_else(|| source.to_path_buf())
+                if let Some(parent) = target.parent() {
+                    match pathdiff::diff_paths(source, parent) {
+                        Some(relative) => relative,
+                        None => source.to_path_buf(),
+                    }
+                } else {
+                    source.to_path_buf()
+                }
             }
             SymlinkResolution::Absolute => source.to_path_buf(),
-            SymlinkResolution::Follow => pathdiff::diff_paths(source, target.parent().unwrap())
-                .unwrap_or_else(|| source.to_path_buf()),
+            SymlinkResolution::Follow => {
+                if let Some(parent) = target.parent() {
+                    match pathdiff::diff_paths(source, parent) {
+                        Some(relative) => relative,
+                        None => source.to_path_buf(),
+                    }
+                } else {
+                    source.to_path_buf()
+                }
+            }
             SymlinkResolution::Replace => {
                 // For Replace, we copy instead of symlink
                 let temp_path = target.with_extension("flux-temp-copy");
@@ -420,7 +436,7 @@ impl Transaction {
         // Create temp symlink first
         let temp_link_path = target.with_extension(format!(
             "{}.flux-temp",
-            target.extension().map_or("", |s| s.to_str().unwrap_or(""))
+            target.extension().and_then(|s| s.to_str()).unwrap_or_default()
         ));
 
         // Remove old temp link if exists

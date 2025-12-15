@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 
 /// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails.
 pub fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    match path.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 /// Check if two files have different content.
@@ -34,10 +37,10 @@ pub fn resolve_symlink_target(symlink_path: &Path, link_target: &Path) -> PathBu
     if link_target.is_absolute() {
         link_target.to_path_buf()
     } else {
-        symlink_path
-            .parent()
-            .map(|p| p.join(link_target))
-            .unwrap_or_else(|| link_target.to_path_buf())
+        match symlink_path.parent() {
+            Some(parent) => parent.join(link_target),
+            None => link_target.to_path_buf(),
+        }
     }
 }
 

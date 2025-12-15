@@ -7,10 +7,13 @@ pub fn init_logging() {
     let mut builder = env_logger::Builder::new();
 
     // Set default log level from environment variable, default to Info
-    let level = std::env::var("DOTFILES_LOG")
+    let level = match std::env::var("DOTFILES_LOG")
         .ok()
         .and_then(|l| l.parse::<LevelFilter>().ok())
-        .unwrap_or(LevelFilter::Warn);
+    {
+        Some(level) => level,
+        None => LevelFilter::Warn,
+    };
 
     builder.filter_level(level);
 

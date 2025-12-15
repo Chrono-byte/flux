@@ -759,10 +759,10 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     let home = dirs::home_dir().ok_or_else(|| {
                         DotfilesError::Config("Could not find home directory".to_string())
                     })?;
-                    source_path
-                        .strip_prefix(&home)
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|_| source_path.to_path_buf())
+                    match source_path.strip_prefix(&home) {
+                        Ok(p) => p.to_path_buf(),
+                        Err(_) => source_path.to_path_buf(),
+                    }
                 };
 
                 add_file(
@@ -983,15 +983,19 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let mut dry_run_tracker = DryRun::default();
 
             // Resolve remote with precedence: CLI flag > config default_remote > "origin"
-            let resolved_remote = remote
-                .or_else(|| config.general.default_remote.clone())
-                .unwrap_or_else(|| "origin".to_string());
+            let resolved_remote = match remote.or_else(|| config.general.default_remote.clone()) {
+                Some(name) => name,
+                None => "origin".to_string(),
+            };
 
             // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
-            let resolved_branch = branch
+            let resolved_branch = match branch
                 .or_else(|| git::get_current_branch(&repo).ok())
                 .or_else(|| config.general.default_branch.clone())
-                .unwrap_or_else(|| "main".to_string());
+            {
+                Some(name) => name,
+                None => "main".to_string(),
+            };
 
             // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
             let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
@@ -1022,15 +1026,19 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let mut dry_run_tracker = DryRun::default();
 
             // Resolve remote with precedence: CLI flag > config default_remote > "origin"
-            let resolved_remote = remote
-                .or_else(|| config.general.default_remote.clone())
-                .unwrap_or_else(|| "origin".to_string());
+            let resolved_remote = match remote.or_else(|| config.general.default_remote.clone()) {
+                Some(name) => name,
+                None => "origin".to_string(),
+            };
 
             // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
-            let resolved_branch = branch
+            let resolved_branch = match branch
                 .or_else(|| git::get_current_branch(&repo).ok())
                 .or_else(|| config.general.default_branch.clone())
-                .unwrap_or_else(|| "main".to_string());
+            {
+                Some(name) => name,
+                None => "main".to_string(),
+            };
 
             // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
             let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);

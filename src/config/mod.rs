@@ -470,7 +470,10 @@ impl Config {
         profile: Option<&str>,
     ) -> Result<Vec<crate::types::TrackedFile>> {
         let repo_path = self.get_repo_path()?;
-        let current_profile = profile.unwrap_or(&self.general.current_profile);
+        let current_profile = match profile {
+            Some(p) => p,
+            None => &self.general.current_profile,
+        };
 
         let mut tracked_files = Vec::new();
 

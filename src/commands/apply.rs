@@ -254,8 +254,11 @@ fn add_file_operation_to_transaction(
     } else {
         // Normal mode: backup existing files
         if file.dest_path.exists() {
-            let backup_path =
-                backup_dir.join(file.dest_path.strip_prefix(home).unwrap_or(&file.dest_path));
+            let relative_path = match file.dest_path.strip_prefix(home) {
+                Ok(rel) => rel,
+                Err(_) => &file.dest_path,
+            };
+            let backup_path = backup_dir.join(relative_path);
 
             transaction.add_operation(FileOperation::BackupAndReplace {
                 source: file.repo_path.clone(),

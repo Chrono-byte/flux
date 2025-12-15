@@ -158,7 +158,10 @@ pub fn stage_changes(
     }
 
     let mut index = repo.index()?;
-    let repo_path = repo.path().parent().unwrap();
+    let repo_path = repo
+        .path()
+        .parent()
+        .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
 
     for change in changes {
         match change {
@@ -261,12 +264,18 @@ pub fn detect_changes(repo: &Repository) -> Result<Vec<FileChange>> {
     status_options.include_ignored(false);
 
     let statuses = repo.statuses(Some(&mut status_options))?;
+    let repo_root = repo
+        .path()
+        .parent()
+        .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
 
     for entry in statuses.iter() {
-        let path = entry.path().unwrap();
+        let Some(path) = entry.path() else {
+            continue;
+        };
         let status = entry.status();
 
-        let repo_path = repo.path().parent().unwrap().join(path);
+        let repo_path = repo_root.join(path);
 
         if status.is_index_new() || status.is_wt_new() {
             changes.push(FileChange::Added(repo_path));
@@ -375,7 +384,10 @@ pub fn list_remotes(repo: &Repository) -> Result<()> {
             println!("{}  {} (fetch)", remote_name.cyan(), fetch_url);
 
             // Show push URL (use fetch URL if push URL not set, or show if different)
-            let actual_push_url = push_url.unwrap_or(fetch_url);
+            let actual_push_url = match push_url {
+                Some(url) => url,
+                None => fetch_url,
+            };
             println!("{}  {} (push)", remote_name.cyan(), actual_push_url);
         }
     }
@@ -491,19 +503,22 @@ pub fn push_to_remote(
                 if let Ok(head) = repo.head()
                     && let Ok(commit) = head.peel_to_commit()
                 {
-                    let message = commit
-                        .message()
-                        .unwrap_or("(no message)")
-                        .lines()
-                        .next()
-                        .unwrap_or("(no message)");
+                    let message_raw = commit.message().unwrap_or("(no message)");
+                    let message = message_raw.lines().next().unwrap_or("(no message)");
                     let short_id = commit.id().to_string()[..7].to_string();
+                    let author_name = {
+                        let author = commit.author();
+                        match author.name() {
+                            Some(name) => name.to_string(),
+                            None => "unknown".to_string(),
+                        }
+                    };
                     println!(
                         "  {} {} {} {}",
                         "→".cyan(),
                         short_id.cyan(),
                         message,
-                        commit.author().name().unwrap_or("unknown").dimmed()
+                        author_name.dimmed()
                     );
                 }
             }
@@ -689,8 +704,9 @@ pub fn pull_from_remote(
                         .conflicts()?
                         .filter_map(|conflict| {
                             conflict.ok().and_then(|c| {
-                                c.our.map(|entry| {
-                                    std::str::from_utf8(&entry.path).unwrap_or("").to_string()
+                                c.our.map(|entry| match std::str::from_utf8(&entry.path) {
+                                    Ok(path) => path.to_string(),
+                                    Err(_) => String::new(),
                                 })
                             })
                         })
@@ -783,18 +799,21 @@ pub fn pull_from_remote(
                             );
                             println!("  {} {} new commit(s):", "→".cyan(), commits.len());
                             for commit in commits.iter().rev() {
-                                let message = commit
-                                    .message()
-                                    .unwrap_or("(no message)")
-                                    .lines()
-                                    .next()
-                                    .unwrap_or("(no message)");
+                                let message_raw = commit.message().unwrap_or("(no message)");
+                                let message = message_raw.lines().next().unwrap_or("(no message)");
                                 let short_id = commit.id().to_string()[..7].to_string();
+                                let author_name = {
+                                    let author = commit.author();
+                                    match author.name() {
+                                        Some(name) => name.to_string(),
+                                        None => "unknown".to_string(),
+                                    }
+                                };
                                 println!(
                                     "    {} {} {}",
                                     short_id.cyan(),
                                     message,
-                                    commit.author().name().unwrap_or("unknown").dimmed()
+                                    author_name.dimmed()
                                 );
                             }
                         } else {
@@ -881,11 +900,10 @@ pub fn show_git_status(repo: &Repository) -> Result<()> {
         })?;
 
         let (ahead, behind) = repo.graph_ahead_behind(head_oid, upstream_oid)?;
-        let upstream_name = upstream_branch
-            .get()
-            .name()
-            .unwrap_or("unknown")
-            .to_string();
+        let upstream_name = match upstream_branch.get().name() {
+            Some(name) => name.to_string(),
+            None => "unknown".to_string(),
+        };
         (Some(ahead), Some(behind), Some(upstream_name))
     } else {
         (None, None, None)
@@ -901,12 +919,8 @@ pub fn show_git_status(repo: &Repository) -> Result<()> {
     }
 
     println!("  HEAD: {} {}", short_id.cyan(), {
-        head_commit
-            .message()
-            .unwrap_or("(no message)")
-            .lines()
-            .next()
-            .unwrap_or("(no message)")
+        let message = head_commit.message().unwrap_or("(no message)");
+        message.lines().next().unwrap_or("(no message)")
     });
 
     // Show ahead/behind
@@ -938,8 +952,10 @@ pub fn show_git_status(repo: &Repository) -> Result<()> {
                 FileChange::Modified(p) => ("M", p),
                 FileChange::Deleted(p) => ("-", p),
             };
-            let repo_path = repo.path().parent().unwrap();
-            if let Ok(relative) = path.strip_prefix(repo_path) {
+            let repo_root = repo.path().parent().ok_or_else(|| {
+                DotfilesError::Config("Could not determine repository path".to_string())
+            })?;
+            if let Ok(relative) = path.strip_prefix(repo_root) {
                 println!(
                     "    {} {}",
                     icon.green(),

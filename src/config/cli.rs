@@ -188,7 +188,7 @@ impl EnvironmentConfig {
             debug!(
                 "Git username loaded from {} (length: {} chars)",
                 env_keys::GIT_USERNAME,
-                config.git_username.as_ref().map(|u| u.len()).unwrap_or(0)
+                config.git_username.as_ref().map_or(0, |u| u.len())
             );
         }
 
@@ -203,7 +203,7 @@ impl EnvironmentConfig {
             debug!(
                 "Git password loaded from {} (length: {} chars)",
                 env_keys::GIT_PASSWORD,
-                config.git_password.as_ref().map(|p| p.len()).unwrap_or(0)
+                config.git_password.as_ref().map_or(0, |p| p.len())
             );
         }
 

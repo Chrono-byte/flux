@@ -121,11 +121,10 @@ fn check_orphaned_entries(
         for file_entry in &tool_config.files {
             let normalized_repo = if file_entry.repo.starts_with(&format!("{}/", tool)) {
                 // Remove tool name prefix (e.g., "cursor/settings.json" -> "settings.json")
-                file_entry
-                    .repo
-                    .strip_prefix(&format!("{}/", tool))
-                    .unwrap_or(&file_entry.repo)
-                    .to_string()
+                match file_entry.repo.strip_prefix(&format!("{}/", tool)) {
+                    Some(stripped) => stripped.to_string(),
+                    None => file_entry.repo.clone(),
+                }
             } else {
                 file_entry.repo.clone()
             };

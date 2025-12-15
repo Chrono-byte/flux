@@ -211,19 +211,20 @@ fn migrate_file(
                         let resolved_target = if link_target.is_absolute() {
                             link_target
                         } else {
-                            file.dest_path
-                                .parent()
-                                .map(|p| p.join(&link_target))
-                                .unwrap_or(link_target.clone())
+                            match file.dest_path.parent() {
+                                Some(parent) => parent.join(&link_target),
+                                None => link_target.clone(),
+                            }
                         };
 
                         // Check if the link target exists and has content
                         if resolved_target.exists() {
                             // Check if target is empty
                             let is_empty = if resolved_target.is_file() {
-                                fs::metadata(&resolved_target)
-                                    .map(|m| m.len() == 0)
-                                    .unwrap_or(false)
+                                match fs::metadata(&resolved_target) {
+                                    Ok(m) => m.len() == 0,
+                                    Err(_) => false,
+                                }
                             } else {
                                 false
                             };
@@ -302,7 +303,10 @@ fn migrate_file(
                 if let Some(source) = &source_to_copy {
                     // Check if source is empty
                     let source_is_empty = if source.is_file() {
-                        fs::metadata(source).map(|m| m.len() == 0).unwrap_or(false)
+                        match fs::metadata(source) {
+                            Ok(m) => m.len() == 0,
+                            Err(_) => false,
+                        }
                     } else {
                         false
                     };
@@ -374,24 +378,45 @@ fn compute_link_target(
     Ok(match resolution {
         SymlinkResolution::Auto => {
             // Try relative, fall back to absolute
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                .unwrap_or_else(|| file.repo_path.clone())
+            if let Some(parent) = file.dest_path.parent() {
+                match pathdiff::diff_paths(&file.repo_path, parent) {
+                    Some(relative) => relative,
+                    None => file.repo_path.clone(),
+                }
+            } else {
+                file.repo_path.clone()
+            }
         }
         SymlinkResolution::Relative => {
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
+            let parent = file.dest_path.parent().ok_or_else(|| {
+                DotfilesError::Path("Cannot determine parent for destination path".to_string())
+            })?;
+            pathdiff::diff_paths(&file.repo_path, parent)
                 .ok_or_else(|| DotfilesError::Path("Cannot create relative symlink".to_string()))?
         }
         SymlinkResolution::Absolute => file.repo_path.clone(),
         SymlinkResolution::Follow => {
             // For migration, just use relative
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                .unwrap_or_else(|| file.repo_path.clone())
+            if let Some(parent) = file.dest_path.parent() {
+                match pathdiff::diff_paths(&file.repo_path, parent) {
+                    Some(relative) => relative,
+                    None => file.repo_path.clone(),
+                }
+            } else {
+                file.repo_path.clone()
+            }
         }
         SymlinkResolution::Replace => {
             // Replace mode doesn't use symlinks, but we'll still compute a target
             // (This shouldn't be called in Replace mode, but handle it anyway)
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                .unwrap_or_else(|| file.repo_path.clone())
+            if let Some(parent) = file.dest_path.parent() {
+                match pathdiff::diff_paths(&file.repo_path, parent) {
+                    Some(relative) => relative,
+                    None => file.repo_path.clone(),
+                }
+            } else {
+                file.repo_path.clone()
+            }
         }
     })
 }

@@ -73,10 +73,10 @@ pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
              - Check path does not contain invalid characters\n    \
              - Ensure path is relative to home directory",
             full_dest.display(),
-            full_dest
-                .parent()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "N/A".to_string())
+            match full_dest.parent() {
+                Some(parent) => parent.display().to_string(),
+                None => "N/A".to_string(),
+            }
         ))
     })?;
 

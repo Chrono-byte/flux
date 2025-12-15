@@ -263,9 +263,10 @@ pub fn backup_all_files(
         }
 
         // Calculate backup path preserving directory structure relative to home
-        let relative_path = canonical_source
-            .strip_prefix(&canonical_home)
-            .unwrap_or(&canonical_source);
+        let relative_path = match canonical_source.strip_prefix(&canonical_home) {
+            Ok(path) => path,
+            Err(_) => &canonical_source,
+        };
         let backup_path = backup_dir.join(relative_path);
 
         // Create parent directories for backup path if needed
@@ -546,7 +547,10 @@ impl<'a> FileSystemManager<'a> {
 
         let home = dirs::home_dir()
             .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
-        let relative_path = file_path.strip_prefix(&home).unwrap_or(file_path);
+        let relative_path = match file_path.strip_prefix(&home) {
+            Ok(path) => path,
+            Err(_) => file_path,
+        };
         let backup_path = backup_dir.join(relative_path);
 
         if self.is_dry_run {
@@ -560,7 +564,9 @@ impl<'a> FileSystemManager<'a> {
                 backup: backup_path.clone(),
             });
         } else {
-            fs::create_dir_all(backup_path.parent().unwrap())?;
+            if let Some(parent) = backup_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
 
             if file_path.is_dir() {
                 copy_dir_all(file_path, &backup_path)?;
@@ -739,12 +745,18 @@ fn determine_sync_action(file: &TrackedFile, verbose: bool) -> Result<SyncAction
 
     // Safety check: prevent overwriting non-empty destination with empty repo file
     let repo_is_empty = if file.repo_path.is_file() {
-        fs::metadata(&file.repo_path).map(|m| m.len()).unwrap_or(0) == 0
+        match fs::metadata(&file.repo_path) {
+            Ok(metadata) => metadata.len() == 0,
+            Err(_) => false,
+        }
     } else {
         false // Dirs aren't "empty" for this check
     };
     let dest_has_content = if file.dest_path.is_file() {
-        fs::metadata(&file.dest_path).map(|m| m.len()).unwrap_or(0) > 0
+        match fs::metadata(&file.dest_path) {
+            Ok(metadata) => metadata.len() > 0,
+            Err(_) => false,
+        }
     } else {
         false
     };
@@ -898,11 +910,20 @@ fn create_symlink_managed(
     let link_target = match resolution {
         // Compute symlink target based on resolution strategy
         SymlinkResolution::Auto => {
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                .unwrap_or_else(|| file.repo_path.clone())
+            if let Some(parent) = file.dest_path.parent() {
+                match pathdiff::diff_paths(&file.repo_path, parent) {
+                    Some(relative) => relative,
+                    None => file.repo_path.clone(),
+                }
+            } else {
+                file.repo_path.clone()
+            }
         }
         SymlinkResolution::Relative => {
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
+            let parent = file.dest_path.parent().ok_or_else(|| {
+                DotfilesError::Path("Cannot determine parent for destination path".to_string())
+            })?;
+            pathdiff::diff_paths(&file.repo_path, parent)
                 .ok_or_else(|| DotfilesError::Path("Cannot create relative symlink".to_string()))?
         }
         SymlinkResolution::Absolute => file.repo_path.clone(),
@@ -910,8 +931,14 @@ fn create_symlink_managed(
             if verbose {
                 println!("    'Follow' resolution strategy is treated as 'Auto'.");
             }
-            pathdiff::diff_paths(&file.repo_path, file.dest_path.parent().unwrap())
-                .unwrap_or_else(|| file.repo_path.clone())
+            if let Some(parent) = file.dest_path.parent() {
+                match pathdiff::diff_paths(&file.repo_path, parent) {
+                    Some(relative) => relative,
+                    None => file.repo_path.clone(),
+                }
+            } else {
+                file.repo_path.clone()
+            }
         }
         SymlinkResolution::Replace => unreachable!(), // Handled above
     };
@@ -920,9 +947,7 @@ fn create_symlink_managed(
     // This prevents broken symlinks if the operation is interrupted
     let temp_link_path = file.dest_path.with_extension(format!(
         "{}.flux-temp",
-        file.dest_path
-            .extension()
-            .map_or("", |s| s.to_str().unwrap_or(""))
+        file.dest_path.extension().and_then(|s| s.to_str()).unwrap_or_default()
     ));
 
     if verbose {
