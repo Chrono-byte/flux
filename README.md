@@ -10,7 +10,7 @@ A symlink-based dotfiles manager written in Rust. Manage your configuration file
 - **Git integration**: Automatic commits, remote management, and push support (SSH/HTTPS)
 - **File locking detection**: Skips locked files with warnings
 - **Dry-run mode**: Preview changes before applying
-- **Backup & restore**: Automatic backups with restore capability
+- **Transaction safety**: Automatic backups during apply operations for rollback safety
 - **Validation**: Check configuration integrity
 
 ## Installation
@@ -65,20 +65,13 @@ flux status
 - `flux profile create <name>` - Create a new profile
 - `flux profile switch <name>` - Switch to a different profile
 
-### Backup & Restore
-
-- `flux backup create [--profile NAME]` - Create backup of tracked files
-- `flux backup restore [backup] [--file PATH]` - Restore from backup (use `latest` or index)
-- `flux backup list` - List available backups
-- `flux backup cleanup [--keep N] [--days N]` - Clean up old backups
-
 ### Configuration Management Commands
 
 - `flux config sync [--dry-run]` - Sync XDG config to repo
 
 ### Apply Configuration
 
-- `flux apply [--profile NAME] [--dry-run] [--yes] [--force]` - Apply tracked files to their destinations, creating symlinks. Use `--force` to replace all files that aren't correct symlinks (no backups, uses repo version)
+- `flux apply [--profile NAME] [--dry-run] [--yes] [--force]` - Apply tracked files to their destinations, creating symlinks. Use `--force` to replace all files that aren't correct symlinks without creating backups
 
 ### Git Operations
 
@@ -93,7 +86,7 @@ flux status
 
 - `flux maintain check [--profile NAME]` - Check for discrepancies
 - `flux maintain validate` - Validate configuration integrity
-- `flux maintain migrate [--profile NAME] [--no-backup]` - Migrate files with discrepancies (use `--no-backup` to skip backup and copy, just remove and create symlinks)
+- `flux maintain migrate [--profile NAME] [--no-backup]` - Migrate files with discrepancies (use `--no-backup` to skip copying files to repo, just remove and create symlinks)
 - `flux maintain gitignore` - Generate .gitignore file
 
 ### Completions
@@ -116,7 +109,7 @@ The first found file is used.
 [general]
 repo_path = "~/.dotfiles"
 current_profile = "default"
-backup_dir = "~/.dotfiles-backups"
+# backup_dir is optional - defaults to ~/.local/share/flux/backups if not specified
 symlink_resolution = "auto"  # auto, relative, absolute, follow, replace
 default_remote = "origin"
 default_branch = "main"

@@ -8,22 +8,20 @@ mod utils;
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use commands::{
-    add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_states,
-    display_backups, display_discrepancies, display_health_report, display_preview, display_status,
-    display_validation, find_discrepancies, import_scan, import_stow, list_backups, migrate_files,
-    restore_backup, run_health_checks, validate_config,
+    apply_config, check_status, compare_states, display_discrepancies, display_health_report,
+    display_preview, display_status, display_validation, find_discrepancies, import_scan,
+    import_stow, migrate_files, run_health_checks, validate_config,
 };
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use config::{Config, EnvironmentConfig};
-use file_manager::{add_file, backup_all_files, remove_file, sync_files};
+use file_manager::{add_file, remove_file, sync_files};
 use services::git;
 use services::{
-    add_remote, commit_changes, detect_changes, init_repo, list_generations, list_remotes,
-    load_generation, pull_from_remote, push_to_remote, read_events, record_event, remove_remote,
-    restore_generation, set_remote_url, show_git_status, stage_changes,
+    add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
+    push_to_remote, read_events, remove_remote, set_remote_url, show_git_status, stage_changes,
 };
 use std::path::PathBuf;
-use utils::prompt::{prompt_commit_message, prompt_yes_no};
+use utils::prompt::prompt_commit_message;
 use utils::{DotfilesError, DryRun, Result, logging};
 
 #[derive(Parser)]
@@ -116,8 +114,6 @@ enum Commands {
     },
     /// Apply configuration declaratively
     Apply {
-        #[command(subcommand)]
-        command: Option<ApplyCommands>,
         /// Profile name (default: current profile)
         #[arg(long)]
         profile: Option<String>,
@@ -164,11 +160,6 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
-    },
-    /// Backup and restore operations
-    Backup {
-        #[command(subcommand)]
-        command: BackupCommands,
     },
     /// Manage remote repositories
     Remote {
@@ -262,76 +253,6 @@ enum ImportCommands {
 }
 
 #[derive(Subcommand)]
-enum BackupCommands {
-    /// Backup all currently tracked files
-    Create {
-        /// Profile name (default: current profile)
-        #[arg(long)]
-        profile: Option<String>,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Restore files from backup
-    Restore {
-        /// Backup index, 'latest', or 'list' to show backups
-        #[arg(default_value = "list")]
-        backup: String,
-        /// Specific file to restore (optional, restores all if not specified)
-        #[arg(long)]
-        file: Option<String>,
-        /// Skip confirmation prompts (auto-confirm)
-        #[arg(long)]
-        yes: bool,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Add files from a backup to the repository and stage them
-    Add {
-        /// Backup index, 'latest', or 'list' to show backups
-        #[arg(default_value = "latest")]
-        backup: String,
-        /// Profile name (default: current profile)
-        #[arg(long)]
-        profile: Option<String>,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Commit staged changes in the repository
-    Commit {
-        /// Commit message (optional, will prompt if not provided)
-        #[arg(long)]
-        message: Option<String>,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Clean up old backups based on retention policy
-    Cleanup {
-        /// Number of recent backups to keep (default: 10)
-        #[arg(long)]
-        keep: Option<usize>,
-        /// Keep all backups from the last N days (default: 7)
-        #[arg(long)]
-        days: Option<i64>,
-        /// Minimum size threshold in bytes - backups smaller than this will be deleted (default: 1024 = 1KB)
-        #[arg(long)]
-        min_size: Option<u64>,
-        /// Keep only the most recent N backups, ignoring age (overrides keep and days)
-        #[arg(long)]
-        only_keep: Option<usize>,
-        /// Skip confirmation prompts (auto-confirm)
-        #[arg(long)]
-        yes: bool,
-        /// Dry run mode (show what would be deleted)
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-#[derive(Subcommand)]
 enum MaintainCommands {
     /// Check for discrepancies in tracked files (missing, wrong target, content differs, etc.)
     Check {
@@ -408,27 +329,6 @@ enum RemoteCommands {
 }
 
 #[derive(Subcommand)]
-enum ApplyCommands {
-    /// Rollback to a previous generation
-    Rollback {
-        /// Generation ID to rollback to
-        id: String,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-        /// Skip confirmation prompts
-        #[arg(long)]
-        yes: bool,
-    },
-    /// List recent generations
-    List {
-        /// Limit number of generations to show
-        #[arg(long, short = 'n')]
-        limit: Option<usize>,
-    },
-}
-
-#[derive(Subcommand)]
 enum ConfigCommands {
     /// Sync XDG config to repo (overwrite repo config with XDG config)
     Sync {
@@ -490,193 +390,6 @@ fn main() {
         eprintln!("{} {}", "Error:".red().bold(), e);
         std::process::exit(1);
     }
-}
-
-fn handle_backup_command(command: BackupCommands) -> Result<()> {
-    match command {
-        BackupCommands::Create { profile, dry_run } => {
-            let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::default();
-            backup_all_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        BackupCommands::Restore {
-            backup,
-            file,
-            yes,
-            dry_run,
-        } => {
-            let config = Config::load()?;
-            let backups = list_backups(&config)?;
-
-            if backups.is_empty() {
-                println!("{}", "No backups available.".yellow());
-                return Ok(());
-            }
-
-            // If backup is "latest" and no specific file, show list and prompt user
-            let selected_backup = if backup == "latest" && file.is_none() {
-                display_backups(&backups);
-                if !yes && !prompt_yes_no("Restore from latest backup?")? {
-                    println!("{}", "Restore cancelled.".yellow());
-                    return Ok(());
-                }
-                &backups[0]
-            } else if backup == "latest" {
-                &backups[0]
-            } else if backup == "list" {
-                display_backups(&backups);
-                return Ok(());
-            } else {
-                let index: usize = backup.parse().map_err(|_| {
-                    DotfilesError::Path(
-                        "Invalid backup index. Use 'latest', 'list', or a number".to_string(),
-                    )
-                })?;
-                if index == 0 || index > backups.len() {
-                    return Err(DotfilesError::Path(format!(
-                        "Backup index out of range (1-{})",
-                        backups.len()
-                    )));
-                }
-                &backups[index - 1]
-            };
-
-            let mut dry_run_tracker = DryRun::default();
-
-            if let Some(target_file) = file {
-                let target_path = std::path::Path::new(&target_file);
-                if !dry_run
-                    && !yes
-                    && !prompt_yes_no(&format!("Restore {} from backup?", target_file))?
-                {
-                    println!("{}", "Restore cancelled.".yellow());
-                    return Ok(());
-                }
-                restore_backup(selected_backup, target_path, &mut dry_run_tracker, dry_run)?;
-                if dry_run {
-                    println!("  [DRY RUN] Would restore {}", target_file);
-                } else {
-                    println!("{} Restored {}", "✓".green(), target_file);
-                }
-            } else {
-                // Restore all files from the selected backup
-                if !dry_run
-                    && !yes
-                    && !prompt_yes_no(&format!(
-                        "Restore all {} file(s) from backup {}?",
-                        selected_backup.files.len(),
-                        selected_backup.timestamp.format("%Y-%m-%d %H:%M:%S")
-                    ))?
-                {
-                    println!("{}", "Restore cancelled.".yellow());
-                    return Ok(());
-                }
-
-                let home = dirs::home_dir().ok_or_else(|| {
-                    DotfilesError::Config("Could not find home directory".to_string())
-                })?;
-
-                for backup_file in &selected_backup.files {
-                    if let Ok(relative) = backup_file.strip_prefix(&selected_backup.path) {
-                        let target = home.join(relative);
-                        restore_backup(selected_backup, &target, &mut dry_run_tracker, dry_run)?;
-                    }
-                }
-                if dry_run {
-                    dry_run_tracker.display_summary();
-                } else {
-                    println!("{} Restored all files from backup", "✓".green());
-                }
-            }
-        }
-        BackupCommands::Add {
-            backup,
-            profile,
-            dry_run,
-        } => {
-            let config = Config::load()?;
-            let backups = list_backups(&config)?;
-
-            if backups.is_empty() {
-                println!("{}", "No backups available.".yellow());
-                return Ok(());
-            }
-
-            // Select the backup to use
-            let selected_backup = if backup == "latest" {
-                &backups[0]
-            } else if backup == "list" {
-                display_backups(&backups);
-                return Ok(());
-            } else {
-                let index: usize = backup.parse().map_err(|_| {
-                    DotfilesError::Path(
-                        "Invalid backup index. Use 'latest', 'list', or a number".to_string(),
-                    )
-                })?;
-                if index == 0 || index > backups.len() {
-                    return Err(DotfilesError::Path(format!(
-                        "Backup index out of range (1-{})",
-                        backups.len()
-                    )));
-                }
-                &backups[index - 1]
-            };
-
-            let mut dry_run_tracker = DryRun::default();
-            add_backup_to_repo(
-                selected_backup,
-                &config,
-                profile.as_deref(),
-                &mut dry_run_tracker,
-                dry_run,
-            )?;
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        BackupCommands::Commit { message, dry_run } => {
-            let config = Config::load()?;
-            let mut dry_run_tracker = DryRun::default();
-
-            let repo_path = config.get_repo_path()?;
-            let repo = git::init_repo(&repo_path)?;
-            let changes = git::detect_changes(&repo)?;
-
-            if changes.is_empty() {
-                println!("{} No changes to commit.", "⊘".yellow());
-                return Ok(());
-            }
-
-            let commit_message = if let Some(msg) = message {
-                msg
-            } else {
-                prompt_commit_message(&changes)?
-            };
-
-            git::stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
-            git::commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
-
-            if dry_run {
-                dry_run_tracker.display_summary();
-            }
-        }
-        BackupCommands::Cleanup {
-            keep,
-            days,
-            min_size,
-            only_keep,
-            yes,
-            dry_run,
-        } => {
-            let config = Config::load()?;
-            cleanup_backups(&config, keep, days, min_size, only_keep, yes, dry_run)?;
-        }
-    }
-    Ok(())
 }
 
 fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
@@ -1010,7 +723,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             }
         }
         Commands::Apply {
-            command,
             profile,
             dry_run,
             diff,
@@ -1020,97 +732,25 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         } => {
             let config = Config::load()?;
 
-            if let Some(subcommand) = command {
-                match subcommand {
-                    ApplyCommands::Rollback { id, dry_run, yes } => {
-                        let generation = load_generation(&config, &id)?;
-
-                        println!("{} Rolling back to generation {}", "→".cyan().bold(), id);
-                        if let Some(desc) = &generation.description {
-                            println!("  Description: {}", desc);
-                        }
-                        if let Some(prof) = &generation.profile {
-                            println!("  Profile: {}", prof);
-                        }
-                        println!(
-                            "  Timestamp: {}",
-                            generation.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
-                        );
-                        println!("  Files to restore: {}", generation.backups.len());
-
-                        if !dry_run
-                            && !yes
-                            && !prompt_yes_no("Restore files from this generation?")?
-                        {
-                            println!("{} Rollback cancelled", "⊘".yellow());
-                            return Ok(());
-                        }
-
-                        restore_generation(&config, &generation, dry_run)?;
-
-                        if !dry_run {
-                            record_event(services::history::HistoryEvent {
-                                timestamp: chrono::Utc::now(),
-                                command: "apply rollback".to_string(),
-                                profile: generation.profile.clone(),
-                                dry_run: false,
-                                transaction_id: Some(generation.id.clone()),
-                                summary: Some(format!(
-                                    "Restored {} files",
-                                    generation.backups.len()
-                                )),
-                            })?;
-                        }
-                    }
-                    ApplyCommands::List { limit } => {
-                        let generations = list_generations(&config, limit)?;
-                        if generations.is_empty() {
-                            println!("{} No generations found", "⊘".yellow());
-                            return Ok(());
-                        }
-
-                        println!("\n{} Recent generations:", "→".cyan().bold());
-                        for generation in &generations {
-                            let desc = generation
-                                .description
-                                .as_deref()
-                                .unwrap_or("(no description)");
-                            let prof = match generation.profile.as_deref() {
-                                Some(p) => format!(" [profile: {}]", p),
-                                None => String::new(),
-                            };
-                            println!(
-                                "  {} {} - {} ({}){}",
-                                "•".cyan(),
-                                generation.id,
-                                desc,
-                                generation.timestamp.format("%Y-%m-%d %H:%M:%S"),
-                                prof
-                            );
-                        }
-                    }
+            // Normal apply command
+            if dry_run {
+                // In dry-run mode, only show preview without applying changes
+                let state_diff = compare_states(&config, profile.as_deref(), force)?;
+                display_preview(&state_diff);
+                if diff && !state_diff.files_to_sync.is_empty() {
+                    crate::commands::display_diffs(&state_diff)?;
                 }
             } else {
-                // Normal apply command
-                if dry_run {
-                    // In dry-run mode, only show preview without applying changes
-                    let state_diff = compare_states(&config, profile.as_deref(), force)?;
-                    display_preview(&state_diff);
-                    if diff && !state_diff.files_to_sync.is_empty() {
-                        crate::commands::display_diffs(&state_diff)?;
-                    }
-                } else {
-                    use crate::commands::ApplyOptions;
-                    // apply_config now handles history recording internally
-                    apply_config(ApplyOptions {
-                        config: &config,
-                        profile: profile.as_deref(),
-                        dry_run,
-                        yes,
-                        description: description.as_deref(),
-                        force,
-                    })?;
-                }
+                use crate::commands::ApplyOptions;
+                // apply_config now handles history recording internally
+                apply_config(ApplyOptions {
+                    config: &config,
+                    profile: profile.as_deref(),
+                    dry_run,
+                    yes,
+                    description: description.as_deref(),
+                    force,
+                })?;
             }
         }
         Commands::History {
@@ -1275,9 +915,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 );
             }
         },
-        Commands::Backup { command } => {
-            return handle_backup_command(command);
-        }
         Commands::Remote { command } => {
             let config = Config::load()?;
             let repo_path = config.get_repo_path()?;

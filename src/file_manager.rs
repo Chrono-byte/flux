@@ -2,16 +2,13 @@ use crate::config::Config;
 use crate::types::{SymlinkResolution, TrackedFile};
 use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
-use crate::utils::path_utils::{
-    files_differ, normalize_path, resolve_symlink_target, symlink_points_to_correct_target,
-};
+use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
 use crate::utils::prompt::{ConflictResolution, prompt_conflict};
 use crate::utils::security;
-use chrono::Local;
 use colored::Colorize;
 use log::{debug, warn};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // #############################################################################
 // ## Public API Functions
@@ -31,12 +28,6 @@ pub fn add_file(
 
     // Validate destination path is within home directory
     crate::utils::security::validate_dest_path(dest_path, &home)?;
-
-    let full_dest_path = home.join(dest_path);
-    if let Some(path_to_backup) = get_path_to_backup(&full_dest_path) {
-        println!("  Creating backup of existing destination...");
-        fs_manager.backup_file(&path_to_backup, config, None)?;
-    }
 
     let repo_path = config.get_repo_path()?;
     let tool_dir = repo_path.join(tool);
@@ -107,12 +98,6 @@ pub fn sync_files(
     // Create FileSystemManager to handle all file operations with dry-run support
     let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
 
-    // Create a single timestamped backup directory for all files in this sync operation
-    // This ensures all backups from one sync are grouped together
-    let backup_dir = config
-        .get_backup_dir()?
-        .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
-
     if verbose {
         println!("{} Syncing {} file(s)...", "→".cyan(), tracked_files.len());
     }
@@ -129,14 +114,7 @@ pub fn sync_files(
                 file.dest_path.display()
             );
         }
-        let result = sync_file(
-            file,
-            &symlink_resolution,
-            config,
-            &mut fs_manager,
-            Some(&backup_dir),
-            verbose,
-        )?;
+        let result = sync_file(file, &symlink_resolution, &mut fs_manager, verbose)?;
         stats.update(result);
     }
 
@@ -192,124 +170,6 @@ enum SyncResult {
     Skipped,
 }
 
-/// Backup all currently tracked files.
-pub fn backup_all_files(
-    config: &Config,
-    profile: Option<&str>,
-    dry_run_tracker: &mut DryRun,
-    is_dry_run_mode: bool,
-) -> Result<()> {
-    let tracked_files = config.get_tracked_files(profile)?;
-
-    if tracked_files.is_empty() {
-        println!("{} No tracked files to backup.", "⊘".yellow());
-        return Ok(());
-    }
-
-    println!(
-        "{} Backing up {} tracked file(s)...",
-        "→".cyan(),
-        tracked_files.len()
-    );
-
-    // Create FileSystemManager to handle backup operations with dry-run support
-    let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
-
-    if is_dry_run_mode {
-        println!(
-            "{} DRY RUN MODE - No files will be modified",
-            "⚠".yellow().bold()
-        );
-    }
-
-    // Create a single timestamped backup directory for all files in this backup operation
-    let backup_dir = config
-        .get_backup_dir()?
-        .join(chrono::Local::now().format("%Y%m%d_%H%M%S").to_string());
-    let canonical_backup_dir = normalize_path(&backup_dir);
-
-    let home = dirs::home_dir()
-        .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
-    let canonical_home = normalize_path(&home);
-
-    let mut backed_up_count = 0;
-    let mut skipped_count = 0;
-
-    for file in &tracked_files {
-        // Use centralized helper to determine what file to back up (handles symlinks)
-        let file_to_backup = match get_path_to_backup(&file.dest_path) {
-            Some(path) => path,
-            None => {
-                println!(
-                    "  {} Skipping {} (destination does not exist or is broken symlink)",
-                    "⊘".yellow(),
-                    file.dest_path.display()
-                );
-                skipped_count += 1;
-                continue;
-            }
-        };
-
-        // Safety check: prevent backing up files from within the backup directory itself
-        let canonical_source = normalize_path(&file_to_backup);
-        if canonical_source.starts_with(&canonical_backup_dir) {
-            println!(
-                "  {} Skipping {} (source is inside backup directory)",
-                "⊘".yellow(),
-                file_to_backup.display()
-            );
-            skipped_count += 1;
-            continue;
-        }
-
-        // Calculate backup path preserving directory structure relative to home
-        let relative_path = match canonical_source.strip_prefix(&canonical_home) {
-            Ok(path) => path,
-            Err(_) => &canonical_source,
-        };
-        let backup_path = backup_dir.join(relative_path);
-
-        // Create parent directories for backup path if needed
-        if let Some(parent) = backup_path.parent() {
-            fs_manager.create_dir_all(parent)?;
-        }
-
-        // Copy file or directory using FileSystemManager (handles dry-run)
-        if file_to_backup.is_dir() {
-            fs_manager.copy_dir_all(&file_to_backup, &backup_path)?;
-        } else {
-            fs_manager.copy(&file_to_backup, &backup_path)?;
-        }
-
-        // Log progress (FileSystemManager already logged dry-run operations)
-        if !is_dry_run_mode {
-            println!(
-                "  {} Backed up {} -> {}",
-                "✓".yellow(),
-                file_to_backup.display(),
-                backup_path.display()
-            );
-        }
-        backed_up_count += 1;
-    }
-
-    println!("\n{} Backup complete", "✓".green());
-    println!(
-        "  {} backed up, {} skipped",
-        backed_up_count.to_string().green(),
-        skipped_count.to_string().yellow()
-    );
-
-    if !is_dry_run_mode && backed_up_count > 0 {
-        println!(
-            "  Backup location: {}",
-            backup_dir.display().to_string().cyan()
-        );
-    }
-
-    Ok(())
-}
-
 /// Remove a file from tracking and delete it from the filesystem.
 pub fn remove_file(
     config: &mut Config,
@@ -332,12 +192,6 @@ pub fn remove_file(
     let dest_path = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
         .join(&file_entry.dest);
-
-    // Create backup before removing file from filesystem
-    if let Some(path_to_backup) = get_path_to_backup(&dest_path) {
-        println!("  Creating backup before removal...");
-        fs_manager.backup_file(&path_to_backup, config, None)?;
-    }
 
     // Remove symlink or file from destination location
     fs_manager.remove_file(&dest_path)?;
@@ -527,72 +381,6 @@ impl<'a> FileSystemManager<'a> {
             }
         }
     }
-
-    /// Creates a backup of a file.
-    ///
-    /// Uses `backup_dir` if provided, otherwise creates a new timestamped directory.
-    pub fn backup_file(
-        &mut self,
-        file_path: &Path,
-        config: &Config,
-        backup_dir: Option<&Path>,
-    ) -> Result<PathBuf> {
-        let backup_dir = if let Some(dir) = backup_dir {
-            dir.to_path_buf()
-        } else {
-            config
-                .get_backup_dir()?
-                .join(Local::now().format("%Y%m%d_%H%M%S").to_string())
-        };
-
-        let home = dirs::home_dir()
-            .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
-        let relative_path = match file_path.strip_prefix(&home) {
-            Ok(path) => path,
-            Err(_) => file_path,
-        };
-        let backup_path = backup_dir.join(relative_path);
-
-        if self.is_dry_run {
-            println!(
-                "  [DRY RUN] Would backup {} -> {}",
-                file_path.display(),
-                backup_path.display()
-            );
-            self.dry_run.log_operation(Operation::CreateBackup {
-                file: file_path.to_path_buf(),
-                backup: backup_path.clone(),
-            });
-        } else {
-            if let Some(parent) = backup_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            if file_path.is_dir() {
-                copy_dir_all(file_path, &backup_path)?;
-            } else {
-                fs::copy(file_path, &backup_path)?;
-            }
-
-            // SECURITY: Set secure permissions on backup files (0600 - owner only)
-            if let Err(e) = security::set_secure_permissions(&backup_path) {
-                warn!(
-                    "Could not set secure permissions on backup {}: {}",
-                    backup_path.display(),
-                    e
-                );
-            }
-
-            println!(
-                "{} Backed up {} -> {}",
-                "✓".yellow(),
-                file_path.display(),
-                backup_path.display()
-            );
-        }
-
-        Ok(backup_path)
-    }
 }
 
 // #############################################################################
@@ -615,9 +403,7 @@ enum SyncAction {
 fn sync_file(
     file: &TrackedFile,
     resolution: &SymlinkResolution,
-    config: &Config,
     fs_manager: &mut FileSystemManager,
-    backup_dir: Option<&Path>,
     verbose: bool,
 ) -> Result<SyncResult> {
     if verbose {
@@ -642,16 +428,6 @@ fn sync_file(
     // Check if destination file is locked (e.g., in use by another process)
     if let Some(skip_reason) = check_file_lock_status(&file.dest_path, verbose)? {
         return Ok(skip_reason);
-    }
-
-    // Step 2: Create backup before any modifications
-    // Backup is created before determining action to simplify downstream logic,
-    // since any action (except DoNothing) might modify the destination.
-    if let Some(path_to_backup) = get_path_to_backup(&file.dest_path) {
-        if verbose {
-            println!("  Creating backup before any modifications...");
-        }
-        fs_manager.backup_file(&path_to_backup, config, backup_dir)?;
     }
 
     // Step 3: Determine what action to take
@@ -1134,32 +910,6 @@ fn check_file_lock_status(file_path: &Path, verbose: bool) -> Result<Option<Sync
             debug!("Continuing despite lock check error");
             Ok(None)
         }
-    }
-}
-
-/// Resolves the actual file to be backed up.
-///
-/// If `path` is a file/dir, returns `Some(path)`.
-/// If `path` is a symlink, returns its *target* path.
-/// If `path` doesn't exist or is a broken symlink, returns `None`.
-fn get_path_to_backup(path: &Path) -> Option<PathBuf> {
-    if path.is_symlink() {
-        match fs::read_link(path) {
-            Ok(target) => {
-                let resolved_target = resolve_symlink_target(path, &target);
-                let normalized_target = normalize_path(&resolved_target);
-                if normalized_target.exists() {
-                    Some(normalized_target)
-                } else {
-                    None // Broken symlink
-                }
-            }
-            Err(_) => None, // Can't read symlink
-        }
-    } else if path.exists() {
-        Some(path.to_path_buf()) // Regular file or directory
-    } else {
-        None // Doesn't exist
     }
 }
 

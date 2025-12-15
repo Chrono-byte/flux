@@ -67,21 +67,8 @@ pub struct Transaction {
     pub operations: Vec<FileOperation>,
     /// Results from executed operations
     pub results: Vec<OperationResult>,
-    /// Backup records created during this transaction (backup path and original target)
-    pub backups: Vec<BackupRecord>,
     /// Additional metadata (description, profile, timestamp, etc.)
     pub metadata: HashMap<String, String>,
-}
-
-/// A single backup created during a transaction.
-///
-/// This is used for generation tracking and rollback.
-#[derive(Debug, Clone)]
-pub struct BackupRecord {
-    /// Path to the backup copy on disk
-    pub backup_path: PathBuf,
-    /// Original target path that was backed up
-    pub target_path: PathBuf,
 }
 
 impl Default for Transaction {
@@ -92,7 +79,6 @@ impl Default for Transaction {
             temp_dir: PathBuf::new(),
             operations: Vec::new(),
             results: Vec::new(),
-            backups: Vec::new(),
             metadata: HashMap::new(),
         }
     }
@@ -217,7 +203,6 @@ impl Transaction {
                     target,
                     backup_path,
                     *resolution,
-                    config,
                     fs_manager,
                 ),
             };
@@ -521,7 +506,6 @@ impl Transaction {
         target: &Path,
         backup_path: &Path,
         resolution: SymlinkResolution,
-        config: &Config,
         fs_manager: &mut FileSystemManager,
     ) -> OperationResult {
         // Create backup
@@ -566,17 +550,6 @@ impl Transaction {
                     error: Some(format!("Failed to backup file: {}", e)),
                 };
             }
-
-            self.backups.push(BackupRecord {
-                backup_path: backup_path.to_path_buf(),
-                target_path: target.to_path_buf(),
-            });
-        }
-
-        // Now create symlink (or copy for Replace)
-        let result = self.execute_create_symlink(source, target, resolution, config, fs_manager);
-        if !result.success {
-            return result;
         }
 
         OperationResult {

@@ -69,7 +69,6 @@ pub fn migrate_files(
             &discrepancy.file,
             &discrepancy.issue,
             &symlink_resolution,
-            config,
             &mut fs_manager,
             no_backup,
         )? {
@@ -102,7 +101,6 @@ fn migrate_file(
     file: &TrackedFile,
     issue: &IssueType,
     resolution: &SymlinkResolution,
-    config: &Config,
     fs_manager: &mut FileSystemManager,
     no_backup: bool,
 ) -> Result<MigrationResult> {
@@ -165,11 +163,7 @@ fn migrate_file(
                 }
                 Ok(MigrationResult::Migrated)
             } else {
-                // Normal flow: backup, copy to repo, remove, create symlink
-                // Backup destination before modifying (fs_manager handles dry run)
-                println!("  Creating backup...");
-                fs_manager.backup_file(&file.dest_path, config, None)?;
-
+                // Normal flow: copy to repo, remove, create symlink
                 // Copy current file to repo (fs_manager handles dry run)
                 println!("  Copying current file to repo...");
                 if let Some(parent) = file.repo_path.parent() {
@@ -324,9 +318,6 @@ fn migrate_file(
                             fs_manager.copy(source, &file.repo_path)?;
                         }
                     } else {
-                        println!("  Creating backup...");
-                        fs_manager.backup_file(source, config, None)?;
-
                         // Copy current file to repo (fs_manager handles dry run)
                         println!("  Copying current file to repo...");
                         if let Some(parent) = file.repo_path.parent() {

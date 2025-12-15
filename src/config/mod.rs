@@ -18,8 +18,9 @@ use crate::utils::error::{DotfilesError, Result};
 pub struct GeneralConfig {
     /// Repository path (supports ~ expansion)
     pub repo_path: String,
-    /// Backup directory path (supports ~ expansion)
-    pub backup_dir: String,
+    /// Backup directory path (supports ~ expansion, optional - defaults to ~/.local/share/flux/backups)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_dir: Option<String>,
     /// Currently active profile name
     pub current_profile: String,
     /// Symlink resolution strategy
@@ -47,7 +48,7 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             repo_path: "~/.dotfiles".to_string(),
-            backup_dir: "~/.dotfiles-backup".to_string(),
+            backup_dir: None,
             current_profile: "default".to_string(),
             symlink_resolution: SymlinkResolution::Auto,
             default_remote: None,
@@ -456,19 +457,26 @@ impl Config {
     }
 
     pub fn get_backup_dir(&self) -> Result<PathBuf> {
-        let expanded = shellexpand::tilde(&self.general.backup_dir).into_owned();
-        Ok(PathBuf::from(expanded))
+        let backup_dir = if let Some(ref dir) = self.general.backup_dir {
+            shellexpand::tilde(dir).into_owned()
+        } else {
+            // Default to XDG data directory
+            let data_dir = dirs::data_local_dir().ok_or_else(|| {
+                DotfilesError::Config("Could not find data directory".to_string())
+            })?;
+            data_dir
+                .join("flux")
+                .join("backups")
+                .to_string_lossy()
+                .to_string()
+        };
+        Ok(PathBuf::from(backup_dir))
     }
 
     pub fn validate(&self) -> Result<()> {
         if self.general.repo_path.is_empty() {
             return Err(DotfilesError::Config(
                 "repo_path cannot be empty".to_string(),
-            ));
-        }
-        if self.general.backup_dir.is_empty() {
-            return Err(DotfilesError::Config(
-                "backup_dir cannot be empty".to_string(),
             ));
         }
         if self.general.current_profile.is_empty() {

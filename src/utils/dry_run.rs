@@ -6,8 +6,6 @@ use std::path::PathBuf;
 pub enum Operation {
     /// Create a symlink
     CreateSymlink { from: PathBuf, to: PathBuf },
-    /// Create a backup of a file
-    CreateBackup { file: PathBuf, backup: PathBuf },
     /// Create a directory
     CreateDirectory { path: PathBuf },
     /// Copy a file
@@ -73,14 +71,6 @@ impl DryRun {
                         "Create symlink:".green(),
                         from.display(),
                         to.display()
-                    );
-                }
-                Operation::CreateBackup { file, backup } => {
-                    println!(
-                        "   {} {} -> {}",
-                        "Create backup:".yellow(),
-                        file.display(),
-                        backup.display()
                     );
                 }
                 Operation::CreateDirectory { path } => {

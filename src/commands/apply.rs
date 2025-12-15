@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
-use crate::services::{FileOperation, Transaction, generations, history, unified_diff};
+use crate::services::{FileOperation, Transaction, history, unified_diff};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
@@ -359,9 +359,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
 
     // Cleanup
     transaction.cleanup()?;
-
-    // Record generation metadata for rollback/history
-    generations::record_generation(options.config, &transaction)?;
 
     // Run post-apply hooks
     if let Some(hooks_config) = &options.config.hooks

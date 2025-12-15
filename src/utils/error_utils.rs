@@ -118,22 +118,3 @@ pub fn git_operation_failed(operation: &str, repo_path: &Path, reason: &str) -> 
     // Use a generic IO error as a wrapper since git2::Error requires different construction
     DotfilesError::Io(std::io::Error::other(error_msg))
 }
-
-/// Backup restore error
-pub fn backup_restore_failed(backup_path: &Path, target: &Path, reason: &str) -> DotfilesError {
-    DotfilesError::Path(format!(
-        "What: Failed to restore file from backup\n  \
-         Backup: {}\n  \
-         Target: {}\n  \
-         Reason: {}\n  \
-         Solution:\n    \
-         - Verify backup exists and is readable: `ls -la {}`\n    \
-         - Check that target directory exists or can be created\n    \
-         - Ensure you have write permissions to the target location\n    \
-         - Run with elevated privileges if needed",
-        backup_path.display(),
-        target.display(),
-        reason,
-        backup_path.display()
-    ))
-}
