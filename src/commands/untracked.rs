@@ -1,7 +1,9 @@
 use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::error::Result;
-use crate::utils::path_utils::{files_differ, resolve_symlink_target, symlink_points_to_correct_target};
+use crate::utils::path_utils::{
+    files_differ, resolve_symlink_target, symlink_points_to_correct_target,
+};
 use colored::Colorize;
 use std::fs;
 
@@ -94,7 +96,8 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
                 }
 
                 // Check if symlink points to correct location
-                if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
+                if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path)
+                {
                     return Ok(Some(Discrepancy {
                         file: file.clone(),
                         issue: IssueType::WrongTarget,
@@ -146,7 +149,6 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
         }
     }
 }
-
 
 pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
     if discrepancies.is_empty() {

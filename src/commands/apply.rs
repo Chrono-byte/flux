@@ -100,7 +100,6 @@ fn needs_sync(file: &TrackedFile, force: bool) -> Result<bool> {
     Ok(true)
 }
 
-
 /// Display a preview of changes that would be applied
 pub fn display_preview(diff: &StateDiff) {
     println!("\n{} Preview of changes:", "→".cyan().bold());
@@ -255,11 +254,8 @@ fn add_file_operation_to_transaction(
     } else {
         // Normal mode: backup existing files
         if file.dest_path.exists() {
-            let backup_path = backup_dir.join(
-                file.dest_path
-                    .strip_prefix(home)
-                    .unwrap_or(&file.dest_path),
-            );
+            let backup_path =
+                backup_dir.join(file.dest_path.strip_prefix(home).unwrap_or(&file.dest_path));
 
             transaction.add_operation(FileOperation::BackupAndReplace {
                 source: file.repo_path.clone(),

@@ -2,7 +2,9 @@ use crate::config::Config;
 use crate::types::{SymlinkResolution, TrackedFile};
 use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
-use crate::utils::path_utils::{files_differ, normalize_path, resolve_symlink_target, symlink_points_to_correct_target};
+use crate::utils::path_utils::{
+    files_differ, normalize_path, resolve_symlink_target, symlink_points_to_correct_target,
+};
 use crate::utils::prompt::{ConflictResolution, prompt_conflict};
 use crate::utils::security;
 use chrono::Local;
@@ -971,7 +973,10 @@ fn check_file_lock_status(file_path: &Path, verbose: bool) -> Result<Option<Sync
 
     match security::is_file_locked(file_path) {
         Ok(true) => {
-            warn!("File {} is locked (may be in use), skipping", file_path.display());
+            warn!(
+                "File {} is locked (may be in use), skipping",
+                file_path.display()
+            );
             if verbose {
                 println!(
                     "  {} File is locked (may be in use by another application), skipping",
@@ -1001,7 +1006,6 @@ fn check_file_lock_status(file_path: &Path, verbose: bool) -> Result<Option<Sync
         }
     }
 }
-
 
 /// Resolves the actual file to be backed up.
 ///
@@ -1048,7 +1052,6 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 
     Ok(())
 }
-
 
 /// Show a diff between two files using the `diff` command.
 fn show_diff(path1: &Path, path2: &Path) -> Result<()> {

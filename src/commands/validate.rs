@@ -54,7 +54,8 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
         // Check if destination is a symlink
         if file.dest_path.exists() && file.dest_path.is_symlink() {
             if let Ok(link_target) = fs::read_link(&file.dest_path) {
-                if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
+                if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path)
+                {
                     issues.push(ValidationIssue::InvalidSymlink(file.clone()));
                 }
             } else {
@@ -207,4 +208,3 @@ pub fn display_validation(report: &ValidationReport) {
         report.issues.len().to_string().red()
     );
 }
-

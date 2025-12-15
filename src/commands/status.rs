@@ -1,7 +1,9 @@
 use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::error::Result;
-use crate::utils::path_utils::{files_differ, resolve_symlink_target, symlink_points_to_correct_target};
+use crate::utils::path_utils::{
+    files_differ, resolve_symlink_target, symlink_points_to_correct_target,
+};
 use colored::Colorize;
 use std::fs;
 
@@ -84,7 +86,6 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
     }
 }
 
-
 fn status_message(file: &TrackedFile, status: &FileStatus) -> String {
     match status {
         FileStatus::Synced => format!("✓ {}", file.dest_path.display()),
@@ -159,4 +160,3 @@ pub fn display_status(reports: &[StatusReport]) {
         issues_count.to_string().yellow()
     );
 }
-

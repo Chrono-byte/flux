@@ -52,4 +52,3 @@ pub fn symlink_points_to_correct_target(
     let normalized_expected = normalize_path(expected_target);
     normalized_target == normalized_expected
 }
-
