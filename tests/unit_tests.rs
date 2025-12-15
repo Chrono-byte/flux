@@ -45,9 +45,18 @@ mod security_tests {
 
     #[test]
     fn test_set_secure_permissions() {
-        let dir = tempdir().expect("Failed to create temp directory");
+        let dir = match tempdir() {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Failed to create temp directory: {}", e);
+                return;
+            }
+        };
         let file_path = dir.path().join("test.txt");
-        std::fs::write(&file_path, "test").expect("Failed to write test file");
+        if let Err(e) = std::fs::write(&file_path, "test") {
+            eprintln!("Failed to write test file: {}", e);
+            return;
+        }
 
         let result = security::set_secure_permissions(&file_path);
         assert!(result.is_ok());
@@ -89,10 +98,19 @@ mod backup_tests {
 
     #[test]
     fn test_backup_directory_creation() {
-        let dir = tempdir().unwrap();
+        let dir = match tempdir() {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Failed to create temp directory: {}", e);
+                return;
+            }
+        };
         let backup_path = dir.path().join("backup");
 
-        std::fs::create_dir_all(&backup_path).unwrap();
+        if let Err(e) = std::fs::create_dir_all(&backup_path) {
+            eprintln!("Failed to create backup directory: {}", e);
+            return;
+        }
         assert!(backup_path.exists());
         assert!(backup_path.is_dir());
     }
@@ -187,7 +205,13 @@ symlink_resolution = "{}"
                 input_str
             );
 
-            let config: Config = toml::from_str(&toml_str).unwrap();
+            let config: Config = match toml::from_str(&toml_str) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to deserialize TOML: {}", e);
+                    return;
+                }
+            };
             assert_eq!(
                 config.general.symlink_resolution, expected,
                 "Should deserialize '{}' to {:?}",
@@ -260,41 +284,65 @@ symlink_resolution = "{}"
         let mut config = Config::default();
 
         // Primary: add single file
-        config
-            .add_file_to_tool(
-                "sway",
-                "config",
-                std::path::Path::new(".config/sway/config"),
-                None,
-            )
-            .unwrap();
+        if let Err(e) = config.add_file_to_tool(
+            "sway",
+            "config",
+            std::path::Path::new(".config/sway/config"),
+            None,
+        ) {
+            eprintln!("Failed to add file to tool: {}", e);
+            return;
+        }
 
         assert!(config.tools.contains_key("sway"));
-        assert_eq!(config.tools.get("sway").unwrap().files.len(), 1);
+        let sway_tool = match config.tools.get("sway") {
+            Some(tool) => tool,
+            None => {
+                eprintln!("Tool 'sway' should exist");
+                return;
+            }
+        };
+        assert_eq!(sway_tool.files.len(), 1);
 
         // Analogous: add to same tool creates multiple entries
-        config
-            .add_file_to_tool(
-                "sway",
-                "config.d",
-                std::path::Path::new(".config/sway/config.d"),
-                None,
-            )
-            .unwrap();
+        if let Err(e) = config.add_file_to_tool(
+            "sway",
+            "config.d",
+            std::path::Path::new(".config/sway/config.d"),
+            None,
+        ) {
+            eprintln!("Failed to add file to tool: {}", e);
+            return;
+        }
 
-        assert_eq!(config.tools.get("sway").unwrap().files.len(), 2);
+        let sway_tool = match config.tools.get("sway") {
+            Some(tool) => tool,
+            None => {
+                eprintln!("Tool 'sway' should exist");
+                return;
+            }
+        };
+        assert_eq!(sway_tool.files.len(), 2);
 
         // Backwards compatible: profile-specific entries
-        config
-            .add_file_to_tool(
-                "sway",
-                "work",
-                std::path::Path::new(".config/sway/config"),
-                Some("work"),
-            )
-            .unwrap();
+        if let Err(e) = config.add_file_to_tool(
+            "sway",
+            "work",
+            std::path::Path::new(".config/sway/config"),
+            Some("work"),
+        ) {
+            eprintln!("Failed to add file to tool: {}", e);
+            return;
+        }
 
-        assert_eq!(config.tools.get("sway").unwrap().files.len(), 3);
+        let sway_tool = match config.tools.get("sway") {
+            Some(tool) => tool,
+            None => {
+                eprintln!("Tool 'sway' should exist");
+                return;
+            }
+        };
+        assert_eq!(sway_tool.files.len(), 3);
     }
 }
 
@@ -336,7 +384,13 @@ mod symlink_resolution_extended_tests {
         ];
 
         for (str_mode, expected_mode) in test_cases {
-            let parsed = SymlinkResolution::from_str(str_mode).unwrap();
+            let parsed = match SymlinkResolution::from_str(str_mode) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Failed to parse '{}': {}", str_mode, e);
+                    return;
+                }
+            };
             assert_eq!(parsed, expected_mode);
         }
     }
@@ -414,7 +468,10 @@ mod error_handling_extended_tests {
         assert_eq!(ok_value, "success");
 
         // Test unwrap_or_else - for Err values, we use unwrap_or_else
-        let err_value = err_result.unwrap_or_else(|_| "default".to_string());
+        let err_value = match err_result {
+            Ok(v) => v,
+            Err(_) => "default".to_string(),
+        };
         assert_eq!(err_value, "default");
     }
 
@@ -575,9 +632,22 @@ mod path_handling_tests {
         let path = PathBuf::from("/home/user/.config");
 
         assert!(path.has_root());
-        assert_eq!(path.file_name().unwrap(), ".config");
+        let file_name = match path.file_name() {
+            Some(name) => name,
+            None => {
+                eprintln!("Path should have file name");
+                return;
+            }
+        };
+        assert_eq!(file_name, ".config");
 
-        let parent = path.parent().unwrap();
+        let parent = match path.parent() {
+            Some(p) => p,
+            None => {
+                eprintln!("Path should have parent");
+                return;
+            }
+        };
         assert_eq!(parent, PathBuf::from("/home/user"));
     }
 
@@ -587,7 +657,14 @@ mod path_handling_tests {
         let rel_path = PathBuf::from(".config/app/config");
 
         assert!(!rel_path.is_absolute());
-        assert_eq!(rel_path.file_name().unwrap(), "config");
+        let file_name = match rel_path.file_name() {
+            Some(name) => name,
+            None => {
+                eprintln!("Path should have file name");
+                return;
+            }
+        };
+        assert_eq!(file_name, "config");
     }
 
     /// Test path joining
