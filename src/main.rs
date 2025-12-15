@@ -29,7 +29,28 @@ use utils::{DotfilesError, DryRun, Result, logging};
 #[derive(Parser)]
 #[command(name = "flux")]
 #[command(about = "A tool to manage dotfiles with symlink-based sync")]
+#[command(version)]
 struct Cli {
+    /// Path to configuration file (overrides DOTFILES_CONFIG env var)
+    #[arg(long, global = true)]
+    config: Option<String>,
+
+    /// Disable colored output
+    #[arg(long, global = true)]
+    no_color: bool,
+
+    /// Verbose output (show detailed progress)
+    #[arg(short = 'v', long, global = true)]
+    verbose: bool,
+
+    /// Quiet output (suppress non-error messages)
+    #[arg(short = 'q', long, global = true)]
+    quiet: bool,
+
+    /// Set log level (trace, debug, info, warn, error)
+    #[arg(long, global = true)]
+    log_level: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -345,10 +366,28 @@ enum ConfigCommands {
 }
 
 fn main() {
+    let cli = Cli::parse();
+
+    // Handle --no-color flag (sets NO_COLOR env var, which colored crate respects)
+    if cli.no_color {
+        unsafe {
+            std::env::set_var("NO_COLOR", "1");
+        }
+    }
+
+    // Handle --config flag (overrides DOTFILES_CONFIG env var)
+    if let Some(config_path) = &cli.config {
+        unsafe {
+            std::env::set_var("DOTFILES_CONFIG", config_path);
+        }
+    }
+
     // Load and validate environment configuration early
     let env_config = match EnvironmentConfig::load() {
         Ok(config) => {
-            config.display_summary();
+            if !cli.quiet {
+                config.display_summary();
+            }
             config
         }
         Err(e) => {
@@ -365,10 +404,8 @@ fn main() {
         }
     };
 
-    // Initialize logging system
-    logging::init_logging();
-
-    let cli = Cli::parse();
+    // Initialize logging system with CLI log level
+    logging::init_logging(cli.log_level.as_deref());
 
     if let Err(e) = run(cli, env_config) {
         eprintln!("{} {}", "Error:".red().bold(), e);

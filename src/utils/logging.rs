@@ -3,16 +3,20 @@ use log::{Level, LevelFilter};
 use std::io::Write;
 
 /// Initialize the logging system
-pub fn init_logging() {
+pub fn init_logging(log_level: Option<&str>) {
     let mut builder = env_logger::Builder::new();
 
-    // Set default log level from environment variable, default to Info
-    let level = match std::env::var("DOTFILES_LOG")
-        .ok()
-        .and_then(|l| l.parse::<LevelFilter>().ok())
-    {
-        Some(level) => level,
-        None => LevelFilter::Warn,
+    // Set log level with precedence: CLI flag > environment variable > default
+    let level = if let Some(level_str) = log_level {
+        level_str.parse::<LevelFilter>().unwrap_or(LevelFilter::Warn)
+    } else {
+        match std::env::var("DOTFILES_LOG")
+            .ok()
+            .and_then(|l| l.parse::<LevelFilter>().ok())
+        {
+            Some(level) => level,
+            None => LevelFilter::Warn,
+        }
     };
 
     builder.filter_level(level);
