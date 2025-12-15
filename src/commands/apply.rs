@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
-use crate::services::{FileOperation, Transaction};
+use crate::services::{FileOperation, Transaction, generations, history, unified_diff};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
@@ -126,6 +126,121 @@ pub fn display_preview(diff: &StateDiff) {
     println!("\n  {} Total changes: {}", "→".cyan(), diff.total_changes());
 }
 
+/// Display unified diffs for files that would be changed.
+///
+/// This is only used in dry-run mode and never touches the filesystem.
+pub fn display_diffs(diff: &StateDiff) -> Result<()> {
+    use std::fs;
+
+    if diff.files_to_sync.is_empty() {
+        return Ok(());
+    }
+
+    println!("\n{}", "Unified diffs for planned changes:".bold().cyan());
+    println!("{}", "=".repeat(60).cyan());
+
+    // Pre-resolve all secrets for secret files to batch the operation
+    use crate::services::secrets::SecretsManager;
+    let secrets_mgr = SecretsManager::with_defaults();
+    let mut secret_cache: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    // Collect all secret keys that need resolution
+    let secret_files: Vec<_> = diff
+        .files_to_sync
+        .iter()
+        .filter(|f| f.is_secret && f.secret_key.is_some())
+        .collect();
+
+    if !secret_files.is_empty() {
+        // Batch resolve all secrets using resolve_many
+        let secret_keys: Vec<String> = secret_files
+            .iter()
+            .filter_map(|f| f.secret_key.as_ref().cloned())
+            .collect();
+
+        if let Ok(resolved_secrets) = secrets_mgr.resolve_many(
+            secret_files
+                .first()
+                .and_then(|f| f.secret_backend.as_deref()),
+            &secret_keys,
+        ) {
+            for (key, material) in resolved_secrets {
+                secret_cache.insert(key, material.value);
+            }
+        }
+    }
+
+    for file in &diff.files_to_sync {
+        // Current contents (may not exist yet)
+        let current = match fs::read_to_string(&file.dest_path) {
+            Ok(contents) => contents,
+            Err(_) => String::new(),
+        };
+
+        // Target contents from repo or secret backend
+        let target = if file.is_secret && file.secret_key.is_some() {
+            // For secret files, use cached secret or resolve individually
+            if let Some(key) = &file.secret_key {
+                if let Some(cached) = secret_cache.get(key) {
+                    cached.clone()
+                } else {
+                    // Fallback to individual resolution if not in cache
+                    match secrets_mgr.resolve(file.secret_backend.as_deref(), key) {
+                        Ok(secret_mat) => secret_mat.value,
+                        Err(e) => {
+                            println!(
+                                "\n{} {} (skipping diff: cannot resolve secret: {})",
+                                "⊘".yellow(),
+                                file.repo_path.display(),
+                                e
+                            );
+                            continue;
+                        }
+                    }
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            match fs::read_to_string(&file.repo_path) {
+                Ok(contents) => contents,
+                Err(_) => {
+                    println!(
+                        "\n{} {} (skipping diff: cannot read repo file)",
+                        "⊘".yellow(),
+                        file.repo_path.display()
+                    );
+                    continue;
+                }
+            }
+        };
+
+        // Mask secret content in diff output
+        let (current_display, target_display) = if file.is_secret {
+            (
+                "[SECRET CONTENT HIDDEN]".to_string(),
+                "[SECRET CONTENT HIDDEN]".to_string(),
+            )
+        } else {
+            (current.clone(), target.clone())
+        };
+
+        // Compute a simple unified diff. If there are no textual changes
+        // (e.g., binary files or identical), skip printing.
+        let udiff = unified_diff(&file.dest_path, &current_display, &target_display)?;
+        if udiff.trim().is_empty() {
+            continue;
+        }
+
+        println!("\n{} {}", "File:".bold(), file.dest_path.display());
+        println!("{}", "-".repeat(60).cyan());
+        println!("{udiff}");
+    }
+
+    Ok(())
+}
+
 /// Apply configuration changes using atomic transactions
 pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     if options.force {
@@ -150,6 +265,29 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
 
     // Display preview
     display_preview(&diff);
+
+    // Run pre-apply hooks (if not dry-run)
+    if !options.dry_run
+        && let Some(hooks_config) = &options.config.hooks
+            && let Some(pre_hooks) = &hooks_config.pre_apply {
+                use crate::services::hooks::execute_hooks;
+                println!("{} Running pre-apply hooks...", "→".cyan());
+                let hook_results = execute_hooks(pre_hooks, options.config, None, true)?;
+                for result in hook_results {
+                    if !result.success {
+                        return Err(DotfilesError::Config(format!(
+                            "Pre-apply hook failed: {} (exit code: {:?})",
+                            result.command, result.exit_code
+                        )));
+                    }
+                    if !result.stdout.is_empty() {
+                        print!("{}", result.stdout);
+                    }
+                    if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
+                        eprint!("{}", result.stderr);
+                    }
+                }
+            }
 
     // Confirm if not auto-yes
     if !options.dry_run && !options.yes && !prompt_yes_no("Apply these changes?")? {
@@ -223,6 +361,44 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
 
     // Cleanup
     transaction.cleanup()?;
+
+    // Record generation metadata for rollback/history
+    generations::record_generation(options.config, &transaction)?;
+
+    // Run post-apply hooks
+    if let Some(hooks_config) = &options.config.hooks
+        && let Some(post_hooks) = &hooks_config.post_apply {
+            use crate::services::hooks::execute_hooks;
+            println!("{} Running post-apply hooks...", "→".cyan());
+            let hook_results = execute_hooks(post_hooks, options.config, None, false)?; // Don't fail-fast on post hooks
+            for result in hook_results {
+                if !result.success {
+                    eprintln!(
+                        "{} Post-apply hook failed (non-fatal): {} (exit code: {:?})",
+                        "⚠".yellow(),
+                        result.command,
+                        result.exit_code
+                    );
+                }
+                if !result.stdout.is_empty() {
+                    print!("{}", result.stdout);
+                }
+                if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
+                    eprint!("{}", result.stderr);
+                }
+            }
+        }
+
+    // Record history event
+    let profile_str = options.profile.map(|p| p.to_string());
+    history::record_event(history::HistoryEvent {
+        timestamp: chrono::Utc::now(),
+        command: "apply".to_string(),
+        profile: profile_str,
+        dry_run: false,
+        transaction_id: Some(transaction.id.clone()),
+        summary: Some(format!("Applied {} file(s)", diff.files_to_sync.len())),
+    })?;
 
     println!("\n{} Configuration applied successfully", "✓".green());
     println!("  Transaction ID: {}", transaction.id);

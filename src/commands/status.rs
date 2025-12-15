@@ -96,6 +96,60 @@ fn status_message(file: &TrackedFile, status: &FileStatus) -> String {
     }
 }
 
+/// Filter status reports to only show conflicted files (git merge conflicts).
+pub fn check_conflicts(config: &Config, profile: Option<&str>) -> Result<Vec<StatusReport>> {
+    use git2::Repository;
+
+    let repo_path = config.get_repo_path()?;
+    let repo = match Repository::open(&repo_path) {
+        Ok(r) => r,
+        Err(_) => {
+            // Not a git repo, no conflicts possible
+            return Ok(Vec::new());
+        }
+    };
+
+    // Get git status entries
+    let mut status_options = git2::StatusOptions::new();
+    status_options.include_ignored(false);
+    status_options.include_untracked(false);
+    let statuses = repo.statuses(Some(&mut status_options))?;
+
+    let tracked_files = config.get_tracked_files(profile)?;
+    let mut conflicted = Vec::new();
+
+    for file in tracked_files {
+        // Check if this file is in a conflicted state in git
+        let repo_relative = match file.repo_path.strip_prefix(&repo_path) {
+            Ok(rel) => rel.to_string_lossy().to_string(),
+            Err(_) => continue,
+        };
+
+        // Check git status for this file
+        for entry in statuses.iter() {
+            let entry_path = match entry.path() {
+                Some(path) => path.to_string(),
+                None => continue,
+            };
+            if entry_path == repo_relative || entry_path.ends_with(&repo_relative) {
+                let status_flags = entry.status();
+                // Check for conflict markers (both modified, deleted by them, etc.)
+                if status_flags.contains(git2::Status::CONFLICTED) {
+                    let status = check_file_status(&file)?;
+                    conflicted.push(StatusReport {
+                        file,
+                        status,
+                        message: format!("⚠ Git conflict: {}", repo_relative),
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(conflicted)
+}
+
 pub fn display_status(reports: &[StatusReport]) {
     if reports.is_empty() {
         println!("{}", "No tracked files found.".yellow());

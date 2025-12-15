@@ -892,14 +892,98 @@ fn create_symlink_managed(
             println!("    Copying file instead of symlinking (Replace strategy)...");
         }
 
-        fs_manager.copy(&file.repo_path, &temp_path)?;
+        // If this is a secret file with a secret_key, resolve the secret instead of copying
+        if file.is_secret && file.secret_key.is_some() {
+            use crate::services::secrets::SecretsManager;
+            let secrets_mgr = SecretsManager::with_defaults();
+            let secret_key = file.secret_key.as_ref().ok_or_else(|| {
+                crate::utils::error::DotfilesError::Config(
+                    "Secret file missing secret_key".to_string(),
+                )
+            })?;
+            let secret_mat = secrets_mgr.resolve(file.secret_backend.as_deref(), secret_key)?;
+
+            if !fs_manager.is_dry_run {
+                if let Some(parent) = temp_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&temp_path, secret_mat.value.as_bytes())?;
+            } else if verbose {
+                println!(
+                    "    [DRY RUN] Would write secret content to {}",
+                    temp_path.display()
+                );
+            }
+        } else {
+            fs_manager.copy(&file.repo_path, &temp_path)?;
+        }
+
         fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
+
+        // For secret files, tighten permissions on the destination.
+        if file.is_secret && !fs_manager.is_dry_run
+            && let Err(e) = security::set_secure_permissions(&file.dest_path) {
+                warn!(
+                    "Could not set secure permissions on secret file {}: {}",
+                    file.dest_path.display(),
+                    e
+                );
+            }
+
+        if verbose && !fs_manager.is_dry_run {
+            if file.is_secret && file.secret_key.is_some() {
+                println!(
+                    "{} Wrote secret content to {}",
+                    "✓".green(),
+                    file.dest_path.display()
+                );
+            } else {
+                println!(
+                    "{} Copied {} -> {}",
+                    "✓".green(),
+                    file.repo_path.display(),
+                    file.dest_path.display()
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // If this is a secret file with a secret_key, write secret content directly instead of symlinking
+    if file.is_secret && file.secret_key.is_some() {
+        use crate::services::secrets::SecretsManager;
+        let secrets_mgr = SecretsManager::with_defaults();
+        let secret_key = file.secret_key.as_ref().ok_or_else(|| {
+            crate::utils::error::DotfilesError::Config("Secret file missing secret_key".to_string())
+        })?;
+        let secret_mat = secrets_mgr.resolve(file.secret_backend.as_deref(), secret_key)?;
+
+        if !fs_manager.is_dry_run {
+            if let Some(parent) = file.dest_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&file.dest_path, secret_mat.value.as_bytes())?;
+        } else if verbose {
+            println!(
+                "    [DRY RUN] Would write secret content to {}",
+                file.dest_path.display()
+            );
+        }
+
+        // For secret files, tighten permissions on the destination.
+        if file.is_secret && !fs_manager.is_dry_run
+            && let Err(e) = security::set_secure_permissions(&file.dest_path) {
+                warn!(
+                    "Could not set secure permissions on secret file {}: {}",
+                    file.dest_path.display(),
+                    e
+                );
+            }
 
         if verbose && !fs_manager.is_dry_run {
             println!(
-                "{} Copied {} -> {}",
+                "{} Wrote secret content to {}",
                 "✓".green(),
-                file.repo_path.display(),
                 file.dest_path.display()
             );
         }
@@ -945,10 +1029,18 @@ fn create_symlink_managed(
 
     // Create symlink atomically using temporary path
     // This prevents broken symlinks if the operation is interrupted
-    let temp_link_path = file.dest_path.with_extension(format!(
-        "{}.flux-temp",
-        file.dest_path.extension().and_then(|s| s.to_str()).unwrap_or_default()
-    ));
+    let ext_str = if let Some(ext) = file.dest_path.extension() {
+        if let Some(ext_str) = ext.to_str() {
+            ext_str
+        } else {
+            ""
+        }
+    } else {
+        ""
+    };
+    let temp_link_path = file
+        .dest_path
+        .with_extension(format!("{}.flux-temp", ext_str));
 
     if verbose {
         println!(
@@ -970,6 +1062,17 @@ fn create_symlink_managed(
         );
     }
     fs_manager.rename(&temp_link_path, &file.dest_path)?;
+
+    // For secret files, tighten permissions on the repository copy which holds
+    // the actual secret material.
+    if file.is_secret && !fs_manager.is_dry_run
+        && let Err(e) = security::set_secure_permissions(&file.repo_path) {
+            warn!(
+                "Could not set secure permissions on secret repo file {}: {}",
+                file.repo_path.display(),
+                e
+            );
+        }
 
     if verbose && !fs_manager.is_dry_run {
         println!(

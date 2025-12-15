@@ -5,24 +5,24 @@ mod services;
 mod types;
 mod utils;
 
-#[cfg(test)]
-mod tests;
-
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 use commands::{
     add_backup_to_repo, apply_config, check_status, cleanup_backups, compare_states,
-    display_backups, display_discrepancies, display_preview, display_status, display_validation,
-    find_discrepancies, list_backups, migrate_files, restore_backup, validate_config,
+    display_backups, display_discrepancies, display_health_report, display_preview, display_status,
+    display_validation, find_discrepancies, import_scan, import_stow, list_backups, migrate_files,
+    restore_backup, run_health_checks, validate_config,
 };
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use config::{Config, EnvironmentConfig};
 use file_manager::{add_file, backup_all_files, remove_file, sync_files};
 use services::git;
 use services::{
-    add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
-    push_to_remote, remove_remote, set_remote_url, show_git_status, stage_changes,
+    add_remote, commit_changes, detect_changes, init_repo, list_generations, list_remotes,
+    load_generation, pull_from_remote, push_to_remote, read_events, record_event, remove_remote,
+    restore_generation, set_remote_url, show_git_status, stage_changes,
 };
+use std::path::PathBuf;
 use utils::prompt::{prompt_commit_message, prompt_yes_no};
 use utils::{DotfilesError, DryRun, Result, logging};
 
@@ -116,12 +116,17 @@ enum Commands {
     },
     /// Apply configuration declaratively
     Apply {
+        #[command(subcommand)]
+        command: Option<ApplyCommands>,
         /// Profile name (default: current profile)
         #[arg(long)]
         profile: Option<String>,
         /// Dry run mode (preview changes without applying)
         #[arg(long)]
         dry_run: bool,
+        /// Show unified diffs for files that would change (dry-run only)
+        #[arg(long)]
+        diff: bool,
         /// Skip confirmation prompts
         #[arg(long)]
         yes: bool,
@@ -131,6 +136,24 @@ enum Commands {
         /// Force sync: replace all files that aren't correct symlinks (no backups, uses repo version)
         #[arg(long)]
         force: bool,
+    },
+    /// View operation history
+    History {
+        /// Limit number of events to show
+        #[arg(long, short = 'n')]
+        limit: Option<usize>,
+        /// Filter by profile name
+        #[arg(long)]
+        profile: Option<String>,
+        /// Filter by event kind (apply, rollback, doctor, import, etc.)
+        #[arg(long)]
+        kind: Option<String>,
+        /// Show events since this time (e.g., "1 hour ago", "2024-01-01")
+        #[arg(long)]
+        since: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Profile management
     Profile {
@@ -190,6 +213,9 @@ enum Commands {
         /// Profile name (default: current profile)
         #[arg(long)]
         profile: Option<String>,
+        /// Show only conflicted files (git merge conflicts)
+        #[arg(long)]
+        conflicts: bool,
     },
     /// Maintenance and repair operations
     Maintain {
@@ -200,6 +226,38 @@ enum Commands {
     Completion {
         /// Shell type (zsh, bash, fish, etc.)
         shell: String,
+    },
+    /// CI-safe validation (read-only, no writes, no prompts, no hooks)
+    Check {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Health check and diagnostics
+    Doctor,
+    /// Import configurations from other dotfile managers
+    Import {
+        #[command(subcommand)]
+        command: ImportCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImportCommands {
+    /// Import from GNU Stow layout
+    Stow {
+        /// Path to Stow directory
+        #[arg(long)]
+        stow_dir: String,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Scan home directory for common dotfiles
+    Scan {
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -346,6 +404,27 @@ enum RemoteCommands {
         /// Dry run mode
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ApplyCommands {
+    /// Rollback to a previous generation
+    Rollback {
+        /// Generation ID to rollback to
+        id: String,
+        /// Dry run mode
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip confirmation prompts
+        #[arg(long)]
+        yes: bool,
+    },
+    /// List recent generations
+    List {
+        /// Limit number of generations to show
+        #[arg(long, short = 'n')]
+        limit: Option<usize>,
     },
 }
 
@@ -825,6 +904,30 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             let config = Config::load()?;
             let mut dry_run_tracker = DryRun::default();
 
+            // Run pre-commit hooks (if not dry-run)
+            if !dry_run
+                && let Some(hooks_config) = &config.hooks
+                    && let Some(pre_hooks) = &hooks_config.pre_commit {
+                        use crate::services::hooks::execute_hooks;
+                        println!("{} Running pre-commit hooks...", "→".cyan());
+                        let hook_results = execute_hooks(pre_hooks, &config, None, true)?;
+                        for result in hook_results {
+                            if !result.success {
+                                return Err(DotfilesError::Config(format!(
+                                    "Pre-commit hook failed: {} (exit code: {:?})",
+                                    result.command, result.exit_code
+                                )));
+                            }
+                            if !result.stdout.is_empty() {
+                                print!("{}", result.stdout);
+                            }
+                            if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped")
+                            {
+                                eprint!("{}", result.stderr);
+                            }
+                        }
+                    }
+
             sync_files(
                 &config,
                 profile.as_deref(),
@@ -849,6 +952,32 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                     };
                     stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
                     commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
+
+                    // Run post-commit hooks
+                    if let Some(hooks_config) = &config.hooks
+                        && let Some(post_hooks) = &hooks_config.post_commit {
+                            use crate::services::hooks::execute_hooks;
+                            println!("{} Running post-commit hooks...", "→".cyan());
+                            let hook_results = execute_hooks(post_hooks, &config, None, false)?; // Don't fail-fast on post hooks
+                            for result in hook_results {
+                                if !result.success {
+                                    eprintln!(
+                                        "{} Post-commit hook failed (non-fatal): {} (exit code: {:?})",
+                                        "⚠".yellow(),
+                                        result.command,
+                                        result.exit_code
+                                    );
+                                }
+                                if !result.stdout.is_empty() {
+                                    print!("{}", result.stdout);
+                                }
+                                if !result.stderr.is_empty()
+                                    && !result.stderr.contains("Hook skipped")
+                                {
+                                    eprint!("{}", result.stderr);
+                                }
+                            }
+                        }
                 }
             }
         }
@@ -881,28 +1010,203 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             }
         }
         Commands::Apply {
+            command,
             profile,
             dry_run,
+            diff,
             yes,
             description,
             force,
         } => {
             let config = Config::load()?;
 
-            if dry_run {
-                // In dry-run mode, only show preview without applying changes
-                let diff = compare_states(&config, profile.as_deref(), force)?;
-                display_preview(&diff);
+            if let Some(subcommand) = command {
+                match subcommand {
+                    ApplyCommands::Rollback { id, dry_run, yes } => {
+                        let generation = load_generation(&config, &id)?;
+
+                        println!("{} Rolling back to generation {}", "→".cyan().bold(), id);
+                        if let Some(desc) = &generation.description {
+                            println!("  Description: {}", desc);
+                        }
+                        if let Some(prof) = &generation.profile {
+                            println!("  Profile: {}", prof);
+                        }
+                        println!(
+                            "  Timestamp: {}",
+                            generation.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
+                        );
+                        println!("  Files to restore: {}", generation.backups.len());
+
+                        if !dry_run
+                            && !yes
+                            && !prompt_yes_no("Restore files from this generation?")?
+                        {
+                            println!("{} Rollback cancelled", "⊘".yellow());
+                            return Ok(());
+                        }
+
+                        restore_generation(&config, &generation, dry_run)?;
+
+                        if !dry_run {
+                            record_event(services::history::HistoryEvent {
+                                timestamp: chrono::Utc::now(),
+                                command: "apply rollback".to_string(),
+                                profile: generation.profile.clone(),
+                                dry_run: false,
+                                transaction_id: Some(generation.id.clone()),
+                                summary: Some(format!(
+                                    "Restored {} files",
+                                    generation.backups.len()
+                                )),
+                            })?;
+                        }
+                    }
+                    ApplyCommands::List { limit } => {
+                        let generations = list_generations(&config, limit)?;
+                        if generations.is_empty() {
+                            println!("{} No generations found", "⊘".yellow());
+                            return Ok(());
+                        }
+
+                        println!("\n{} Recent generations:", "→".cyan().bold());
+                        for generation in &generations {
+                            let desc = match generation.description.as_deref() {
+                                Some(d) => d,
+                                None => "(no description)",
+                            };
+                            let prof = match generation.profile.as_deref() {
+                                Some(p) => format!(" [profile: {}]", p),
+                                None => String::new(),
+                            };
+                            println!(
+                                "  {} {} - {} ({}){}",
+                                "•".cyan(),
+                                generation.id,
+                                desc,
+                                generation.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                                prof
+                            );
+                        }
+                    }
+                }
             } else {
-                use crate::commands::ApplyOptions;
-                apply_config(ApplyOptions {
-                    config: &config,
-                    profile: profile.as_deref(),
-                    dry_run,
-                    yes,
-                    description: description.as_deref(),
-                    force,
+                // Normal apply command
+                if dry_run {
+                    // In dry-run mode, only show preview without applying changes
+                    let state_diff = compare_states(&config, profile.as_deref(), force)?;
+                    display_preview(&state_diff);
+                    if diff && !state_diff.files_to_sync.is_empty() {
+                        crate::commands::display_diffs(&state_diff)?;
+                    }
+                } else {
+                    use crate::commands::ApplyOptions;
+                    // apply_config now handles history recording internally
+                    apply_config(ApplyOptions {
+                        config: &config,
+                        profile: profile.as_deref(),
+                        dry_run,
+                        yes,
+                        description: description.as_deref(),
+                        force,
+                    })?;
+                }
+            }
+        }
+        Commands::History {
+            limit,
+            profile,
+            kind,
+            since,
+            json,
+        } => {
+            let mut events = read_events(None)?; // Read all, filter manually
+
+            // Apply filters
+            if let Some(prof_filter) = &profile {
+                events.retain(|e| e.profile.as_deref() == Some(prof_filter));
+            }
+
+            if let Some(kind_filter) = &kind {
+                events.retain(|e| e.command.starts_with(kind_filter));
+            }
+
+            if let Some(since_str) = &since {
+                // Simple parsing: try to parse as relative time or absolute date
+                let since_time = if let Ok(hours) = since_str.parse::<i64>() {
+                    // Interpret as hours ago
+                    chrono::Utc::now() - chrono::Duration::hours(hours)
+                } else if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(since_str) {
+                    dt.with_timezone(&chrono::Utc)
+                } else if let Ok(dt) =
+                    chrono::NaiveDateTime::parse_from_str(since_str, "%Y-%m-%d %H:%M:%S")
+                {
+                    dt.and_utc()
+                } else {
+                    // Try just date
+                    if let Ok(date) = chrono::NaiveDate::parse_from_str(since_str, "%Y-%m-%d") {
+                        date.and_hms_opt(0, 0, 0)
+                            .ok_or_else(|| {
+                                DotfilesError::Config(format!(
+                                    "Invalid date: {}. Could not create datetime from date",
+                                    since_str
+                                ))
+                            })?
+                            .and_utc()
+                    } else {
+                        return Err(DotfilesError::Config(format!(
+                            "Invalid 'since' format: {}. Use ISO 8601, 'YYYY-MM-DD', or hours as number",
+                            since_str
+                        )));
+                    }
+                };
+                events.retain(|e| e.timestamp >= since_time);
+            }
+
+            // Apply limit after filtering
+            if let Some(max) = limit {
+                events.truncate(max);
+            }
+
+            if events.is_empty() {
+                if !json {
+                    println!("{} No history found", "⊘".yellow());
+                } else {
+                    println!("[]");
+                }
+                return Ok(());
+            }
+
+            if json {
+                // Output as JSON
+                let json_str = serde_json::to_string_pretty(&events).map_err(|e| {
+                    DotfilesError::Config(format!("Failed to serialize history to JSON: {}", e))
                 })?;
+                println!("{}", json_str);
+            } else {
+                println!("\n{} Operation History:", "→".cyan().bold());
+                for event in &events {
+                    let prof = match event.profile.as_deref() {
+                        Some(p) => format!(" [profile: {}]", p),
+                        None => String::new(),
+                    };
+                    let dry = if event.dry_run { " [DRY RUN]" } else { "" };
+                    let summary = match event.summary.as_deref() {
+                        Some(s) => s,
+                        None => "(no summary)",
+                    };
+                    println!(
+                        "  {} {} - {}{}{}",
+                        "•".cyan(),
+                        event.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                        event.command,
+                        prof,
+                        dry
+                    );
+                    if !summary.is_empty() && summary != "(no summary)" {
+                        println!("    {}", summary);
+                    }
+                }
             }
         }
         Commands::Profile { command } => {
@@ -1035,7 +1339,10 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             };
 
             // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
-            let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
+            let resolved_timeout = match timeout.or(config.general.push_timeout) {
+                Some(t) => t,
+                None => 60,
+            };
 
             push_to_remote(
                 &repo,
@@ -1078,7 +1385,10 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             };
 
             // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
-            let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
+            let resolved_timeout = match timeout.or(config.general.push_timeout) {
+                Some(t) => t,
+                None => 60,
+            };
 
             pull_from_remote(
                 &repo,
@@ -1093,21 +1403,107 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
                 dry_run_tracker.display_summary();
             }
         }
-        Commands::Status { profile } => {
+        Commands::Status { profile, conflicts } => {
             let config = Config::load()?;
             let repo_path = config.get_repo_path()?;
 
-            // Display git repository status
-            if let Ok(repo) = init_repo(&repo_path) {
-                show_git_status(&repo)?;
-            }
+            if conflicts {
+                // Show only conflicted files
+                use commands::status::check_conflicts;
+                let conflicted = check_conflicts(&config, profile.as_deref())?;
+                if conflicted.is_empty() {
+                    println!("{} No conflicted files found", "✓".green());
+                } else {
+                    println!("\n{} Conflicted files:", "⚠".yellow().bold());
+                    for report in &conflicted {
+                        println!("  {}", report.message);
+                    }
+                    println!(
+                        "\n{} Found {} conflicted file(s)",
+                        "Summary:".bold(),
+                        conflicted.len()
+                    );
+                }
+            } else {
+                // Display git repository status
+                if let Ok(repo) = init_repo(&repo_path) {
+                    show_git_status(&repo)?;
+                }
 
-            // Display file synchronization status
-            let reports = check_status(&config, profile.as_deref())?;
-            display_status(&reports);
+                // Display file synchronization status
+                let reports = check_status(&config, profile.as_deref())?;
+                display_status(&reports);
+            }
         }
         Commands::Maintain { command } => {
             return handle_maintain_command(command);
+        }
+        Commands::Check { profile } => {
+            // CI-safe validation: read-only, no writes, no prompts, no hooks, no secrets
+            let config = Config::load()?;
+            let report = validate_config(&config)?;
+
+            // Also check state diff (read-only)
+            let diff = compare_states(&config, profile.as_deref(), false)?;
+
+            if report.is_valid && diff.is_empty() {
+                // All good - exit 0
+                if !cli.quiet {
+                    println!(
+                        "{} Configuration is valid and system is in sync",
+                        "✓".green()
+                    );
+                }
+                std::process::exit(0);
+            }
+
+            // Issues found - exit with appropriate code
+            if !report.is_valid {
+                display_validation(&report);
+            }
+            if !diff.is_empty()
+                && !cli.quiet {
+                    println!(
+                        "\n{} System is not in sync with configuration",
+                        "⚠".yellow()
+                    );
+                    display_preview(&diff);
+                }
+
+            // Exit code: 1 for validation issues, 2 for sync issues, 3 for both
+            let exit_code = if !report.is_valid && !diff.is_empty() {
+                3
+            } else if !report.is_valid {
+                1
+            } else {
+                2
+            };
+            std::process::exit(exit_code);
+        }
+        Commands::Doctor => {
+            let config = Config::load()?;
+            let report = run_health_checks(&config)?;
+            display_health_report(&report);
+
+            if !report.is_healthy() {
+                std::process::exit(1);
+            }
+        }
+        Commands::Import { command } => {
+            let config = Config::load()?;
+            let repo_path = config.get_repo_path()?;
+
+            match command {
+                ImportCommands::Stow { stow_dir, dry_run } => {
+                    import_stow(&PathBuf::from(stow_dir), &repo_path, dry_run)?;
+                }
+                ImportCommands::Scan { dry_run } => {
+                    let home = dirs::home_dir().ok_or_else(|| {
+                        DotfilesError::Config("Could not find home directory".to_string())
+                    })?;
+                    import_scan(&home, &repo_path, dry_run)?;
+                }
+            }
         }
         Commands::Completion { shell } => {
             use clap_complete::{generate, shells::Zsh};

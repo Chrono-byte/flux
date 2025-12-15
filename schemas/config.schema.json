@@ -120,10 +120,10 @@
                 },
                 "dest": {
                   "type": "string",
-                  "description": "Destination path in home directory (relative to home, e.g., '.config/sway/config')",
+                  "description": "Destination path in home directory (relative to home, e.g., '.config/sway/config'). Supports simple templates like `{{profile}}`, `{{host}}`, `{{user}}`.",
                   "x-taplo": {
                     "docs": {
-                      "main": "Destination path in home directory.\n\nThis is relative to your home directory. Use dot notation for hidden files/directories.\n\n**Examples:**\n- `.config/sway/config` - Standard config location\n- `.vimrc` - Vim configuration\n- `.bashrc` - Bash configuration"
+                      "main": "Destination path in home directory.\n\nThis is relative to your home directory. Use dot notation for hidden files/directories.\n\nYou can also use simple template variables which will be expanded at runtime:\n- `{{profile}}` - current profile name\n- `{{host}}` - hostname\n- `{{user}}` / `{{username}}` - current user\n- `{{os}}` - operating system identifier\n- custom variables from `[environment.values]`.\n\n**Examples:**\n- `.config/sway/config` - Standard config location\n- `.vimrc` - Vim configuration\n- `.bashrc` - Bash configuration\n- `.config/{{profile}}/sway/config` - Profile-specific path"
                     }
                   }
                 },
@@ -136,6 +136,71 @@
                       "main": "Optional profile name.\n\nIf specified, this file will only be active when the `current_profile` matches this value. This allows you to have different configurations for different environments.\n\n**Example:**\n```toml\n{ repo = \"config.work\", dest = \".config/sway/config\", profile = \"work\" }\n```\n\nThis file will only be used when `current_profile = \"work\"`."
                     }
                   }
+                },
+                "conditions": {
+                  "type": "object",
+                  "description": "Optional conditions that control when this entry is active (OS, host, env vars, available commands). All specified conditions must match.",
+                  "properties": {
+                    "os": {
+                      "type": "array",
+                      "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        ["linux"],
+                        ["linux", "darwin"]
+                      ]
+                    },
+                    "host": {
+                      "type": "array",
+                      "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        ["work-laptop"],
+                        ["chrono-desktop", "work-laptop"]
+                      ]
+                    },
+                    "env": {
+                      "type": "object",
+                      "description": "Required environment variable values. Each key/value pair must match the current environment.",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        { "XDG_SESSION_TYPE": "wayland" },
+                        { "FLUX_ENV": "work" }
+                      ]
+                    },
+                    "cmd_exists": {
+                      "type": "array",
+                      "description": "Commands that must exist in PATH for this entry to apply.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        ["nvim"],
+                        ["nvim", "kitty"]
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "secret": {
+                  "type": "boolean",
+                  "description": "Mark this entry as secret. Secret entries are treated with stricter permissions and should not have their contents displayed in logs/diffs.",
+                  "default": false
+                },
+                "secret_backend": {
+                  "type": "string",
+                  "description": "Optional secret backend identifier (e.g., \"env\", \"age\", \"sops\").",
+                  "examples": ["env", "age", "sops", "gpg"]
+                },
+                "secret_key": {
+                  "type": "string",
+                  "description": "Logical secret key or handle used by the configured backend (for example, an environment variable name when using the \"env\" backend)."
                 }
               },
               "required": ["repo", "dest"],
@@ -331,6 +396,19 @@
             }
           ]
         },
+        "values": {
+          "type": "object",
+          "description": "Template variables for use in repo/dest paths and other strings. These are merged with built-in variables like `user`, `home`, `host`, `os`, and `profile`.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "examples": [
+            {
+              "work_root": "Projects/work",
+              "personal_root": "Projects/personal"
+            }
+          ]
+        },
         "shell": {
           "type": "string",
           "description": "Shell to use",
@@ -347,6 +425,113 @@
           "shell": "/bin/zsh"
         }
       ]
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Hooks configuration for executing commands at various points in the apply/commit lifecycle",
+      "x-taplo": {
+        "docs": {
+          "main": "Hooks allow you to execute shell commands at various points in the apply/commit lifecycle.\n\n**Example:**\n```toml\n[hooks]\npre_apply = [\n    { command = \"echo 'Starting apply...'\" },\n    { command = \"systemctl --user restart some-service\", conditions = { os = [\"linux\"] } }\n]\npost_apply = [\n    { command = \"notify-send 'Dotfiles applied'\" }\n]\npre_commit = [\n    { command = \"git add -A\" }\n]\npost_commit = [\n    { command = \"git push\", timeout = 60 }\n]\n```"
+        }
+      },
+      "properties": {
+        "pre_apply": {
+          "type": "array",
+          "description": "Commands to run before applying changes. If any command fails, the apply is aborted.",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        },
+        "post_apply": {
+          "type": "array",
+          "description": "Commands to run after applying changes. Failures are non-fatal (warnings only).",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        },
+        "pre_commit": {
+          "type": "array",
+          "description": "Commands to run before committing changes. If any command fails, the commit is aborted.",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        },
+        "post_commit": {
+          "type": "array",
+          "description": "Commands to run after committing changes. Failures are non-fatal (warnings only).",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "hookCommand": {
+      "type": "object",
+      "description": "A single hook command definition",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute"
+        },
+        "conditions": {
+          "$ref": "#/$defs/conditionSpec"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds (default: 30)",
+          "default": 30,
+          "minimum": 1
+        }
+      },
+      "required": ["command"],
+      "additionalProperties": false
+    },
+    "conditionSpec": {
+      "type": "object",
+      "description": "Conditions that control when a config entry should be active. All specified condition groups must match.",
+      "properties": {
+        "os": {
+          "type": "array",
+          "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["linux"], ["darwin"], ["linux", "darwin"]]
+        },
+        "host": {
+          "type": "array",
+          "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["laptop"], ["desktop", "workstation"]]
+        },
+        "env": {
+          "type": "object",
+          "description": "Required environment variable values. All specified variables must match.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "examples": [
+            {
+              "TERM": "xterm-256color",
+              "EDITOR": "nvim"
+            }
+          ]
+        },
+        "cmd_exists": {
+          "type": "array",
+          "description": "List of commands that must exist in PATH. If omitted, no command checks are performed.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["docker"], ["nvim", "tmux"]]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["general"],

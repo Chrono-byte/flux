@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::{EnvironmentSpec, FileEntry, SymlinkResolution};
+use crate::types::{ConditionSpec, EnvironmentSpec, FileEntry, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
 
 /// General configuration settings.
@@ -75,6 +75,9 @@ pub struct Config {
     /// Environment configuration (e.g., [environment])
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<EnvironmentSpec>,
+    /// Hooks configuration for pre/post operations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<crate::types::HooksConfig>,
 }
 
 impl Config {
@@ -119,18 +122,39 @@ impl Config {
 
     /// Load configuration from a specific path.
     ///
-    /// No merging - configs are loaded as-is with precedence order.
-    fn load_from_path(config_path: &Path, _visited: &mut Vec<PathBuf>) -> Result<Self> {
+    /// Supports includes with cycle-safe merging. Later configs override earlier ones.
+    fn load_from_path(config_path: &Path, visited: &mut Vec<PathBuf>) -> Result<Self> {
         let config_path = match config_path.canonicalize() {
             Ok(path) => path,
             Err(_) => config_path.to_path_buf(),
         };
 
+        // Detect include cycles
+        if visited.contains(&config_path) {
+            let mut chain: Vec<String> = visited.iter().map(|p| p.display().to_string()).collect();
+            chain.push(config_path.display().to_string());
+            return Err(DotfilesError::Config(format!(
+                "Detected configuration include cycle: {}",
+                chain.join(" -> ")
+            )));
+        }
+        visited.push(config_path.clone());
+
         if !config_path.exists() {
-            // Create default config if it doesn't exist
-            let config = Config::default();
-            config.save(false)?;
-            return Ok(config);
+            // For the root config, create a default file if it doesn't exist.
+            // For included configs, treat missing files as an error.
+            if visited.len() == 1 {
+                let config = Config::default();
+                config.save(false)?;
+                visited.pop();
+                return Ok(config);
+            } else {
+                visited.pop();
+                return Err(DotfilesError::Config(format!(
+                    "Included config file does not exist: {}",
+                    config_path.display()
+                )));
+            }
         }
 
         let content = fs::read_to_string(&config_path).map_err(|e| {
@@ -141,7 +165,7 @@ impl Config {
             ))
         })?;
 
-        let config: Config = toml::from_str(&content).map_err(|e| {
+        let mut current: Config = toml::from_str(&content).map_err(|e| {
             DotfilesError::Config(format!(
                 "Failed to parse config {}: {}",
                 config_path.display(),
@@ -149,10 +173,38 @@ impl Config {
             ))
         })?;
 
-        // Validate the config
-        config.validate()?;
+        // First, load and merge any included configs (if present).
+        let mut merged: Option<Config> = None;
+        if let Some(include_paths) = current.general.include.clone() {
+            let base_dir = match config_path.parent() {
+                Some(p) => PathBuf::from(p),
+                None => PathBuf::from("."),
+            };
 
-        Ok(config)
+            for raw in include_paths {
+                let include_path = Self::resolve_include_path(&base_dir, &raw)?;
+                let included = Self::load_from_path(&include_path, visited)?;
+                merged = Some(match merged {
+                    Some(base) => Self::merge_configs(base, included),
+                    None => included,
+                });
+            }
+        }
+
+        // We have already processed includes, so clear them to avoid re-saving them.
+        current.general.include = None;
+
+        let result = match merged {
+            Some(base) => Self::merge_configs(base, current),
+            None => current,
+        };
+
+        // Validate the final merged config
+        result.validate()?;
+
+        visited.pop();
+
+        Ok(result)
     }
 
     pub fn save(&self, validate: bool) -> Result<()> {
@@ -454,6 +506,10 @@ impl Config {
             repo: repo_file.to_string(),
             dest: dest_str,
             profile: profile.map(|p| p.to_string()),
+            conditions: None,
+            secret: false,
+            secret_backend: None,
+            secret_key: None,
         };
 
         self.tools
@@ -475,40 +531,293 @@ impl Config {
             None => &self.general.current_profile,
         };
 
+        // Build template context once per call for deterministic rendering.
+        let template_context = self.build_template_context(current_profile)?;
+
         let mut tracked_files = Vec::new();
 
         for (tool, tool_config) in &self.tools {
             for file in &tool_config.files {
                 // Include if no profile specified, or if profile matches current_profile or is None
-                let include =
+                let profile_matches =
                     file.profile.is_none() || file.profile.as_deref() == Some(current_profile);
 
-                if include {
-                    // Handle both cases: file.repo may or may not include the tool name prefix
-                    let repo_file_path = if file.repo.starts_with(&format!("{}/", tool)) {
-                        // file.repo already includes tool name (e.g., "cursor/settings.json")
-                        repo_path.join(&file.repo)
-                    } else {
-                        // file.repo doesn't include tool name (e.g., "config")
-                        repo_path.join(tool).join(&file.repo)
-                    };
-                    let dest_path = dirs::home_dir()
-                        .ok_or_else(|| {
-                            DotfilesError::Config("Could not find home directory".to_string())
-                        })?
-                        .join(&file.dest);
-
-                    tracked_files.push(crate::types::TrackedFile {
-                        tool: tool.clone(),
-                        repo_path: repo_file_path,
-                        dest_path,
-                        profile: file.profile.clone(),
-                    });
+                if !profile_matches {
+                    continue;
                 }
+
+                // Evaluate optional conditions
+                if let Some(conditions) = &file.conditions
+                    && !Self::conditions_match(conditions) {
+                        continue;
+                    }
+
+                // Render templates in repo and dest paths, if any
+                let rendered_repo =
+                    Self::render_template(&file.repo, &template_context).map_err(|e| {
+                        DotfilesError::Config(format!(
+                            "Failed to render template for repo path '{}': {}",
+                            file.repo, e
+                        ))
+                    })?;
+                let rendered_dest =
+                    Self::render_template(&file.dest, &template_context).map_err(|e| {
+                        DotfilesError::Config(format!(
+                            "Failed to render template for dest path '{}': {}",
+                            file.dest, e
+                        ))
+                    })?;
+
+                // Handle both cases: repo may or may not include the tool name prefix
+                let repo_file_path = if rendered_repo.starts_with(&format!("{}/", tool)) {
+                    // repo already includes tool name (e.g., "cursor/settings.json")
+                    repo_path.join(&rendered_repo)
+                } else {
+                    // repo doesn't include tool name (e.g., "config")
+                    repo_path.join(tool).join(&rendered_repo)
+                };
+
+                let dest_path = dirs::home_dir()
+                    .ok_or_else(|| {
+                        DotfilesError::Config("Could not find home directory".to_string())
+                    })?
+                    .join(&rendered_dest);
+
+                tracked_files.push(crate::types::TrackedFile {
+                    tool: tool.clone(),
+                    repo_path: repo_file_path,
+                    dest_path,
+                    profile: file.profile.clone(),
+                    is_secret: file.secret,
+                    secret_backend: file.secret_backend.clone(),
+                    secret_key: file.secret_key.clone(),
+                });
             }
         }
 
         Ok(tracked_files)
+    }
+
+    /// Build the template context used for rendering repo/dest paths.
+    fn build_template_context(
+        &self,
+        current_profile: &str,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        use std::collections::HashMap;
+
+        let mut values: HashMap<String, String> = HashMap::new();
+
+        // Built-in values
+        if let Some(home) = dirs::home_dir() {
+            values.insert("home".to_string(), home.display().to_string());
+        }
+
+        if let Ok(user) = std::env::var("USER") {
+            values.insert("user".to_string(), user.clone());
+            values.insert("username".to_string(), user);
+        }
+
+        // Hostname (best-effort)
+        if let Ok(hostname) = Self::detect_hostname() {
+            values.insert("host".to_string(), hostname);
+        }
+
+        values.insert("profile".to_string(), current_profile.to_string());
+        values.insert("os".to_string(), std::env::consts::OS.to_string());
+
+        // Merge values from [environment] section, if present
+        if let Some(env_spec) = &self.environment {
+            for (k, v) in &env_spec.variables {
+                values.insert(k.clone(), v.clone());
+            }
+            for (k, v) in &env_spec.values {
+                values.insert(k.clone(), v.clone());
+            }
+        }
+
+        Ok(values)
+    }
+
+    /// Very small, deterministic template renderer supporting `{{ var }}` placeholders.
+    fn render_template(
+        input: &str,
+        values: &std::collections::HashMap<String, String>,
+    ) -> Result<String> {
+        if !input.contains("{{") {
+            return Ok(input.to_string());
+        }
+
+        let mut output = String::new();
+        let mut rest = input;
+
+        while let Some(start) = rest.find("{{") {
+            output.push_str(&rest[..start]);
+            let after_start = &rest[start + 2..];
+            let end_rel = after_start.find("}}").ok_or_else(|| {
+                DotfilesError::Config(format!("Unclosed template variable in '{}'", input))
+            })?;
+            let key_raw = &after_start[..end_rel];
+            let key = key_raw.trim();
+            if key.is_empty() {
+                return Err(DotfilesError::Config(
+                    "Empty template variable name is not allowed".to_string(),
+                ));
+            }
+
+            let value = values.get(key).ok_or_else(|| {
+                DotfilesError::Config(format!("Unknown template variable '{{{{{}}}}}'", key))
+            })?;
+            output.push_str(value);
+
+            rest = &after_start[end_rel + 2..];
+        }
+
+        output.push_str(rest);
+        Ok(output)
+    }
+
+    /// Determine if a set of conditions matches the current runtime environment.
+    pub fn conditions_match(conditions: &ConditionSpec) -> bool {
+        // OS check
+        if !conditions.os.is_empty() {
+            let current_os = std::env::consts::OS.to_string();
+            let mut os_ok = false;
+            for os in &conditions.os {
+                if os.eq_ignore_ascii_case(&current_os) {
+                    os_ok = true;
+                    break;
+                }
+                // Support "darwin" alias for macOS
+                if current_os == "macos" && os.eq_ignore_ascii_case("darwin") {
+                    os_ok = true;
+                    break;
+                }
+            }
+            if !os_ok {
+                return false;
+            }
+        }
+
+        // Hostname check
+        if !conditions.host.is_empty() {
+            let hostname = match Self::detect_hostname() {
+                Ok(name) => name,
+                Err(_) => return false,
+            };
+            if !conditions
+                .host
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case(&hostname))
+            {
+                return false;
+            }
+        }
+
+        // Environment variables check
+        for (key, expected) in &conditions.env {
+            match std::env::var(key) {
+                Ok(actual) if actual == *expected => {}
+                _ => return false,
+            }
+        }
+
+        // Command existence check
+        for cmd in &conditions.cmd_exists {
+            if !Self::command_in_path(cmd) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Best-effort hostname detection using environment variables and common files.
+    fn detect_hostname() -> Result<String> {
+        // Prefer HOSTNAME environment variable if set.
+        if let Ok(host) = std::env::var("HOSTNAME") {
+            let trimmed = host.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+
+        // Fallback: try reading /etc/hostname on Unix-like systems.
+        #[cfg(unix)]
+        {
+            if let Ok(contents) = std::fs::read_to_string("/etc/hostname") {
+                let trimmed = contents.trim();
+                if !trimmed.is_empty() {
+                    return Ok(trimmed.to_string());
+                }
+            }
+        }
+
+        Err(DotfilesError::Config(
+            "Failed to determine hostname; set HOSTNAME environment variable to override."
+                .to_string(),
+        ))
+    }
+
+    /// Check if a command exists in PATH (simple PATH scan).
+    fn command_in_path(cmd: &str) -> bool {
+        if cmd.is_empty() {
+            return false;
+        }
+
+        if let Ok(path_var) = std::env::var("PATH") {
+            for dir in path_var.split(':') {
+                if dir.is_empty() {
+                    continue;
+                }
+                let candidate = Path::new(dir).join(cmd);
+                if candidate.is_file() {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Resolve an include path relative to a base directory, supporting `~` expansion.
+    fn resolve_include_path(base_dir: &Path, raw: &str) -> Result<PathBuf> {
+        use shellexpand::tilde;
+
+        // Expand leading ~
+        let expanded = if raw.starts_with('~') {
+            tilde(raw).to_string()
+        } else {
+            raw.to_string()
+        };
+
+        let path = PathBuf::from(&expanded);
+        if path.is_absolute() {
+            Ok(path)
+        } else {
+            Ok(base_dir.join(path))
+        }
+    }
+
+    /// Merge two configs, with `overlay` taking precedence over `base`.
+    fn merge_configs(mut base: Config, overlay: Config) -> Config {
+        // General settings: overlay wins entirely.
+        base.general = overlay.general;
+
+        // Tools: merge tool tables, appending file entries.
+        for (tool, tool_cfg) in overlay.tools {
+            base.tools
+                .entry(tool)
+                .or_insert(ToolConfig { files: Vec::new() })
+                .files
+                .extend(tool_cfg.files);
+        }
+
+        // Environment: overlay wins if present.
+        if overlay.environment.is_some() {
+            base.environment = overlay.environment;
+        }
+
+        base
     }
 
     /// Sync XDG config to repo (overwrite repo config with XDG config).

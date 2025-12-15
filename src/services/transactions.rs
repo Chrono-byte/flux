@@ -67,10 +67,21 @@ pub struct Transaction {
     pub operations: Vec<FileOperation>,
     /// Results from executed operations
     pub results: Vec<OperationResult>,
-    /// Backup paths created during this transaction
-    pub backups: Vec<PathBuf>,
+    /// Backup records created during this transaction (backup path and original target)
+    pub backups: Vec<BackupRecord>,
     /// Additional metadata (description, profile, timestamp, etc.)
     pub metadata: HashMap<String, String>,
+}
+
+/// A single backup created during a transaction.
+///
+/// This is used for generation tracking and rollback.
+#[derive(Debug, Clone)]
+pub struct BackupRecord {
+    /// Path to the backup copy on disk
+    pub backup_path: PathBuf,
+    /// Original target path that was backed up
+    pub target_path: PathBuf,
 }
 
 impl Default for Transaction {
@@ -216,7 +227,10 @@ impl Transaction {
             // If any operation fails, rollback
             if !result.success {
                 self.rollback(config, fs_manager)?;
-                let error_message = result.error.as_deref().unwrap_or("Unknown error");
+                let error_message = match result.error.as_deref() {
+                    Some(msg) => msg,
+                    None => "Unknown error",
+                };
                 return Err(DotfilesError::Config(format!(
                     "Transaction failed: {}",
                     error_message
@@ -257,7 +271,10 @@ impl Transaction {
         // Verify each operation succeeded
         for result in &self.results {
             if !result.success {
-                let error_message = result.error.as_deref().unwrap_or("Unknown error");
+                let error_message = match result.error.as_deref() {
+                    Some(msg) => msg,
+                    None => "Unknown error",
+                };
                 return Err(DotfilesError::Config(format!(
                     "Verification failed: operation did not succeed: {}",
                     error_message
@@ -434,10 +451,16 @@ impl Transaction {
         };
 
         // Create temp symlink first
-        let temp_link_path = target.with_extension(format!(
-            "{}.flux-temp",
-            target.extension().and_then(|s| s.to_str()).unwrap_or_default()
-        ));
+        let ext_str = if let Some(ext) = target.extension() {
+            if let Some(ext_str) = ext.to_str() {
+                ext_str
+            } else {
+                ""
+            }
+        } else {
+            ""
+        };
+        let temp_link_path = target.with_extension(format!("{}.flux-temp", ext_str));
 
         // Remove old temp link if exists
         let _ = fs_manager.remove_file(&temp_link_path);
@@ -555,7 +578,10 @@ impl Transaction {
                 };
             }
 
-            self.backups.push(backup_path.to_path_buf());
+            self.backups.push(BackupRecord {
+                backup_path: backup_path.to_path_buf(),
+                target_path: target.to_path_buf(),
+            });
         }
 
         // Now create symlink (or copy for Replace)

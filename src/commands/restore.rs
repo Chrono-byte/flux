@@ -364,9 +364,18 @@ pub fn cleanup_backups(
     dry_run: bool,
 ) -> Result<()> {
     let backup_dir = config.get_backup_dir()?;
-    let keep_count = keep_count.unwrap_or(10);
-    let keep_days = keep_days.unwrap_or(7);
-    let min_size = min_size.unwrap_or(1024);
+    let keep_count = match keep_count {
+        Some(count) => count,
+        None => 10,
+    };
+    let keep_days = match keep_days {
+        Some(days) => days,
+        None => 7,
+    };
+    let min_size = match min_size {
+        Some(size) => size,
+        None => 1024,
+    };
 
     if !backup_dir.exists() {
         println!("{} No backups to clean up.", "⊘".yellow());
@@ -405,7 +414,10 @@ pub fn cleanup_backups(
     } else {
         // Calculate size for each backup and apply all criteria
         for (idx, backup) in backups.iter().enumerate() {
-            let size = calculate_dir_size(&backup.path).unwrap_or_default();
+            let size = match calculate_dir_size(&backup.path) {
+                Ok(s) => s,
+                Err(_) => 0,
+            };
 
             // Check if backup is too small (may indicate incomplete or failed backup)
             // Small backups are always deleted, regardless of age or count
@@ -483,7 +495,10 @@ pub fn cleanup_backups(
 
     // First, calculate sizes and show what will be deleted
     for backup in &to_delete {
-        let size = calculate_dir_size(&backup.path).unwrap_or_default();
+        let size = match calculate_dir_size(&backup.path) {
+            Ok(s) => s,
+            Err(_) => 0,
+        };
         total_size += size;
 
         let size_str = format_size(size);

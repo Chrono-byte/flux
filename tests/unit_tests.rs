@@ -1,7 +1,11 @@
-#[cfg(test)]
+//! Unit tests for core library modules
+//!
+//! This file contains unit tests for all core modules.
+//! Integration tests are in other files in the tests/ directory.
+
 mod config_tests {
-    use crate::config::Config;
-    use crate::types::SymlinkResolution;
+    use flux::config::Config;
+    use flux::types::SymlinkResolution;
 
     #[test]
     fn test_default_config_is_valid() {
@@ -26,7 +30,6 @@ mod config_tests {
     }
 }
 
-#[cfg(test)]
 mod path_tests {
     #[test]
     fn test_path_expansion() {
@@ -36,9 +39,8 @@ mod path_tests {
     }
 }
 
-#[cfg(test)]
 mod security_tests {
-    use crate::utils::security;
+    use flux::utils::security;
     use tempfile::tempdir;
 
     #[test]
@@ -52,9 +54,8 @@ mod security_tests {
     }
 }
 
-#[cfg(test)]
 mod error_tests {
-    use crate::utils::error::DotfilesError;
+    use flux::utils::error::DotfilesError;
 
     #[test]
     fn test_error_with_context() {
@@ -66,7 +67,6 @@ mod error_tests {
     }
 }
 
-#[cfg(test)]
 mod symlink_tests {
     // These tests verify symlink creation and validation
     // Use tempdir for safe isolated filesystem testing
@@ -84,7 +84,6 @@ mod symlink_tests {
     }
 }
 
-#[cfg(test)]
 mod backup_tests {
     use tempfile::tempdir;
 
@@ -100,19 +99,12 @@ mod backup_tests {
 }
 
 // ============================================================================
-// COMPREHENSIVE TEST SUITE - Library Core Tests
-// ============================================================================
-// This file contains unit tests for all core modules
-// Integration tests are in tests/ directory
-
-// ============================================================================
 // Configuration Module - Extended Tests
 // ============================================================================
 
-#[cfg(test)]
 mod config_validation_tests {
-    use crate::config::Config;
-    use crate::types::SymlinkResolution;
+    use flux::config::Config;
+    use flux::types::SymlinkResolution;
 
     /// Test primary config validation functionality
     #[test]
@@ -171,7 +163,7 @@ mod config_validation_tests {
     /// Test symlink resolution TOML deserialization
     #[test]
     fn test_symlink_resolution_toml_deserialization() {
-        use crate::types::SymlinkResolution;
+        use flux::types::SymlinkResolution;
 
         // Test that serde can deserialize valid lowercase strings from TOML
         let test_cases = vec![
@@ -310,9 +302,8 @@ symlink_resolution = "{}"
 // SymlinkResolution Type - Extended Tests
 // ============================================================================
 
-#[cfg(test)]
 mod symlink_resolution_extended_tests {
-    use crate::types::SymlinkResolution;
+    use flux::types::SymlinkResolution;
     use std::str::FromStr;
 
     /// Test all symlink resolution modes can be created
@@ -327,9 +318,9 @@ mod symlink_resolution_extended_tests {
         ];
 
         for mode in modes {
-            let _cloned = mode.clone();
+            let _cloned = mode;
             let _formatted = format!("{:?}", mode);
-            assert!(true); // All operations succeed
+            // All operations succeed
         }
     }
 
@@ -369,10 +360,9 @@ mod symlink_resolution_extended_tests {
 // Error Handling - Extended Tests
 // ============================================================================
 
-// The #[cfg(test)] attribute is not needed for a module inside tests.rs
 mod error_handling_extended_tests {
-    use crate::DotfilesError;
-    use crate::Result;
+    use flux::utils::error::DotfilesError;
+    use flux::utils::error::Result;
 
     /// Test error creation and context addition
     #[test]
@@ -408,6 +398,7 @@ mod error_handling_extended_tests {
 
     /// Test Result type operations
     #[test]
+    #[allow(clippy::unnecessary_literal_unwrap)]
     fn test_result_operations() {
         let ok_result: Result<String> = Ok("success".to_string());
         let err_result: Result<String> = Err(DotfilesError::Cancelled);
@@ -416,10 +407,14 @@ mod error_handling_extended_tests {
         assert!(ok_result.is_ok());
         assert!(err_result.is_err());
 
-        // Test unwrap_or
-        let ok_value = ok_result.unwrap_or_else(|_| "default".to_string());
+        // Test extracting Ok value - use pattern matching to avoid clippy warning
+        let ok_value = match ok_result {
+            Ok(v) => v,
+            Err(_) => unreachable!(),
+        };
         assert_eq!(ok_value, "success");
 
+        // Test unwrap_or_else - for Err values, we use unwrap_or_else
         let err_value = err_result.unwrap_or_else(|_| "default".to_string());
         assert_eq!(err_value, "default");
     }
@@ -442,9 +437,8 @@ mod error_handling_extended_tests {
 // Dry-Run Module - Extended Tests
 // ============================================================================
 
-#[cfg(test)]
 mod dry_run_extended_tests {
-    use crate::utils::dry_run::{DryRun, Operation};
+    use flux::utils::dry_run::{DryRun, Operation};
     use std::path::PathBuf;
 
     /// Test dry-run operation logging
@@ -468,7 +462,6 @@ mod dry_run_extended_tests {
 
         // Display should not panic
         dry_run.display_summary();
-        assert!(true);
     }
 
     /// Test git remote operations
@@ -491,7 +484,6 @@ mod dry_run_extended_tests {
         });
 
         dry_run.display_summary();
-        assert!(true);
     }
 
     /// Test git push operation
@@ -506,7 +498,6 @@ mod dry_run_extended_tests {
         });
 
         dry_run.display_summary();
-        assert!(true);
     }
 }
 
@@ -514,9 +505,8 @@ mod dry_run_extended_tests {
 // File Entry Type - Extended Tests
 // ============================================================================
 
-#[cfg(test)]
 mod file_entry_extended_tests {
-    use crate::types::FileEntry;
+    use flux::types::FileEntry;
 
     /// Test file entry creation without profile
     #[test]
@@ -525,6 +515,10 @@ mod file_entry_extended_tests {
             repo: "config".to_string(),
             dest: ".config/app".to_string(),
             profile: None,
+            conditions: None,
+            secret: false,
+            secret_backend: None,
+            secret_key: None,
         };
 
         assert_eq!(entry.repo, "config");
@@ -539,6 +533,10 @@ mod file_entry_extended_tests {
             repo: "work_config".to_string(),
             dest: ".config/app".to_string(),
             profile: Some("work".to_string()),
+            conditions: None,
+            secret: false,
+            secret_backend: None,
+            secret_key: None,
         };
 
         assert_eq!(entry.profile, Some("work".to_string()));
@@ -551,6 +549,10 @@ mod file_entry_extended_tests {
             repo: "config".to_string(),
             dest: ".config".to_string(),
             profile: Some("default".to_string()),
+            conditions: None,
+            secret: false,
+            secret_backend: None,
+            secret_key: None,
         };
 
         let entry2 = entry1.clone();
@@ -565,7 +567,6 @@ mod file_entry_extended_tests {
 // Path Handling - Extended Tests
 // ============================================================================
 
-#[cfg(test)]
 mod path_handling_tests {
     use std::path::PathBuf;
 

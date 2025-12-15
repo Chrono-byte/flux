@@ -8,7 +8,10 @@ pub fn init_logging(log_level: Option<&str>) {
 
     // Set log level with precedence: CLI flag > environment variable > default
     let level = if let Some(level_str) = log_level {
-        level_str.parse::<LevelFilter>().unwrap_or(LevelFilter::Warn)
+        match level_str.parse::<LevelFilter>() {
+            Ok(l) => l,
+            Err(_) => LevelFilter::Warn,
+        }
     } else {
         match std::env::var("DOTFILES_LOG")
             .ok()

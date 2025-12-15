@@ -5,7 +5,8 @@ use std::path::Path;
 
 /// Format error messages consistently
 /// Pattern: [What happened] [Why it matters] [What to do] [Related elements]
-#[cfg(test)]
+/// Note: This is primarily for testing, but made available for integration tests
+#[allow(dead_code)]
 pub struct ErrorBuilder {
     what: String,
     why: Option<String>,
@@ -13,8 +14,8 @@ pub struct ErrorBuilder {
     context: Vec<(String, String)>,
 }
 
-#[cfg(test)]
 impl ErrorBuilder {
+    #[allow(dead_code)]
     pub fn new(what: impl Into<String>) -> Self {
         Self {
             what: what.into(),
@@ -24,25 +25,30 @@ impl ErrorBuilder {
         }
     }
 
+    #[allow(dead_code)]
     pub fn why(mut self, why: impl Into<String>) -> Self {
         self.why = Some(why.into());
         self
     }
 
+    #[allow(dead_code)]
     pub fn solution(mut self, solution: impl Into<String>) -> Self {
         self.solution = Some(solution.into());
         self
     }
 
+    #[allow(dead_code)]
     pub fn context(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.context.push((key.into(), value.into()));
         self
     }
 
+    #[allow(dead_code)]
     pub fn build_path_error(self) -> DotfilesError {
         DotfilesError::Path(self.format())
     }
 
+    #[allow(dead_code)]
     fn format(&self) -> String {
         let mut msg = format!("What: {}", self.what);
 
@@ -223,32 +229,4 @@ macro_rules! err_config_file {
             $msg
         ))
     };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_builder_basic() {
-        let err = ErrorBuilder::new("File not found")
-            .why("Required configuration is missing")
-            .solution("Check the file path")
-            .context("Path", "/path/to/file")
-            .build_path_error();
-
-        let msg = err.to_string();
-        assert!(msg.contains("What: File not found"));
-        assert!(msg.contains("Why: Required configuration is missing"));
-        assert!(msg.contains("Solution"));
-        assert!(msg.contains("Path: /path/to/file"));
-    }
-
-    #[test]
-    fn test_home_dir_not_found_message() {
-        let err = home_dir_not_found();
-        let msg = err.to_string();
-        assert!(msg.contains("$HOME"));
-        assert!(msg.contains("Solution"));
-    }
 }
