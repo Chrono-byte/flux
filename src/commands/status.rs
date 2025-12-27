@@ -6,8 +6,9 @@ use crate::utils::path_utils::{
     symlink_points_to_correct_target,
 };
 use colored::Colorize;
-use std::collections::HashMap;
+use serde::Serialize;
 use std::fs;
+use std::time::SystemTime;
 
 /// Status of a tracked file.
 #[derive(Debug, Clone)]
@@ -25,6 +26,7 @@ pub enum FileStatus {
 }
 
 /// Status report for a tracked file.
+#[derive(Clone)]
 pub struct StatusReport {
     /// The tracked file
     pub file: TrackedFile,
@@ -32,6 +34,62 @@ pub struct StatusReport {
     pub status: FileStatus,
     /// Human-readable status message
     pub message: String,
+}
+
+/// JSON-serializable status report for scripting.
+#[derive(Serialize)]
+pub struct JsonStatusReport {
+    /// Tool name
+    pub tool: String,
+    /// Repository path
+    pub repo_path: String,
+    /// Destination path
+    pub dest_path: String,
+    /// Profile name (if any)
+    pub profile: Option<String>,
+    /// Status as string
+    pub status: String,
+    /// Human-readable message
+    pub message: String,
+    /// File size in bytes (if available)
+    pub size: Option<u64>,
+    /// Last modified time (if available)
+    pub modified: Option<String>,
+}
+
+impl From<&StatusReport> for JsonStatusReport {
+    fn from(report: &StatusReport) -> Self {
+        // Get file size if available
+        let size = report
+            .file
+            .repo_path
+            .metadata()
+            .map(|metadata| metadata.len())
+            .ok();
+
+        // Get last modified time as seconds since UNIX_EPOCH (as string), if available
+        let modified = match report.file.repo_path.metadata() {
+            Ok(metadata) => match metadata.modified() {
+                Ok(mtime) => match mtime.duration_since(SystemTime::UNIX_EPOCH) {
+                    Ok(duration) => Some(duration.as_secs().to_string()),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            },
+            Err(_) => None,
+        };
+
+        JsonStatusReport {
+            tool: report.file.tool.clone(),
+            repo_path: report.file.repo_path.display().to_string(),
+            dest_path: report.file.dest_path.display().to_string(),
+            profile: report.file.profile.clone(),
+            status: format!("{:?}", report.status),
+            message: report.message.clone(),
+            size,
+            modified,
+        }
+    }
 }
 
 /// Check the status of all tracked files.
@@ -191,76 +249,161 @@ pub fn check_conflicts(config: &Config, profile: Option<&str>) -> Result<Vec<Sta
     Ok(conflicted)
 }
 
-/// Display the status of the tracked files.
+/// Format file size as a human-readable string.
+#[allow(dead_code)]
+fn format_file_size(size: u64) -> String {
+    if size < 1024 {
+        format!("{size}B")
+    } else if size < 1024 * 1024 {
+        // Convert to KB: divide by 1024, then convert to f64 for decimal formatting
+        // Use integer division first to reduce precision loss
+        let kb = size / 1024;
+        let remainder = size % 1024;
+        // Convert via u32 to avoid precision loss warnings
+        if let (Ok(kb_u32), Ok(remainder_u32)) = (u32::try_from(kb), u32::try_from(remainder)) {
+            let kb_f64 = f64::from(kb_u32) + f64::from(remainder_u32) / 1024.0;
+            format!("{kb_f64:.1}KB")
+        } else {
+            // For extremely large files (> 4TB), show as whole KB
+            format!("{kb}KB")
+        }
+    } else {
+        // Convert to MB: divide by 1024*1024, then convert to f64 for decimal formatting
+        let mb = size / (1024 * 1024);
+        let remainder = size % (1024 * 1024);
+        // Convert via u32 to avoid precision loss warnings
+        if let (Ok(mb_u32), Ok(remainder_u32)) = (u32::try_from(mb), u32::try_from(remainder)) {
+            let mb_f64 = f64::from(mb_u32) + f64::from(remainder_u32) / (1024.0 * 1024.0);
+            format!("{mb_f64:.1}MB")
+        } else {
+            // For extremely large files (> 4PB), show as whole MB
+            format!("{mb}MB")
+        }
+    }
+}
+
+/// Format modification time as a human-readable string.
+#[allow(dead_code)]
+fn format_modified_time(modified_time: SystemTime) -> String {
+    modified_time
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|duration| {
+            let secs = duration.as_secs();
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .ok()
+                .map_or(secs, |n| n.as_secs()); // Fallback: treat "now" as the file time if error.
+            let age = now.saturating_sub(secs);
+
+            if age < 3600 {
+                format!("{}m ago", age / 60)
+            } else if age < 86400 {
+                format!("{}h ago", age / 3600)
+            } else {
+                format!("{}d ago", age / 86400)
+            }
+        })
+        .unwrap_or_default()
+}
+
+/// Display the status of the tracked files with git-like formatting.
 ///
 /// # Parameters
 ///
 /// * `reports`: The status reports to display.
-///
-/// # Returns
-///
-/// Returns the status of the tracked files.
 pub fn display_status(reports: &[StatusReport]) {
     if reports.is_empty() {
         println!("{}", "No tracked files found.".yellow());
         return;
     }
 
-    let synced_count = reports
-        .iter()
-        .filter(|result| matches!(result.status, FileStatus::Synced))
-        .count();
-    let issues_count = reports.len() - synced_count;
+    // Group reports by status type
+    let mut synced: Vec<&StatusReport> = Vec::new();
+    let mut missing_symlinks: Vec<&StatusReport> = Vec::new();
+    let mut broken_symlinks: Vec<&StatusReport> = Vec::new();
+    let mut out_of_sync: Vec<&StatusReport> = Vec::new();
+    let mut missing_repo: Vec<&StatusReport> = Vec::new();
 
-    // Group by tool
-    let mut by_tool: HashMap<String, Vec<&StatusReport>> = HashMap::new();
     for report in reports {
-        by_tool
-            .entry(report.file.tool.clone())
-            .or_default()
-            .push(report);
-    }
-
-    println!("\n{}", "Dotfiles Status:".bold().cyan());
-    println!("{}", "=".repeat(60).cyan());
-
-    let mut tool_names: Vec<_> = by_tool.keys().collect();
-    tool_names.sort();
-
-    let empty_vec = Vec::new();
-    for tool in tool_names {
-        let tool_reports = by_tool.get(tool).unwrap_or(&empty_vec);
-        println!(
-            "\n{} {} ({} file(s))",
-            "Tool:".bold(),
-            tool.cyan(),
-            tool_reports.len()
-        );
-
-        for report in tool_reports {
-            let icon = match report.status {
-                FileStatus::Synced => "✓".green(),
-                FileStatus::MissingSymlink => "⊘".yellow(),
-                FileStatus::BrokenSymlink => "⚠".yellow(),
-                FileStatus::OutOfSync => "↻".yellow(),
-                FileStatus::MissingRepo => "✗".red(),
-            };
-
-            let profile_info = if let Some(profile) = &report.file.profile {
-                format!(" [profile: {profile}]").yellow()
-            } else {
-                "".normal()
-            };
-
-            println!("  {} {}{}", icon, report.message, profile_info);
+        match report.status {
+            FileStatus::Synced => synced.push(report),
+            FileStatus::MissingSymlink => missing_symlinks.push(report),
+            FileStatus::BrokenSymlink => broken_symlinks.push(report),
+            FileStatus::OutOfSync => out_of_sync.push(report),
+            FileStatus::MissingRepo => missing_repo.push(report),
         }
     }
 
-    println!("\n{}", "=".repeat(60).cyan());
-    println!(
-        "{} {} synced, {} need attention",
-        "Summary:".bold(),
-        synced_count.to_string().green(),
-        issues_count.to_string().yellow()
-    );
+    // Sort each group by destination path for consistent output
+    synced.sort_by_key(|report| &report.file.dest_path);
+    missing_symlinks.sort_by_key(|report| &report.file.dest_path);
+    broken_symlinks.sort_by_key(|report| &report.file.dest_path);
+    out_of_sync.sort_by_key(|report| &report.file.dest_path);
+    missing_repo.sort_by_key(|report| &report.file.repo_path);
+
+    // Display issues sections (similar to git's "Changes not staged for commit")
+    let has_issues = !missing_symlinks.is_empty()
+        || !broken_symlinks.is_empty()
+        || !out_of_sync.is_empty()
+        || !missing_repo.is_empty();
+
+    if has_issues {
+        // Missing symlinks (similar to "Changes not staged for commit")
+        if !missing_symlinks.is_empty() {
+            println!("\n{}", "Missing symlinks:".yellow().bold());
+            for report in &missing_symlinks {
+                println!("  {}", format_file_path(&report.file.dest_path).yellow());
+            }
+        }
+
+        // Broken symlinks
+        if !broken_symlinks.is_empty() {
+            println!("\n{}", "Broken symlinks:".yellow().bold());
+            for report in &broken_symlinks {
+                println!("  {}", format_file_path(&report.file.dest_path).yellow());
+            }
+        }
+
+        // Out of sync
+        if !out_of_sync.is_empty() {
+            println!("\n{}", "Out of sync:".yellow().bold());
+            for report in &out_of_sync {
+                println!("  {}", format_file_path(&report.file.dest_path).yellow());
+            }
+        }
+
+        // Missing repo files
+        if !missing_repo.is_empty() {
+            println!("\n{}", "Missing repo files:".red().bold());
+            for report in &missing_repo {
+                println!("  {}", format_file_path(&report.file.repo_path).red());
+            }
+        }
+    }
+
+    // Summary (similar to git status summary)
+    let total = reports.len();
+    let synced_count = synced.len();
+    let issues_count = total - synced_count;
+
+    if issues_count == 0 {
+        println!("\n{}", "nothing to sync, working tree clean".green());
+    } else {
+        println!(
+            "\n{} {} file(s) synced, {} file(s) need attention",
+            "Summary:".bold(),
+            synced_count.to_string().green(),
+            issues_count.to_string().yellow()
+        );
+    }
+}
+
+/// Format a file path for display, showing relative path when possible.
+fn format_file_path(path: &std::path::Path) -> String {
+    // Try to show relative path from current directory, fallback to full path
+    std::env::current_dir()
+        .ok()
+        .and_then(|cwd| path.strip_prefix(&cwd).ok())
+        .map_or_else(|| path.display().to_string(), |rel| rel.display().to_string())
 }

@@ -267,7 +267,18 @@ pub fn commit_changes(
     new_index.read_tree(&tree)?;
     new_index.write()?;
 
-    println!("{} Committed changes: {}", "✓".green(), commit_message);
+    // Get the commit we just created
+    let commit_id = repo.head()?.target().ok_or_else(|| {
+        DotfilesError::Config("Could not get commit ID after commit".to_string())
+    })?;
+    let short_id = commit_id.to_string()[..7].to_string();
+
+    // Get branch name (or "detached HEAD" if not on a branch)
+    let branch_name = get_current_branch(repo)
+        .unwrap_or_else(|_| "detached HEAD".to_string());
+
+    // Show git-like output: [branch-name abc1234] commit message
+    println!("[{} {}] {}", branch_name.cyan(), short_id.cyan(), commit_message);
     Ok(())
 }
 

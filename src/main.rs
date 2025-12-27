@@ -224,6 +224,9 @@ enum Commands {
         /// Show only conflicted files (git merge conflicts)
         #[arg(long)]
         conflicts: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Maintenance and repair operations
     Maintain {
@@ -1268,6 +1271,7 @@ fn handle_pull_command(
 ///
 /// * `profile`: Optional profile name.
 /// * `conflicts`: Whether to show only conflicted files.
+/// * `json`: Whether to output as JSON.
 ///
 /// # Returns
 ///
@@ -1276,7 +1280,7 @@ fn handle_pull_command(
 /// # Errors
 ///
 /// Returns an error if the configuration cannot be loaded or if the status cannot be checked.
-fn handle_status_command(profile: Option<&str>, conflicts: bool) -> Result<()> {
+fn handle_status_command(profile: Option<&str>, conflicts: bool, json: bool) -> Result<()> {
     let config = Config::load()?;
     let repo_path = config.get_repo_path();
 
@@ -1284,7 +1288,12 @@ fn handle_status_command(profile: Option<&str>, conflicts: bool) -> Result<()> {
         // Show only conflicted files
         use commands::status::check_conflicts;
         let conflicted = check_conflicts(&config, profile)?;
-        if conflicted.is_empty() {
+
+        if json {
+            use commands::status::JsonStatusReport;
+            let json_reports: Vec<JsonStatusReport> = conflicted.iter().map(Into::into).collect();
+            println!("{}", serde_json::to_string_pretty(&json_reports)?);
+        } else if conflicted.is_empty() {
             println!("{} No conflicted files found", "✓".green());
         } else {
             println!("\n{} Conflicted files:", "⚠".yellow().bold());
@@ -1297,6 +1306,12 @@ fn handle_status_command(profile: Option<&str>, conflicts: bool) -> Result<()> {
                 conflicted.len()
             );
         }
+    } else if json {
+        // JSON output - skip git status, just show file status
+        use commands::status::JsonStatusReport;
+        let reports = check_status(&config, profile)?;
+        let json_reports: Vec<JsonStatusReport> = reports.iter().map(Into::into).collect();
+        println!("{}", serde_json::to_string_pretty(&json_reports)?);
     } else {
         // Display git repository status
         if let Ok(repo) = init_repo(&repo_path) {
@@ -1531,9 +1546,11 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             dry_run,
             timeout,
         } => handle_pull_command(remote, branch, dry_run, timeout)?,
-        Commands::Status { profile, conflicts } => {
-            handle_status_command(profile.as_deref(), conflicts)?;
-        }
+        Commands::Status {
+            profile,
+            conflicts,
+            json,
+        } => handle_status_command(profile.as_deref(), conflicts, json)?,
         Commands::Maintain { command } => return handle_maintain_command(command),
         Commands::Check { profile } => handle_check_command(profile.as_deref(), cli.quiet)?,
         Commands::Doctor => handle_doctor_command()?,

@@ -31,6 +31,10 @@ pub enum DotfilesError {
     )]
     TomlSerialize(#[from] toml::ser::Error),
 
+    /// JSON serialization errors - cannot serialize to JSON
+    #[error("Failed to serialize to JSON: {0}")]
+    JsonSerialize(#[from] serde_json::Error),
+
     /// Path-related errors - file operations, symlinks, path validation
     /// Includes specific file paths and resolution guidance
     #[error("{0}")]
@@ -66,6 +70,7 @@ impl DotfilesError {
             DotfilesError::Git(error) => DotfilesError::Git(error),
             DotfilesError::Toml(error) => DotfilesError::Toml(error),
             DotfilesError::TomlSerialize(error) => DotfilesError::TomlSerialize(error),
+            DotfilesError::JsonSerialize(error) => DotfilesError::JsonSerialize(error),
             DotfilesError::InvalidTool(msg) => {
                 DotfilesError::InvalidTool(format!("{msg}\n  Context: {context}"))
             }

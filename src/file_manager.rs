@@ -9,6 +9,7 @@ use crate::utils::path_utils::{
 use crate::utils::prompt::{ConflictResolution, prompt_conflict};
 use crate::utils::security;
 use colored::Colorize;
+use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, warn};
 use std::fs;
 use std::path::Path;
@@ -108,15 +109,35 @@ pub fn sync_files(
     let tracked_files = config.get_tracked_files(profile)?;
     let symlink_resolution = config.general.symlink_resolution;
 
-    // Create FileSystemManager to handle all file operations with dry-run support
-    let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
+    if tracked_files.is_empty() {
+        println!("{} No files to sync", "⊘".yellow());
+        return Ok(());
+    }
+
+    // Create progress bar (only show if not verbose and not dry-run)
+    let progress_bar = if !verbose && !is_dry_run_mode && tracked_files.len() > 1 {
+        let pb = ProgressBar::new(tracked_files.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files ({msg})")
+                .map_err(|_| DotfilesError::Config("Failed to create progress bar".to_string()))?
+                .progress_chars("#>-"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
 
     if verbose {
         println!("{} Syncing {} file(s)...", "→".cyan(), tracked_files.len());
     }
 
+    // Create FileSystemManager to handle all file operations with dry-run support
+    let mut fs_manager = FileSystemManager::new(dry_run_tracker, is_dry_run_mode);
+
     let mut stats = SyncStats::default();
 
+    // Process files sequentially with progress bar
     for (idx, file) in tracked_files.iter().enumerate() {
         if verbose {
             println!(
@@ -127,16 +148,38 @@ pub fn sync_files(
                 file.dest_path.display()
             );
         }
+
+        if let Some(ref pb) = progress_bar {
+            pb.set_message(
+                file.dest_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("file")
+                    .to_string(),
+            );
+        }
+
         let result = sync_file(file, symlink_resolution, &mut fs_manager, verbose)?;
         stats.update(result);
+
+        if let Some(ref pb) = progress_bar {
+            pb.inc(1);
+        }
+    }
+
+    // Finish progress bar
+    let had_progress_bar = progress_bar.is_some();
+    if let Some(pb) = progress_bar {
+        pb.finish_with_message("Sync complete");
     }
 
     // Display sync operation summary
     if verbose {
         println!("\n{} Sync complete", "✓".green());
-    } else {
+    } else if !had_progress_bar {
         stats.print_summary();
     }
+
     Ok(())
 }
 
