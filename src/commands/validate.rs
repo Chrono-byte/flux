@@ -29,9 +29,14 @@ pub struct ValidationReport {
     pub is_valid: bool,
 }
 
+/// Validate the configuration and return a report of any issues.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 pub fn validate_config(config: &Config) -> Result<ValidationReport> {
     let mut issues = Vec::new();
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
 
     // Check if repo exists
     if !repo_path.exists() {
@@ -98,6 +103,21 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
     })
 }
 
+/// Check for orphaned entries in the repository.
+///
+/// # Parameters
+///
+/// * `repo_path`: The path to the repository.
+/// * `config`: The configuration.
+/// * `issues`: The issues to check for.
+///
+/// # Returns
+///
+/// Returns the orphaned entries.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_orphaned_entries(
     repo_path: &Path,
     config: &Config,
@@ -119,9 +139,9 @@ fn check_orphaned_entries(
         // Normalize repo paths: remove tool name prefix if present
         let mut tracked_files = std::collections::HashSet::new();
         for file_entry in &tool_config.files {
-            let normalized_repo = if file_entry.repo.starts_with(&format!("{}/", tool)) {
+            let normalized_repo = if file_entry.repo.starts_with(&format!("{tool}/")) {
                 // Remove tool name prefix (e.g., "cursor/settings.json" -> "settings.json")
-                match file_entry.repo.strip_prefix(&format!("{}/", tool)) {
+                match file_entry.repo.strip_prefix(&format!("{tool}/")) {
                     Some(stripped) => stripped.to_string(),
                     None => file_entry.repo.clone(),
                 }
@@ -142,6 +162,17 @@ fn check_orphaned_entries(
     Ok(())
 }
 
+/// Collect files from a directory.
+///
+/// # Parameters
+///
+/// * `base`: The base path.
+/// * `dir`: The directory to collect files from.
+/// * `files`: The files to collect.
+///
+/// # Returns
+///
+/// Returns the collected files.
 fn collect_files(
     base: &Path,
     dir: &Path,
@@ -163,6 +194,15 @@ fn collect_files(
     Ok(())
 }
 
+/// Display the validation report.
+///
+/// # Parameters
+///
+/// * `report`: The validation report to display.
+///
+/// # Returns
+///
+/// Returns the validation report.
 pub fn display_validation(report: &ValidationReport) {
     if report.is_valid {
         println!("{}", "✓ Configuration is valid!".green().bold());

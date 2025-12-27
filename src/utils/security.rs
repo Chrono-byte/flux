@@ -3,6 +3,11 @@ use crate::utils::error_utils;
 use std::path::Path;
 
 /// Validate that a symlink target is within the repository (prevents path traversal attacks)
+///
+/// # Errors
+///
+/// Returns an error if the repository path or target path cannot be canonicalized,
+/// or if the target path is outside the repository directory.
 pub fn validate_symlink_target(repo_path: &Path, target: &Path) -> Result<()> {
     // Canonicalize both paths for comparison
     let canonical_repo = repo_path.canonicalize().map_err(|_| {
@@ -46,6 +51,11 @@ pub fn validate_symlink_target(repo_path: &Path, target: &Path) -> Result<()> {
 }
 
 /// Validate that a destination path doesn't try to escape home directory
+///
+/// # Errors
+///
+/// Returns an error if the home directory or destination path cannot be canonicalized,
+/// or if the destination path is outside the home directory.
 pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
     let canonical_home = home.canonicalize().map_err(|_| {
         DotfilesError::Path(format!(
@@ -89,6 +99,10 @@ pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
 }
 
 /// Set secure permissions on a file (mode 0600 - read/write owner only)
+///
+/// # Errors
+///
+/// Returns an error if setting file permissions fails (Unix systems only).
 pub fn set_secure_permissions(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -107,6 +121,10 @@ pub fn set_secure_permissions(path: &Path) -> Result<()> {
 }
 
 /// Check if a file is locked (Unix only using flock)
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or if there's an error checking the lock.
 pub fn is_file_locked(path: &Path) -> Result<bool> {
     #[cfg(unix)]
     {
@@ -121,18 +139,17 @@ pub fn is_file_locked(path: &Path) -> Result<bool> {
                         Ok(false) // File was not locked
                     }
                     Err((_, nix::Error::EAGAIN)) => Ok(true), // File is locked
-                    Err((_, e)) => Err(DotfilesError::Path(format!(
-                        "Error checking file lock: {}",
-                        e
+                    Err((_, error)) => Err(DotfilesError::Path(format!(
+                        "Error checking file lock: {error}"
                     ))),
                 }
             }
-            Err(e) => {
+            Err(error) => {
                 // If we can't open the file, assume it's locked
                 log::warn!(
                     "Could not open file '{}' to check lock status: {}",
                     path.display(),
-                    e
+                    error
                 );
                 Ok(true)
             }

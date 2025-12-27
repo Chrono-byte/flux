@@ -46,15 +46,15 @@ mod security_tests {
     #[test]
     fn test_set_secure_permissions() {
         let dir = match tempdir() {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Failed to create temp directory: {}", e);
+            Ok(dir) => dir,
+            Err(error) => {
+                eprintln!("Failed to create temp directory: {error}");
                 return;
             }
         };
         let file_path = dir.path().join("test.txt");
-        if let Err(e) = std::fs::write(&file_path, "test") {
-            eprintln!("Failed to write test file: {}", e);
+        if let Err(error) = std::fs::write(&file_path, "test") {
+            eprintln!("Failed to write test file: {error}");
             return;
         }
 
@@ -99,16 +99,16 @@ mod backup_tests {
     #[test]
     fn test_backup_directory_creation() {
         let dir = match tempdir() {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Failed to create temp directory: {}", e);
+            Ok(dir) => dir,
+            Err(error) => {
+                eprintln!("Failed to create temp directory: {error}");
                 return;
             }
         };
         let backup_path = dir.path().join("backup");
 
-        if let Err(e) = std::fs::create_dir_all(&backup_path) {
-            eprintln!("Failed to create backup directory: {}", e);
+        if let Err(error) = std::fs::create_dir_all(&backup_path) {
+            eprintln!("Failed to create backup directory: {error}");
             return;
         }
         assert!(backup_path.exists());
@@ -172,8 +172,7 @@ mod config_validation_tests {
 
             assert!(
                 config.validate().is_ok(),
-                "Symlink mode '{:?}' should be valid",
-                mode
+                "Symlink mode '{mode:?}' should be valid"
             );
         }
     }
@@ -200,22 +199,20 @@ mod config_validation_tests {
 repo_path = "~/.dotfiles"
 backup_dir = "~/.dotfiles-backup"
 current_profile = "default"
-symlink_resolution = "{}"
-"#,
-                input_str
+symlink_resolution = "{input_str}"
+"#
             );
 
             let config: Config = match toml::from_str(&toml_str) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to deserialize TOML: {}", e);
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("Failed to deserialize TOML: {error}");
                     return;
                 }
             };
             assert_eq!(
                 config.general.symlink_resolution, expected,
-                "Should deserialize '{}' to {:?}",
-                input_str, expected
+                "Should deserialize '{input_str}' to {expected:?}"
             );
         }
     }
@@ -250,8 +247,7 @@ symlink_resolution = "{}"
 
             assert!(
                 config.validate().is_ok(),
-                "Profile name '{}' should be valid",
-                name
+                "Profile name '{name}' should be valid"
             );
         }
     }
@@ -272,8 +268,7 @@ symlink_resolution = "{}"
 
             assert!(
                 config.validate().is_err(),
-                "Profile name '{}' should be invalid",
-                name
+                "Profile name '{name}' should be invalid"
             );
         }
     }
@@ -284,63 +279,45 @@ symlink_resolution = "{}"
         let mut config = Config::default();
 
         // Primary: add single file
-        if let Err(e) = config.add_file_to_tool(
+        config.add_file_to_tool(
             "sway",
             "config",
             std::path::Path::new(".config/sway/config"),
             None,
-        ) {
-            eprintln!("Failed to add file to tool: {}", e);
-            return;
-        }
+        );
 
         assert!(config.tools.contains_key("sway"));
-        let sway_tool = match config.tools.get("sway") {
-            Some(tool) => tool,
-            None => {
-                eprintln!("Tool 'sway' should exist");
-                return;
-            }
+        let Some(sway_tool) = config.tools.get("sway") else {
+            eprintln!("Tool 'sway' should exist");
+            return;
         };
         assert_eq!(sway_tool.files.len(), 1);
 
         // Analogous: add to same tool creates multiple entries
-        if let Err(e) = config.add_file_to_tool(
+        config.add_file_to_tool(
             "sway",
             "config.d",
             std::path::Path::new(".config/sway/config.d"),
             None,
-        ) {
-            eprintln!("Failed to add file to tool: {}", e);
-            return;
-        }
+        );
 
-        let sway_tool = match config.tools.get("sway") {
-            Some(tool) => tool,
-            None => {
-                eprintln!("Tool 'sway' should exist");
-                return;
-            }
+        let Some(sway_tool) = config.tools.get("sway") else {
+            eprintln!("Tool 'sway' should exist");
+            return;
         };
         assert_eq!(sway_tool.files.len(), 2);
 
         // Backwards compatible: profile-specific entries
-        if let Err(e) = config.add_file_to_tool(
+        config.add_file_to_tool(
             "sway",
             "work",
             std::path::Path::new(".config/sway/config"),
             Some("work"),
-        ) {
-            eprintln!("Failed to add file to tool: {}", e);
-            return;
-        }
+        );
 
-        let sway_tool = match config.tools.get("sway") {
-            Some(tool) => tool,
-            None => {
-                eprintln!("Tool 'sway' should exist");
-                return;
-            }
+        let Some(sway_tool) = config.tools.get("sway") else {
+            eprintln!("Tool 'sway' should exist");
+            return;
         };
         assert_eq!(sway_tool.files.len(), 3);
     }
@@ -366,8 +343,7 @@ mod symlink_resolution_extended_tests {
         ];
 
         for mode in modes {
-            let _cloned = mode;
-            let _formatted = format!("{:?}", mode);
+            let _formatted = format!("{mode:?}");
             // All operations succeed
         }
     }
@@ -385,9 +361,9 @@ mod symlink_resolution_extended_tests {
 
         for (str_mode, expected_mode) in test_cases {
             let parsed = match SymlinkResolution::from_str(str_mode) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("Failed to parse '{}': {}", str_mode, e);
+                Ok(path) => path,
+                Err(error) => {
+                    eprintln!("Failed to parse '{str_mode}': {error}");
                     return;
                 }
             };
@@ -403,8 +379,7 @@ mod symlink_resolution_extended_tests {
         for mode_str in invalid {
             assert!(
                 SymlinkResolution::from_str(mode_str).is_err(),
-                "Mode '{}' should fail to parse",
-                mode_str
+                "Mode '{mode_str}' should fail to parse"
             );
         }
     }
@@ -461,15 +436,14 @@ mod error_handling_extended_tests {
         assert!(err_result.is_err());
 
         // Test extracting Ok value - use pattern matching to avoid clippy warning
-        let ok_value = match ok_result {
-            Ok(v) => v,
-            Err(_) => unreachable!(),
+        let Ok(ok_value) = ok_result else {
+            unreachable!();
         };
         assert_eq!(ok_value, "success");
 
         // Test unwrap_or_else - for Err values, we use unwrap_or_else
         let err_value = match err_result {
-            Ok(v) => v,
+            Ok(value) => value,
             Err(_) => "default".to_string(),
         };
         assert_eq!(err_value, "default");
@@ -632,21 +606,15 @@ mod path_handling_tests {
         let path = PathBuf::from("/home/user/.config");
 
         assert!(path.has_root());
-        let file_name = match path.file_name() {
-            Some(name) => name,
-            None => {
-                eprintln!("Path should have file name");
-                return;
-            }
+        let Some(file_name) = path.file_name() else {
+            eprintln!("Path should have file name");
+            return;
         };
         assert_eq!(file_name, ".config");
 
-        let parent = match path.parent() {
-            Some(p) => p,
-            None => {
-                eprintln!("Path should have parent");
-                return;
-            }
+        let Some(parent) = path.parent() else {
+            eprintln!("Path should have parent");
+            return;
         };
         assert_eq!(parent, PathBuf::from("/home/user"));
     }
@@ -657,12 +625,9 @@ mod path_handling_tests {
         let rel_path = PathBuf::from(".config/app/config");
 
         assert!(!rel_path.is_absolute());
-        let file_name = match rel_path.file_name() {
-            Some(name) => name,
-            None => {
-                eprintln!("Path should have file name");
-                return;
-            }
+        let Some(file_name) = rel_path.file_name() else {
+            eprintln!("Path should have file name");
+            return;
         };
         assert_eq!(file_name, "config");
     }

@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Error type for the Flux dotfiles manager.
 #[derive(Error, Debug)]
 pub enum DotfilesError {
     /// IO errors - includes file system and I/O related failures
@@ -54,27 +55,35 @@ pub enum DotfilesError {
 impl DotfilesError {
     /// Provide additional context for the error
     #[allow(dead_code)] // This is used in tests
+    #[must_use]
     pub fn with_context(self, context: &str) -> Self {
         match self {
             DotfilesError::Config(msg) => {
-                DotfilesError::Config(format!("{}\n  Context: {}", msg, context))
+                DotfilesError::Config(format!("{msg}\n  Context: {context}"))
             }
-            DotfilesError::Path(msg) => {
-                DotfilesError::Path(format!("{}\n  Context: {}", msg, context))
-            }
-            DotfilesError::Io(e) => DotfilesError::Io(e),
-            DotfilesError::Git(e) => DotfilesError::Git(e),
-            DotfilesError::Toml(e) => DotfilesError::Toml(e),
-            DotfilesError::TomlSerialize(e) => DotfilesError::TomlSerialize(e),
+            DotfilesError::Path(msg) => DotfilesError::Path(format!("{msg}\n  Context: {context}")),
+            DotfilesError::Io(error) => DotfilesError::Io(error),
+            DotfilesError::Git(error) => DotfilesError::Git(error),
+            DotfilesError::Toml(error) => DotfilesError::Toml(error),
+            DotfilesError::TomlSerialize(error) => DotfilesError::TomlSerialize(error),
             DotfilesError::InvalidTool(msg) => {
-                DotfilesError::InvalidTool(format!("{}\n  Context: {}", msg, context))
+                DotfilesError::InvalidTool(format!("{msg}\n  Context: {context}"))
             }
             DotfilesError::ProfileNotFound(msg) => {
-                DotfilesError::ProfileNotFound(format!("{}\n  Context: {}", msg, context))
+                DotfilesError::ProfileNotFound(format!("{msg}\n  Context: {context}"))
             }
             DotfilesError::Cancelled => DotfilesError::Cancelled,
         }
     }
 }
 
+/// Result type for the Flux dotfiles manager.
+///
+/// # Parameters
+///
+/// * `T`: The type of the result.
+///
+/// # Returns
+///
+/// Returns the result.
 pub type Result<T> = std::result::Result<T, DotfilesError>;

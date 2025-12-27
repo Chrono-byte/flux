@@ -10,26 +10,48 @@ use std::fs;
 pub enum HealthIssue {
     /// Broken symlink (target doesn't exist)
     BrokenSymlink {
+        /// The path of the broken symlink
         path: PathBuf,
+        /// The target of the broken symlink
         target: PathBuf,
+        /// The reason for the broken symlink
         reason: String,
     },
     /// Missing repository file referenced in config
-    MissingRepoFile { file: TrackedFile },
+    MissingRepoFile {
+        /// The tracked file that is missing
+        file: TrackedFile,
+    },
     /// Config drift: file content differs from repo
-    ConfigDrift { file: TrackedFile, summary: String },
+    ConfigDrift {
+        /// The tracked file that has config drift
+        file: TrackedFile,
+        /// The summary of the config drift
+        summary: String,
+    },
     /// Invalid profile or environment configuration
-    InvalidProfile { profile: String, reason: String },
+    InvalidProfile {
+        /// The profile that is invalid
+        profile: String,
+        /// The reason for the invalid profile
+        reason: String,
+    },
     /// Git remote is unreachable or invalid
     BadGitRemote {
+        /// The remote that is unreachable or invalid
         remote: String,
+        /// The URL of the remote
         url: String,
+        /// The reason for the bad git remote
         reason: String,
     },
     /// Unsafe file permissions detected
     UnsafePermissions {
+        /// The path of the unsafe permissions
         path: PathBuf,
+        /// The current mode of the unsafe permissions
         current_mode: String,
+        /// The recommended mode of the unsafe permissions
         recommended_mode: String,
     },
 }
@@ -38,14 +60,26 @@ use std::path::PathBuf;
 
 /// Health report from doctor command.
 pub struct HealthReport {
+    /// The issues found in the health report
     pub issues: Vec<HealthIssue>,
 }
 
 impl HealthReport {
-    pub fn is_healthy(&self) -> bool {
+    /// Check if the health report is healthy.
+    ///
+    /// # Returns
+    ///
+    /// Returns true if the health report is healthy, false otherwise.
+    #[must_use]
+    pub const fn is_healthy(&self) -> bool {
         self.issues.is_empty()
     }
 
+    /// Get the health report by category.
+    ///
+    /// # Returns
+    ///
+    /// Returns a map of categories to the issues in that category.
     pub fn by_category(&self) -> std::collections::HashMap<String, Vec<&HealthIssue>> {
         let mut by_cat = std::collections::HashMap::new();
         for issue in &self.issues {
@@ -67,6 +101,10 @@ impl HealthReport {
 }
 
 /// Run all health checks and return a report.
+///
+/// # Errors
+///
+/// Returns an error if the health checks cannot be run.
 pub fn run_health_checks(config: &Config) -> Result<HealthReport> {
     let mut issues = Vec::new();
 
@@ -80,7 +118,7 @@ pub fn run_health_checks(config: &Config) -> Result<HealthReport> {
     check_config_drift(config, &mut issues)?;
 
     // Check invalid profiles
-    check_invalid_profiles(config, &mut issues)?;
+    check_invalid_profiles(config, &mut issues);
 
     // Check git remotes
     check_git_remotes(config, &mut issues)?;
@@ -91,6 +129,11 @@ pub fn run_health_checks(config: &Config) -> Result<HealthReport> {
     Ok(HealthReport { issues })
 }
 
+/// Check the symlinks of the tracked files.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_symlinks(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> {
     let tracked_files = config.get_tracked_files(None)?;
 
@@ -100,7 +143,10 @@ fn check_symlinks(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> 
         }
 
         if let Ok(link_target) = fs::read_link(&file.dest_path) {
-            let resolved = file.dest_path.parent().map(|p| p.join(&link_target));
+            let resolved = file
+                .dest_path
+                .parent()
+                .map(|parent_path| parent_path.join(&link_target));
             if let Some(resolved_path) = resolved {
                 if !resolved_path.exists() {
                     issues.push(HealthIssue::BrokenSymlink {
@@ -126,6 +172,11 @@ fn check_symlinks(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> 
     Ok(())
 }
 
+/// Check the missing repository files of the tracked files.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_missing_repo_files(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> {
     let tracked_files = config.get_tracked_files(None)?;
 
@@ -138,6 +189,11 @@ fn check_missing_repo_files(config: &Config, issues: &mut Vec<HealthIssue>) -> R
     Ok(())
 }
 
+/// Check the config drift of the tracked files.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_config_drift(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> {
     use crate::utils::path_utils::files_differ;
 
@@ -170,41 +226,45 @@ fn check_config_drift(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<
     Ok(())
 }
 
-fn check_invalid_profiles(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> {
-    let repo_path = config.get_repo_path()?;
+/// Check the invalid profiles of the tracked files.
+///
+/// # Errors
+///
+fn check_invalid_profiles(config: &Config, issues: &mut Vec<HealthIssue>) {
+    let repo_path = config.get_repo_path();
     let profiles_dir = repo_path.join("profiles");
 
     // Check if current profile directory exists
     if config.general.current_profile != "default" {
-        let profile_dir = profiles_dir.join(&config.general.current_profile);
-        if !profile_dir.exists() {
+        let current_profile_dir = profiles_dir.join(&config.general.current_profile);
+        if !current_profile_dir.exists() {
             issues.push(HealthIssue::InvalidProfile {
                 profile: config.general.current_profile.clone(),
                 reason: "Profile directory does not exist".to_string(),
             });
         }
     }
-
-    Ok(())
 }
 
+/// Check the git remotes of the tracked files.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_git_remotes(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> {
     use git2::Repository;
 
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
 
     // Try to open repository
-    let repo = match Repository::open(&repo_path) {
-        Ok(r) => r,
-        Err(_) => {
-            // Not a git repo, skip remote checks
-            return Ok(());
-        }
+    let Ok(repo) = Repository::open(&repo_path) else {
+        // Not a git repo, skip remote checks
+        return Ok(());
     };
 
     let remotes = repo.remotes()?;
 
-    for name_opt in remotes.iter() {
+    for name_opt in &remotes {
         if let Some(name) = name_opt
             && let Ok(remote) = repo.find_remote(name)
             && let Some(url) = remote.url()
@@ -234,6 +294,11 @@ fn check_git_remotes(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<(
     Ok(())
 }
 
+/// Check the unsafe permissions of the tracked files.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_unsafe_permissions(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -263,13 +328,13 @@ fn check_unsafe_permissions(config: &Config, issues: &mut Vec<HealthIssue>) -> R
                 // World or group readable/writable
                 issues.push(HealthIssue::UnsafePermissions {
                     path: file.dest_path.clone(),
-                    current_mode: format!("{:o}", file_mode),
+                    current_mode: format!("{file_mode:o}"),
                     recommended_mode: "600".to_string(),
                 });
             } else if file.dest_path.is_dir() && file_mode & 0o077 != 0 {
                 issues.push(HealthIssue::UnsafePermissions {
                     path: file.dest_path.clone(),
-                    current_mode: format!("{:o}", file_mode),
+                    current_mode: format!("{file_mode:o}"),
                     recommended_mode: "700".to_string(),
                 });
             }
@@ -280,6 +345,10 @@ fn check_unsafe_permissions(config: &Config, issues: &mut Vec<HealthIssue>) -> R
 }
 
 /// Display health report with categorized issues and suggested fixes.
+///
+/// # Parameters
+///
+/// * `report`: The health report to display
 pub fn display_health_report(report: &HealthReport) {
     if report.is_healthy() {
         println!("{} All health checks passed!", "✓".green().bold());
@@ -294,8 +363,9 @@ pub fn display_health_report(report: &HealthReport) {
     let mut sorted_categories = categories.clone();
     sorted_categories.sort();
 
+    let empty_vec = Vec::new();
     for category in sorted_categories {
-        let cat_issues = &by_category[category];
+        let cat_issues = by_category.get(category).unwrap_or(&empty_vec);
         println!(
             "\n{} {} ({} issue(s))",
             "Category:".bold(),
@@ -312,7 +382,7 @@ pub fn display_health_report(report: &HealthReport) {
                 } => {
                     println!("  {} Broken symlink: {}", "⚠".yellow(), path.display());
                     println!("    Target: {}", target.display());
-                    println!("    Reason: {}", reason);
+                    println!("    Reason: {reason}");
                     println!("    💡 Fix: Run `flux apply` to recreate symlink");
                 }
                 HealthIssue::MissingRepoFile { file } => {
@@ -329,12 +399,12 @@ pub fn display_health_report(report: &HealthReport) {
                         "↻".yellow(),
                         file.dest_path.display()
                     );
-                    println!("    {}", summary);
+                    println!("    {summary}");
                     println!("    💡 Fix: Run `flux apply` to sync with repository");
                 }
                 HealthIssue::InvalidProfile { profile, reason } => {
                     println!("  {} Invalid profile: {}", "⚠".yellow(), profile);
-                    println!("    Reason: {}", reason);
+                    println!("    Reason: {reason}");
                     println!("    💡 Fix: Create profile directory or switch to valid profile");
                 }
                 HealthIssue::BadGitRemote {
@@ -343,10 +413,9 @@ pub fn display_health_report(report: &HealthReport) {
                     reason,
                 } => {
                     println!("  {} Bad git remote: {} ({})", "⚠".yellow(), remote, url);
-                    println!("    Reason: {}", reason);
+                    println!("    Reason: {reason}");
                     println!(
-                        "    💡 Fix: Update remote URL with `flux remote set-url {} <new-url>`",
-                        remote
+                        "    💡 Fix: Update remote URL with `flux remote set-url {remote} <new-url>`"
                     );
                 }
                 HealthIssue::UnsafePermissions {
@@ -355,10 +424,7 @@ pub fn display_health_report(report: &HealthReport) {
                     recommended_mode,
                 } => {
                     println!("  {} Unsafe permissions: {}", "⚠".yellow(), path.display());
-                    println!(
-                        "    Current: {}, Recommended: {}",
-                        current_mode, recommended_mode
-                    );
+                    println!("    Current: {current_mode}, Recommended: {recommended_mode}");
                     println!(
                         "    💡 Fix: Run `chmod {} {}`",
                         recommended_mode,

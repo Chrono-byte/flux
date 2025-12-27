@@ -27,17 +27,27 @@ pub enum TransactionState {
 pub enum FileOperation {
     /// Create a symlink from source to target
     CreateSymlink {
+        /// Source path for the symlink.
         source: PathBuf,
+        /// Target path where the symlink will be created.
         target: PathBuf,
+        /// Symlink resolution strategy to use.
         resolution: SymlinkResolution,
     },
     /// Remove a symlink at target
-    RemoveSymlink { target: PathBuf },
+    RemoveSymlink {
+        /// Target path of the symlink to remove.
+        target: PathBuf,
+    },
     /// Backup existing file and replace with symlink
     BackupAndReplace {
+        /// Source path for the symlink.
         source: PathBuf,
+        /// Target path where the symlink will be created.
         target: PathBuf,
+        /// Path where the backup will be stored.
         backup_path: PathBuf,
+        /// Symlink resolution strategy to use.
         resolution: SymlinkResolution,
     },
 }
@@ -86,6 +96,10 @@ impl Default for Transaction {
 
 impl Transaction {
     /// Begin a new transaction
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the temporary directory cannot be created.
     pub fn begin(temp_dir: PathBuf) -> Result<Self> {
         // Create temp directory if it doesn't exist
         if !temp_dir.exists() {
@@ -104,6 +118,11 @@ impl Transaction {
     }
 
     /// Validate all operations in the transaction
+    /// Validate the transaction before preparation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction is not in the correct state or if validation fails.
     pub fn validate(&mut self, _config: &Config) -> Result<()> {
         if self.state != TransactionState::Started {
             return Err(DotfilesError::Config(
@@ -162,6 +181,10 @@ impl Transaction {
     }
 
     /// Prepare all operations (stage changes in temp directory)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction is not in the correct state or if preparation fails.
     pub fn prepare(&mut self, _config: &Config) -> Result<()> {
         if self.state != TransactionState::Prepared {
             return Err(DotfilesError::Config(
@@ -175,6 +198,10 @@ impl Transaction {
     }
 
     /// Commit all operations atomically
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction is not in the correct state or if any operation fails.
     pub fn commit(&mut self, config: &Config, fs_manager: &mut FileSystemManager) -> Result<()> {
         if self.state != TransactionState::Prepared {
             return Err(DotfilesError::Config(
@@ -189,16 +216,16 @@ impl Transaction {
                     source,
                     target,
                     resolution,
-                } => self.execute_create_symlink(source, target, *resolution, config, fs_manager),
+                } => Self::execute_create_symlink(source, target, *resolution, config, fs_manager),
                 FileOperation::RemoveSymlink { target } => {
-                    self.execute_remove_symlink(target, fs_manager)
+                    Self::execute_remove_symlink(target, fs_manager)
                 }
                 FileOperation::BackupAndReplace {
                     source,
                     target,
                     backup_path,
                     resolution,
-                } => self.execute_backup_and_replace(
+                } => Self::execute_backup_and_replace(
                     source,
                     target,
                     backup_path,
@@ -211,11 +238,10 @@ impl Transaction {
 
             // If any operation fails, rollback
             if !result.success {
-                self.rollback(config, fs_manager)?;
+                self.rollback(config, fs_manager);
                 let error_message = result.error.as_deref().unwrap_or("Unknown error");
                 return Err(DotfilesError::Config(format!(
-                    "Transaction failed: {}",
-                    error_message
+                    "Transaction failed: {error_message}"
                 )));
             }
         }
@@ -225,6 +251,11 @@ impl Transaction {
     }
 
     /// Verify that all changes were applied correctly
+    /// Verify that all operations completed successfully.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction is not in the correct state or if verification fails.
     pub fn verify(&mut self) -> Result<()> {
         if self.state != TransactionState::Committed {
             return Err(DotfilesError::Config(
@@ -255,8 +286,7 @@ impl Transaction {
             if !result.success {
                 let error_message = result.error.as_deref().unwrap_or("Unknown error");
                 return Err(DotfilesError::Config(format!(
-                    "Verification failed: operation did not succeed: {}",
-                    error_message
+                    "Verification failed: operation did not succeed: {error_message}"
                 )));
             }
 
@@ -281,7 +311,7 @@ impl Transaction {
                         )));
                     }
                 }
-                _ => {
+                FileOperation::BackupAndReplace { .. } => {
                     // Other operations verified by their success flag
                 }
             }
@@ -292,9 +322,9 @@ impl Transaction {
     }
 
     /// Rollback all changes made by this transaction
-    pub fn rollback(&mut self, _config: &Config, fs_manager: &mut FileSystemManager) -> Result<()> {
+    pub fn rollback(&mut self, _config: &Config, fs_manager: &mut FileSystemManager) {
         if self.state == TransactionState::RolledBack {
-            return Ok(()); // Already rolled back
+            return; // Already rolled back
         }
 
         // Rollback in reverse order
@@ -333,10 +363,13 @@ impl Transaction {
         }
 
         self.state = TransactionState::RolledBack;
-        Ok(())
     }
 
     /// Clean up temporary files and directories
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if cleanup fails.
     pub fn cleanup(&self) -> Result<()> {
         if self.temp_dir.exists() {
             fs::remove_dir_all(&self.temp_dir)?;
@@ -346,8 +379,8 @@ impl Transaction {
 
     // Private helper methods for executing operations
 
+    /// Execute creation of a symlink.
     fn execute_create_symlink(
-        &mut self,
         source: &Path,
         target: &Path,
         resolution: SymlinkResolution,
@@ -356,7 +389,7 @@ impl Transaction {
     ) -> OperationResult {
         // Create parent directory if needed
         if let Some(parent) = target.parent()
-            && let Err(e) = fs_manager.create_dir_all(parent)
+            && let Err(error) = fs_manager.create_dir_all(parent)
         {
             return OperationResult {
                 operation: FileOperation::CreateSymlink {
@@ -365,13 +398,13 @@ impl Transaction {
                     resolution,
                 },
                 success: false,
-                error: Some(format!("Failed to create parent directory: {}", e)),
+                error: Some(format!("Failed to create parent directory: {error}")),
             };
         }
 
         // Create symlink using atomic approach
         let link_target = match resolution {
-            SymlinkResolution::Auto | SymlinkResolution::Relative => {
+            SymlinkResolution::Auto | SymlinkResolution::Relative | SymlinkResolution::Follow => {
                 if let Some(parent) = target.parent() {
                     match pathdiff::diff_paths(source, parent) {
                         Some(relative) => relative,
@@ -382,20 +415,10 @@ impl Transaction {
                 }
             }
             SymlinkResolution::Absolute => source.to_path_buf(),
-            SymlinkResolution::Follow => {
-                if let Some(parent) = target.parent() {
-                    match pathdiff::diff_paths(source, parent) {
-                        Some(relative) => relative,
-                        None => source.to_path_buf(),
-                    }
-                } else {
-                    source.to_path_buf()
-                }
-            }
             SymlinkResolution::Replace => {
                 // For Replace, we copy instead of symlink
                 let temp_path = target.with_extension("flux-temp-copy");
-                if let Err(e) = fs_manager.copy(source, &temp_path) {
+                if let Err(error) = fs_manager.copy(source, &temp_path) {
                     return OperationResult {
                         operation: FileOperation::CreateSymlink {
                             source: source.to_path_buf(),
@@ -403,10 +426,10 @@ impl Transaction {
                             resolution,
                         },
                         success: false,
-                        error: Some(format!("Failed to copy file: {}", e)),
+                        error: Some(format!("Failed to copy file: {error}")),
                     };
                 }
-                if let Err(e) = fs_manager.rename(&temp_path, target) {
+                if let Err(error) = fs_manager.rename(&temp_path, target) {
                     return OperationResult {
                         operation: FileOperation::CreateSymlink {
                             source: source.to_path_buf(),
@@ -414,7 +437,7 @@ impl Transaction {
                             resolution,
                         },
                         success: false,
-                        error: Some(format!("Failed to rename temp file: {}", e)),
+                        error: Some(format!("Failed to rename temp file: {error}")),
                     };
                 }
                 return OperationResult {
@@ -434,12 +457,12 @@ impl Transaction {
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or_default();
-        let temp_link_path = target.with_extension(format!("{}.flux-temp", ext_str));
+        let temp_link_path = target.with_extension(format!("{ext_str}.flux-temp"));
 
         // Remove old temp link if exists
         let _ = fs_manager.remove_file(&temp_link_path);
 
-        if let Err(e) = fs_manager.symlink(&link_target, &temp_link_path) {
+        if let Err(error) = fs_manager.symlink(&link_target, &temp_link_path) {
             return OperationResult {
                 operation: FileOperation::CreateSymlink {
                     source: source.to_path_buf(),
@@ -447,12 +470,12 @@ impl Transaction {
                     resolution,
                 },
                 success: false,
-                error: Some(format!("Failed to create temp symlink: {}", e)),
+                error: Some(format!("Failed to create temp symlink: {error}")),
             };
         }
 
         // Atomically rename
-        if let Err(e) = fs_manager.rename(&temp_link_path, target) {
+        if let Err(error) = fs_manager.rename(&temp_link_path, target) {
             return OperationResult {
                 operation: FileOperation::CreateSymlink {
                     source: source.to_path_buf(),
@@ -460,7 +483,7 @@ impl Transaction {
                     resolution,
                 },
                 success: false,
-                error: Some(format!("Failed to rename temp symlink: {}", e)),
+                error: Some(format!("Failed to rename temp symlink: {error}")),
             };
         }
 
@@ -475,19 +498,19 @@ impl Transaction {
         }
     }
 
+    /// Execute removal of a symlink.
     fn execute_remove_symlink(
-        &mut self,
         target: &Path,
         fs_manager: &mut FileSystemManager,
     ) -> OperationResult {
         let target_path = target.to_path_buf();
-        if let Err(e) = fs_manager.remove_file(&target_path) {
+        if let Err(error) = fs_manager.remove_file(&target_path) {
             OperationResult {
                 operation: FileOperation::RemoveSymlink {
                     target: target_path,
                 },
                 success: false,
-                error: Some(format!("Failed to remove symlink: {}", e)),
+                error: Some(format!("Failed to remove symlink: {error}")),
             }
         } else {
             OperationResult {
@@ -500,8 +523,8 @@ impl Transaction {
         }
     }
 
+    /// Execute backup and replace operation.
     fn execute_backup_and_replace(
-        &mut self,
         source: &Path,
         target: &Path,
         backup_path: &Path,
@@ -511,7 +534,7 @@ impl Transaction {
         // Create backup
         if target.exists() {
             if let Some(parent) = backup_path.parent()
-                && let Err(e) = fs_manager.create_dir_all(parent)
+                && let Err(error) = fs_manager.create_dir_all(parent)
             {
                 return OperationResult {
                     operation: FileOperation::BackupAndReplace {
@@ -521,12 +544,12 @@ impl Transaction {
                         resolution,
                     },
                     success: false,
-                    error: Some(format!("Failed to create backup directory: {}", e)),
+                    error: Some(format!("Failed to create backup directory: {error}")),
                 };
             }
 
             if target.is_dir() {
-                if let Err(e) = fs_manager.copy_dir_all(target, backup_path) {
+                if let Err(error) = fs_manager.copy_dir_all(target, backup_path) {
                     return OperationResult {
                         operation: FileOperation::BackupAndReplace {
                             source: source.to_path_buf(),
@@ -535,10 +558,10 @@ impl Transaction {
                             resolution,
                         },
                         success: false,
-                        error: Some(format!("Failed to backup directory: {}", e)),
+                        error: Some(format!("Failed to backup directory: {error}")),
                     };
                 }
-            } else if let Err(e) = fs_manager.copy(target, backup_path) {
+            } else if let Err(error) = fs_manager.copy(target, backup_path) {
                 return OperationResult {
                     operation: FileOperation::BackupAndReplace {
                         source: source.to_path_buf(),
@@ -547,7 +570,7 @@ impl Transaction {
                         resolution,
                     },
                     success: false,
-                    error: Some(format!("Failed to backup file: {}", e)),
+                    error: Some(format!("Failed to backup file: {error}")),
                 };
             }
         }

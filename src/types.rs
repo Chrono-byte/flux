@@ -41,27 +41,6 @@ pub enum FileChange {
     Deleted(PathBuf),
 }
 
-// ==================== Environment Types ====================
-
-/// Environment configuration for declarative operations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvironmentSpec {
-    /// Environment variables to set
-    #[serde(default)]
-    pub variables: HashMap<String, String>,
-
-    /// Shell to use for command execution
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell: Option<String>,
-
-    /// Template variables for use in paths and other config strings.
-    ///
-    /// These are merged with built-in variables like `user`, `home`, `host`,
-    /// `os`, and `profile` when rendering templates.
-    #[serde(default)]
-    pub values: HashMap<String, String>,
-}
-
 /// Hooks configuration for pre/post operations.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HooksConfig {
@@ -148,7 +127,7 @@ impl std::str::FromStr for SymlinkResolution {
             "absolute" => Ok(SymlinkResolution::Absolute),
             "follow" => Ok(SymlinkResolution::Follow),
             "replace" => Ok(SymlinkResolution::Replace),
-            _ => Err(format!("Invalid symlink resolution: {}", s)),
+            _ => Err(format!("Invalid symlink resolution: {s}")),
         }
     }
 }

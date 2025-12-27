@@ -5,7 +5,7 @@
 # For editor autocomplete and validation, use the JSON schema:
 # schemas/config.schema.json
 # See schemas/README.md for setup instructions.
-
+#:schema https://github.com/Chrono-byte/dotfiles-manager/raw/refs/heads/master/schemas/config.schema.json
 [general]
 # Repository path where dotfiles are stored
 repo_path = "~/.dotfiles"

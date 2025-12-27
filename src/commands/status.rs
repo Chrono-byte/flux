@@ -2,9 +2,11 @@ use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::error::Result;
 use crate::utils::path_utils::{
-    files_differ, resolve_symlink_target, symlink_points_to_correct_target,
+    files_differ, find_symlinked_parent, normalize_path, resolve_symlink_target,
+    symlink_points_to_correct_target,
 };
 use colored::Colorize;
+use std::collections::HashMap;
 use std::fs;
 
 /// Status of a tracked file.
@@ -32,6 +34,11 @@ pub struct StatusReport {
     pub message: String,
 }
 
+/// Check the status of all tracked files.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 pub fn check_status(config: &Config, profile: Option<&str>) -> Result<Vec<StatusReport>> {
     let tracked_files = config.get_tracked_files(profile)?;
     let mut reports = Vec::new();
@@ -49,6 +56,11 @@ pub fn check_status(config: &Config, profile: Option<&str>) -> Result<Vec<Status
     Ok(reports)
 }
 
+/// Check the status of a tracked file.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
     // Check if repo file exists
     if !file.repo_path.exists() {
@@ -81,11 +93,39 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
 
         Ok(FileStatus::Synced)
     } else {
-        // Destination exists but is not a symlink - this is always out of sync
+        // Destination exists but is not a symlink
+        // Check if a parent directory is symlinked - if so, the file might be effectively synced
+        // via the directory symlink
+        if let Some((parent_dir, resolved_parent)) = find_symlinked_parent(&file.dest_path) {
+            // Get the relative path from the symlinked parent to the file
+            if let Ok(relative) = file.dest_path.strip_prefix(parent_dir) {
+                let resolved_file_path = resolved_parent.join(relative);
+                let normalized_resolved = normalize_path(&resolved_file_path);
+                let normalized_repo = normalize_path(&file.repo_path);
+
+                // If the resolved path through the symlinked parent matches the repo path,
+                // and the file content matches, it's effectively synced
+                if normalized_resolved == normalized_repo
+                    && !files_differ(&file.repo_path, &file.dest_path)?
+                {
+                    // Files match and are effectively synced via directory symlink
+                    // Return OutOfSync to indicate it should be converted to individual symlink
+                    // for better management
+                    return Ok(FileStatus::OutOfSync);
+                }
+            }
+        }
+
+        // Destination exists but is not a symlink and content differs
         Ok(FileStatus::OutOfSync)
     }
 }
 
+/// Get the status message for a tracked file.
+///
+/// # Returns
+///
+/// Returns the status message for a tracked file.
 fn status_message(file: &TrackedFile, status: &FileStatus) -> String {
     match status {
         FileStatus::Synced => format!("✓ {}", file.dest_path.display()),
@@ -97,16 +137,17 @@ fn status_message(file: &TrackedFile, status: &FileStatus) -> String {
 }
 
 /// Filter status reports to only show conflicted files (git merge conflicts).
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading the git repository or configuration.
 pub fn check_conflicts(config: &Config, profile: Option<&str>) -> Result<Vec<StatusReport>> {
     use git2::Repository;
 
-    let repo_path = config.get_repo_path()?;
-    let repo = match Repository::open(&repo_path) {
-        Ok(r) => r,
-        Err(_) => {
-            // Not a git repo, no conflicts possible
-            return Ok(Vec::new());
-        }
+    let repo_path = config.get_repo_path();
+    let Ok(repo) = Repository::open(&repo_path) else {
+        // Not a git repo, no conflicts possible
+        return Ok(Vec::new());
     };
 
     // Get git status entries
@@ -139,7 +180,7 @@ pub fn check_conflicts(config: &Config, profile: Option<&str>) -> Result<Vec<Sta
                     conflicted.push(StatusReport {
                         file,
                         status,
-                        message: format!("⚠ Git conflict: {}", repo_relative),
+                        message: format!("⚠ Git conflict: {repo_relative}"),
                     });
                     break;
                 }
@@ -150,6 +191,15 @@ pub fn check_conflicts(config: &Config, profile: Option<&str>) -> Result<Vec<Sta
     Ok(conflicted)
 }
 
+/// Display the status of the tracked files.
+///
+/// # Parameters
+///
+/// * `reports`: The status reports to display.
+///
+/// # Returns
+///
+/// Returns the status of the tracked files.
 pub fn display_status(reports: &[StatusReport]) {
     if reports.is_empty() {
         println!("{}", "No tracked files found.".yellow());
@@ -158,12 +208,11 @@ pub fn display_status(reports: &[StatusReport]) {
 
     let synced_count = reports
         .iter()
-        .filter(|r| matches!(r.status, FileStatus::Synced))
+        .filter(|result| matches!(result.status, FileStatus::Synced))
         .count();
     let issues_count = reports.len() - synced_count;
 
     // Group by tool
-    use std::collections::HashMap;
     let mut by_tool: HashMap<String, Vec<&StatusReport>> = HashMap::new();
     for report in reports {
         by_tool
@@ -178,8 +227,9 @@ pub fn display_status(reports: &[StatusReport]) {
     let mut tool_names: Vec<_> = by_tool.keys().collect();
     tool_names.sort();
 
+    let empty_vec = Vec::new();
     for tool in tool_names {
-        let tool_reports = &by_tool[tool];
+        let tool_reports = by_tool.get(tool).unwrap_or(&empty_vec);
         println!(
             "\n{} {} ({} file(s))",
             "Tool:".bold(),
@@ -197,7 +247,7 @@ pub fn display_status(reports: &[StatusReport]) {
             };
 
             let profile_info = if let Some(profile) = &report.file.profile {
-                format!(" [profile: {}]", profile).yellow()
+                format!(" [profile: {profile}]").yellow()
             } else {
                 "".normal()
             };

@@ -251,10 +251,7 @@ mod file_operations_integration_tests {
         fs::create_dir_all(&dir)?;
 
         for i in 0..100 {
-            fs::write(
-                dir.join(format!("file_{}.txt", i)),
-                format!("content {}", i),
-            )?;
+            fs::write(dir.join(format!("file_{i}.txt")), format!("content {i}"))?;
         }
 
         let entries: Vec<_> = fs::read_dir(&dir)?.collect::<Result<Vec<_>, _>>()?;

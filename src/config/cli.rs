@@ -11,10 +11,15 @@ use std::path::PathBuf;
 
 /// Environment configuration keys
 pub mod env_keys {
+    /// Configuration file environment variable
     pub const CONFIG_FILE: &str = "DOTFILES_CONFIG";
+    /// Log level environment variable
     pub const LOG_LEVEL: &str = "DOTFILES_LOG";
+    /// Log format environment variable
     pub const LOG_FORMAT: &str = "DOTFILES_LOG_FORMAT";
+    /// Git username environment variable
     pub const GIT_USERNAME: &str = "GIT_USERNAME";
+    /// Git password environment variable
     pub const GIT_PASSWORD: &str = "GIT_PASSWORD";
 }
 
@@ -24,19 +29,19 @@ pub mod env_keys {
 /// Provides early detection of configuration issues with helpful error messages.
 #[derive(Debug, Clone)]
 pub struct EnvironmentConfig {
-    /// Path to configuration file (from DOTFILES_CONFIG or default locations)
+    /// Path to configuration file (from `DOTFILES_CONFIG` or default locations)
     pub config_file: Option<PathBuf>,
 
-    /// Log level (from DOTFILES_LOG environment variable)
+    /// Log level (from `DOTFILES_LOG` environment variable)
     pub log_level: LogLevel,
 
-    /// Log format (from DOTFILES_LOG_FORMAT environment variable)
+    /// Log format (from `DOTFILES_LOG_FORMAT` environment variable)
     pub log_format: LogFormat,
 
-    /// Git username (from GIT_USERNAME environment variable, for HTTPS auth)
+    /// Git username (from `GIT_USERNAME` environment variable, for HTTPS auth)
     pub git_username: Option<String>,
 
-    /// Git password (from GIT_PASSWORD environment variable, for HTTPS auth)
+    /// Git password (from `GIT_PASSWORD` environment variable, for HTTPS auth)
     pub git_password: Option<String>,
 
     /// Whether we're in CI/CD environment
@@ -46,30 +51,39 @@ pub struct EnvironmentConfig {
 /// Log level configuration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
+    /// Trace log level
     Trace,
+    /// Debug log level
     Debug,
+    /// Info log level
     Info,
+    /// Warn log level
     Warn,
+    /// Error log level
     Error,
 }
 
 impl LogLevel {
     /// Parse from environment variable string
-    pub fn from_env(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the log level string is invalid.
+    pub fn from_env(input_str: &str) -> Result<Self> {
+        match input_str.to_lowercase().as_str() {
             "trace" => Ok(LogLevel::Trace),
             "debug" => Ok(LogLevel::Debug),
             "info" => Ok(LogLevel::Info),
             "warn" => Ok(LogLevel::Warn),
             "error" => Ok(LogLevel::Error),
             _ => Err(DotfilesError::Config(format!(
-                "Invalid log level '{}'. Supported values: trace, debug, info, warn, error",
-                s
+                "Invalid log level '{input_str}'. Supported values: trace, debug, info, warn, error"
             ))),
         }
     }
 
     /// Convert to string for log configuration
+    #[must_use]
     pub fn to_string(self) -> &'static str {
         match self {
             LogLevel::Trace => "trace",
@@ -84,26 +98,33 @@ impl LogLevel {
 /// Log format configuration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFormat {
+    /// Default log format
     Default,
+    /// JSON log format
     Json,
+    /// Compact log format
     Compact,
 }
 
 impl LogFormat {
     /// Parse from environment variable string
-    pub fn from_env(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the log format string is invalid.
+    pub fn from_env(input_str: &str) -> Result<Self> {
+        match input_str.to_lowercase().as_str() {
             "default" => Ok(LogFormat::Default),
             "json" => Ok(LogFormat::Json),
             "compact" => Ok(LogFormat::Compact),
             _ => Err(DotfilesError::Config(format!(
-                "Invalid log format '{}'. Supported values: default, json, compact",
-                s
+                "Invalid log format '{input_str}'. Supported values: default, json, compact"
             ))),
         }
     }
 
     /// Convert to string
+    #[must_use]
     pub fn to_string(self) -> &'static str {
         match self {
             LogFormat::Default => "default",
@@ -188,7 +209,10 @@ impl EnvironmentConfig {
             debug!(
                 "Git username loaded from {} (length: {} chars)",
                 env_keys::GIT_USERNAME,
-                config.git_username.as_ref().map_or(0, |u| u.len())
+                config
+                    .git_username
+                    .as_ref()
+                    .map_or(0, std::string::String::len)
             );
         }
 
@@ -203,7 +227,10 @@ impl EnvironmentConfig {
             debug!(
                 "Git password loaded from {} (length: {} chars)",
                 env_keys::GIT_PASSWORD,
-                config.git_password.as_ref().map_or(0, |p| p.len())
+                config
+                    .git_password
+                    .as_ref()
+                    .map_or(0, std::string::String::len)
             );
         }
 

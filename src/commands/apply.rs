@@ -36,16 +36,28 @@ pub struct StateDiff {
 }
 
 impl StateDiff {
-    pub fn is_empty(&self) -> bool {
+    /// Check if the state diff is empty.
+    ///
+    /// # Returns
+    ///
+    /// Returns true if the state diff is empty, false otherwise.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.files_to_sync.is_empty()
     }
 
-    pub fn total_changes(&self) -> usize {
+    /// Get the total number of changes in the state diff.
+    #[must_use]
+    pub const fn total_changes(&self) -> usize {
         self.files_to_sync.len()
     }
 }
 
 /// Compare declared state (from config) with actual system state
+///
+/// # Errors
+///
+/// Returns an error if the configuration file cannot be loaded.
 pub fn compare_states(config: &Config, profile: Option<&str>, force: bool) -> Result<StateDiff> {
     let mut diff = StateDiff::default();
 
@@ -129,18 +141,20 @@ pub fn display_preview(diff: &StateDiff) {
 /// Display unified diffs for files that would be changed.
 ///
 /// This is only used in dry-run mode and never touches the filesystem.
-pub fn display_diffs(diff: &StateDiff) -> Result<()> {
+///
+/// Display unified diffs for planned changes.
+pub fn display_diffs(diff: &StateDiff) {
+    use crate::services::secrets::SecretsManager;
     use std::fs;
 
     if diff.files_to_sync.is_empty() {
-        return Ok(());
+        return;
     }
 
     println!("\n{}", "Unified diffs for planned changes:".bold().cyan());
     println!("{}", "=".repeat(60).cyan());
 
     // Pre-resolve all secrets for secret files to batch the operation
-    use crate::services::secrets::SecretsManager;
     let secrets_mgr = SecretsManager::with_defaults();
     let mut secret_cache: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -149,20 +163,20 @@ pub fn display_diffs(diff: &StateDiff) -> Result<()> {
     let secret_files: Vec<_> = diff
         .files_to_sync
         .iter()
-        .filter(|f| f.is_secret && f.secret_key.is_some())
+        .filter(|file| file.is_secret && file.secret_key.is_some())
         .collect();
 
     if !secret_files.is_empty() {
         // Batch resolve all secrets using resolve_many
         let secret_keys: Vec<String> = secret_files
             .iter()
-            .filter_map(|f| f.secret_key.as_ref().cloned())
+            .filter_map(|file| file.secret_key.clone())
             .collect();
 
         if let Ok(resolved_secrets) = secrets_mgr.resolve_many(
             secret_files
                 .first()
-                .and_then(|f| f.secret_backend.as_deref()),
+                .and_then(|file| file.secret_backend.as_deref()),
             &secret_keys,
         ) {
             for (key, material) in resolved_secrets {
@@ -185,12 +199,12 @@ pub fn display_diffs(diff: &StateDiff) -> Result<()> {
                     // Fallback to individual resolution if not in cache
                     match secrets_mgr.resolve(file.secret_backend.as_deref(), key) {
                         Ok(secret_mat) => secret_mat.value,
-                        Err(e) => {
+                        Err(error) => {
                             println!(
                                 "\n{} {} (skipping diff: cannot resolve secret: {})",
                                 "⊘".yellow(),
                                 file.repo_path.display(),
-                                e
+                                error
                             );
                             continue;
                         }
@@ -199,18 +213,15 @@ pub fn display_diffs(diff: &StateDiff) -> Result<()> {
             } else {
                 String::new()
             }
+        } else if let Ok(contents) = fs::read_to_string(&file.repo_path) {
+            contents
         } else {
-            match fs::read_to_string(&file.repo_path) {
-                Ok(contents) => contents,
-                Err(_) => {
-                    println!(
-                        "\n{} {} (skipping diff: cannot read repo file)",
-                        "⊘".yellow(),
-                        file.repo_path.display()
-                    );
-                    continue;
-                }
-            }
+            println!(
+                "\n{} {} (skipping diff: cannot read repo file)",
+                "⊘".yellow(),
+                file.repo_path.display()
+            );
+            continue;
         };
 
         // Mask secret content in diff output
@@ -225,7 +236,7 @@ pub fn display_diffs(diff: &StateDiff) -> Result<()> {
 
         // Compute a simple unified diff. If there are no textual changes
         // (e.g., binary files or identical), skip printing.
-        let udiff = unified_diff(&file.dest_path, &current_display, &target_display)?;
+        let udiff = unified_diff(&file.dest_path, &current_display, &target_display);
         if udiff.trim().is_empty() {
             continue;
         }
@@ -234,12 +245,14 @@ pub fn display_diffs(diff: &StateDiff) -> Result<()> {
         println!("{}", "-".repeat(60).cyan());
         println!("{udiff}");
     }
-
-    Ok(())
 }
 
 /// Apply configuration changes using atomic transactions
-pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
+///
+/// # Errors
+///
+/// Returns an error if the configuration cannot be applied.
+pub fn apply_config(options: &ApplyOptions<'_>) -> Result<()> {
     if options.force {
         println!(
             "{} Force applying configuration (no backups, using repo version)...",
@@ -264,6 +277,66 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
     display_preview(&diff);
 
     // Run pre-apply hooks (if not dry-run)
+    run_pre_apply_hooks(options)?;
+
+    // Confirm if not auto-yes
+    if !options.dry_run && !options.yes && !prompt_yes_no("Apply these changes?")? {
+        println!("{} Apply cancelled", "⊘".yellow());
+        return Ok(());
+    }
+
+    if options.dry_run {
+        println!(
+            "\n{} DRY RUN MODE - No changes will be applied",
+            "⚠".yellow().bold()
+        );
+        return Ok(());
+    }
+
+    // Create and setup transaction
+    let mut transaction = create_and_setup_transaction(options, &diff)?;
+
+    // Execute transaction
+    let mut dry_run_tracker = DryRun::default();
+    let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, false);
+
+    // Validate
+    transaction.validate(options.config)?;
+
+    // Prepare
+    transaction.prepare(options.config)?;
+
+    // Commit
+    transaction.commit(options.config, &mut fs_manager)?;
+
+    // Verify
+    transaction.verify()?;
+
+    // Cleanup
+    transaction.cleanup()?;
+
+    // Run post-apply hooks
+    run_post_apply_hooks(options)?;
+
+    // Record history event
+    let profile_str = options.profile.map(std::string::ToString::to_string);
+    history::record_event(&history::HistoryEvent {
+        timestamp: chrono::Utc::now(),
+        command: "apply".to_string(),
+        profile: profile_str,
+        dry_run: false,
+        transaction_id: Some(transaction.id.clone()),
+        summary: Some(format!("Applied {} file(s)", diff.files_to_sync.len())),
+    })?;
+
+    println!("\n{} Configuration applied successfully", "✓".green());
+    println!("  Transaction ID: {}", transaction.id);
+
+    Ok(())
+}
+
+/// Run pre-apply hooks if configured.
+fn run_pre_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
     if !options.dry_run
         && let Some(hooks_config) = &options.config.hooks
         && let Some(pre_hooks) = &hooks_config.pre_apply
@@ -286,24 +359,16 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
 
-    // Confirm if not auto-yes
-    if !options.dry_run && !options.yes && !prompt_yes_no("Apply these changes?")? {
-        println!("{} Apply cancelled", "⊘".yellow());
-        return Ok(());
-    }
-
-    if options.dry_run {
-        println!(
-            "\n{} DRY RUN MODE - No changes will be applied",
-            "⚠".yellow().bold()
-        );
-        return Ok(());
-    }
-
-    // Create transaction
+/// Create and setup transaction with all file operations.
+fn create_and_setup_transaction(
+    options: &ApplyOptions<'_>,
+    diff: &StateDiff,
+) -> Result<Transaction> {
     let temp_dir = TempDir::new()?.path().to_path_buf();
-    let mut transaction = Transaction::begin(temp_dir.clone())?;
+    let mut transaction = Transaction::begin(temp_dir)?;
 
     // Add metadata
     if let Some(desc) = options.description {
@@ -335,32 +400,17 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
             &mut transaction,
             file,
             options.force,
-            &symlink_resolution,
+            symlink_resolution,
             &home,
             &transaction_backup_dir,
         );
     }
 
-    // Execute transaction
-    let mut dry_run_tracker = DryRun::default();
-    let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, false);
+    Ok(transaction)
+}
 
-    // Validate
-    transaction.validate(options.config)?;
-
-    // Prepare
-    transaction.prepare(options.config)?;
-
-    // Commit
-    transaction.commit(options.config, &mut fs_manager)?;
-
-    // Verify
-    transaction.verify()?;
-
-    // Cleanup
-    transaction.cleanup()?;
-
-    // Run post-apply hooks
+/// Run post-apply hooks if configured.
+fn run_post_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
     if let Some(hooks_config) = &options.config.hooks
         && let Some(post_hooks) = &hooks_config.post_apply
     {
@@ -384,21 +434,6 @@ pub fn apply_config(options: ApplyOptions<'_>) -> Result<()> {
             }
         }
     }
-
-    // Record history event
-    let profile_str = options.profile.map(|p| p.to_string());
-    history::record_event(history::HistoryEvent {
-        timestamp: chrono::Utc::now(),
-        command: "apply".to_string(),
-        profile: profile_str,
-        dry_run: false,
-        transaction_id: Some(transaction.id.clone()),
-        summary: Some(format!("Applied {} file(s)", diff.files_to_sync.len())),
-    })?;
-
-    println!("\n{} Configuration applied successfully", "✓".green());
-    println!("  Transaction ID: {}", transaction.id);
-
     Ok(())
 }
 
@@ -407,7 +442,7 @@ fn add_file_operation_to_transaction(
     transaction: &mut Transaction,
     file: &TrackedFile,
     force: bool,
-    symlink_resolution: &crate::types::SymlinkResolution,
+    symlink_resolution: crate::types::SymlinkResolution,
     home: &Path,
     backup_dir: &Path,
 ) {
@@ -421,7 +456,7 @@ fn add_file_operation_to_transaction(
         transaction.add_operation(FileOperation::CreateSymlink {
             source: file.repo_path.clone(),
             target: file.dest_path.clone(),
-            resolution: *symlink_resolution,
+            resolution: symlink_resolution,
         });
     } else {
         // Normal mode: backup existing files
@@ -435,14 +470,14 @@ fn add_file_operation_to_transaction(
             transaction.add_operation(FileOperation::BackupAndReplace {
                 source: file.repo_path.clone(),
                 target: file.dest_path.clone(),
-                backup_path: backup_path.clone(),
-                resolution: *symlink_resolution,
+                backup_path,
+                resolution: symlink_resolution,
             });
         } else {
             transaction.add_operation(FileOperation::CreateSymlink {
                 source: file.repo_path.clone(),
                 target: file.dest_path.clone(),
-                resolution: *symlink_resolution,
+                resolution: symlink_resolution,
             });
         }
     }

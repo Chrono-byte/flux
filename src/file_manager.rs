@@ -2,7 +2,10 @@ use crate::config::Config;
 use crate::types::{SymlinkResolution, TrackedFile};
 use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
-use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
+use crate::utils::path_utils::{
+    files_differ, find_symlinked_parent, normalize_path, resolve_symlink_target,
+    symlink_points_to_correct_target,
+};
 use crate::utils::prompt::{ConflictResolution, prompt_conflict};
 use crate::utils::security;
 use colored::Colorize;
@@ -15,6 +18,11 @@ use std::path::Path;
 // #############################################################################
 
 /// Add a file to the dotfiles repository.
+///
+/// # Errors
+///
+/// Returns an error if there are issues validating paths, copying files,
+/// or updating the configuration.
 pub fn add_file(
     config: &mut Config,
     tool: &str,
@@ -29,7 +37,7 @@ pub fn add_file(
     // Validate destination path is within home directory
     crate::utils::security::validate_dest_path(dest_path, &home)?;
 
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
     let tool_dir = repo_path.join(tool);
     let repo_file = tool_dir.join(source_path.file_name().ok_or_else(|| {
         DotfilesError::Path(format!(
@@ -53,29 +61,29 @@ pub fn add_file(
     // Register file in configuration (in-memory, will be saved later)
     let repo_relative = repo_file
         .strip_prefix(&repo_path)
-        .map_err(|e| {
+        .map_err(|error| {
             crate::utils::error_utils::invalid_path_computation(
                 &repo_path,
                 &repo_file,
-                &format!("Repository file is not within repository directory: {}", e),
+                &format!("Repository file is not within repository directory: {error}"),
             )
         })?
         .to_string_lossy()
         .to_string();
-    config.add_file_to_tool(tool, &repo_relative, dest_path, profile)?;
+    config.add_file_to_tool(tool, &repo_relative, dest_path, profile);
 
     // Only save config if not in dry run mode
-    if !fs_manager.is_dry_run {
-        config.save(fs_manager.is_dry_run)?;
+    if fs_manager.is_dry_run {
         println!(
-            "{} Added {} to {} tool",
-            "✓".green(),
+            "  [DRY RUN] Would add {} to {} tool",
             source_path.display(),
             tool
         );
     } else {
+        config.save(fs_manager.is_dry_run)?;
         println!(
-            "  [DRY RUN] Would add {} to {} tool",
+            "{} Added {} to {} tool",
+            "✓".green(),
             source_path.display(),
             tool
         );
@@ -85,6 +93,11 @@ pub fn add_file(
 }
 
 /// Sync all tracked files, creating symlinks from repo to destination.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading configuration, creating symlinks,
+/// or managing files.
 pub fn sync_files(
     config: &Config,
     profile: Option<&str>,
@@ -114,7 +127,7 @@ pub fn sync_files(
                 file.dest_path.display()
             );
         }
-        let result = sync_file(file, &symlink_resolution, &mut fs_manager, verbose)?;
+        let result = sync_file(file, symlink_resolution, &mut fs_manager, verbose)?;
         stats.update(result);
     }
 
@@ -127,13 +140,17 @@ pub fn sync_files(
     Ok(())
 }
 
+/// Statistics tracking for file synchronization operations.
 #[derive(Default)]
 struct SyncStats {
+    /// Number of files successfully synced.
     synced: usize,
+    /// Number of files skipped during sync.
     skipped: usize,
 }
 
 impl SyncStats {
+    /// Update statistics based on a sync result.
     fn update(&mut self, result: SyncResult) {
         match result {
             SyncResult::Synced => self.synced += 1,
@@ -141,6 +158,7 @@ impl SyncStats {
         }
     }
 
+    /// Print a summary of sync statistics.
     fn print_summary(&self) {
         let total = self.synced + self.skipped;
         if total == 0 {
@@ -164,13 +182,21 @@ impl SyncStats {
     }
 }
 
+/// Result of a file synchronization operation.
 #[derive(Clone, Copy)]
 enum SyncResult {
+    /// File was successfully synced.
     Synced,
+    /// File was skipped during sync.
     Skipped,
 }
 
 /// Remove a file from tracking and delete it from the filesystem.
+///
+/// # Errors
+///
+/// Returns an error if the file is not found, or if there are issues
+/// removing files or updating configuration.
 pub fn remove_file(
     config: &mut Config,
     tool: &str,
@@ -186,8 +212,8 @@ pub fn remove_file(
     let file_entry = tool_config
         .files
         .iter()
-        .find(|e| e.repo == file)
-        .ok_or_else(|| DotfilesError::Path(format!("File {} not found in tool {}", file, tool)))?;
+        .find(|entry| entry.repo == file)
+        .ok_or_else(|| DotfilesError::Path(format!("File {file} not found in tool {tool}")))?;
 
     let dest_path = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
@@ -197,9 +223,9 @@ pub fn remove_file(
     fs_manager.remove_file(&dest_path)?;
 
     // Remove file from repository
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
     // Handle both path formats: file may or may not include the tool name prefix
-    let repo_file = if file.starts_with(&format!("{}/", tool)) {
+    let repo_file = if file.starts_with(&format!("{tool}/")) {
         // File path already includes tool name (e.g., "cursor/settings.json")
         repo_path.join(file)
     } else {
@@ -210,18 +236,18 @@ pub fn remove_file(
 
     // Remove file entry from configuration (in-memory, will be saved later)
     if let Some(tool_config) = config.tools.get_mut(tool) {
-        tool_config.files.retain(|e| e.repo != file);
+        tool_config.files.retain(|entry| entry.repo != file);
         if tool_config.files.is_empty() {
             config.tools.remove(tool);
         }
     }
 
     // Save configuration to disk only if not in dry run mode
-    if !fs_manager.is_dry_run {
+    if fs_manager.is_dry_run {
+        println!("  [DRY RUN] Would remove {file} from {tool} tool");
+    } else {
         config.save(fs_manager.is_dry_run)?;
         println!("{} Removed {} from {} tool", "✓".green(), file, tool);
-    } else {
-        println!("  [DRY RUN] Would remove {} from {} tool", file, tool);
     }
 
     Ok(())
@@ -233,6 +259,7 @@ pub fn remove_file(
 
 /// Manages file system operations with dry-run support.
 pub struct FileSystemManager<'a> {
+    /// Dry-run tracker for logging operations.
     dry_run: &'a mut DryRun,
     /// Whether operations are in dry-run mode
     pub is_dry_run: bool,
@@ -247,6 +274,11 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
+    /// Create a directory and all parent directories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory cannot be created.
     pub fn create_dir_all(&mut self, path: &Path) -> Result<()> {
         if self.is_dry_run {
             println!("  [DRY RUN] Would create directory: {}", path.display());
@@ -259,6 +291,11 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
+    /// Copy a file from one location to another.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be copied.
     pub fn copy(&mut self, from: &Path, to: &Path) -> Result<()> {
         // Safety check: don't copy a file to itself
         if from == to {
@@ -284,6 +321,11 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
+    /// Recursively copy a directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory cannot be copied.
     pub fn copy_dir_all(&mut self, src: &Path, dst: &Path) -> Result<()> {
         // Safety check: don't copy a directory to itself
         if src == dst {
@@ -309,6 +351,11 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
+    /// Remove a file or symlink.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be removed.
     pub fn remove_file(&mut self, path: &Path) -> Result<()> {
         if self.is_dry_run {
             println!("  [DRY RUN] Would remove file: {}", path.display());
@@ -326,6 +373,11 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
+    /// Rename or move a file or directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be renamed.
     pub fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
         if self.is_dry_run {
             println!(
@@ -344,6 +396,11 @@ impl<'a> FileSystemManager<'a> {
         }
     }
 
+    /// Create a symbolic link.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if symlink cannot be created.
     pub fn symlink(&mut self, from: &Path, to: &Path) -> Result<()> {
         if self.is_dry_run {
             println!(
@@ -402,7 +459,7 @@ enum SyncAction {
 /// Orchestrates the sync for a single file.
 fn sync_file(
     file: &TrackedFile,
-    resolution: &SymlinkResolution,
+    resolution: SymlinkResolution,
     fs_manager: &mut FileSystemManager,
     verbose: bool,
 ) -> Result<SyncResult> {
@@ -426,7 +483,7 @@ fn sync_file(
     }
 
     // Check if destination file is locked (e.g., in use by another process)
-    if let Some(skip_reason) = check_file_lock_status(&file.dest_path, verbose)? {
+    if let Some(skip_reason) = check_file_lock_status(&file.dest_path, verbose) {
         return Ok(skip_reason);
     }
 
@@ -507,16 +564,45 @@ fn determine_sync_action(file: &TrackedFile, verbose: bool) -> Result<SyncAction
                 println!("  {} Already correctly linked", "✓".green());
             }
             return Ok(SyncAction::DoNothing);
-        } else {
-            if verbose {
-                println!("  {} Symlink points to wrong location", "⚠".yellow());
-            }
-            return Ok(SyncAction::ResolveConflict);
         }
+        if verbose {
+            println!("  {} Symlink points to wrong location", "⚠".yellow());
+        }
+        return Ok(SyncAction::ResolveConflict);
     }
 
     if verbose {
         println!("  Is regular file/directory (not symlink)");
+    }
+
+    // Check if a parent directory is symlinked - if so, we need to convert it
+    if let Some((symlinked_parent, resolved_parent)) = find_symlinked_parent(&file.dest_path) {
+        if verbose {
+            println!(
+                "  {} Parent directory {} is symlinked to {}",
+                "⚠".yellow(),
+                symlinked_parent.display(),
+                resolved_parent.display()
+            );
+        }
+        // Get the relative path from the symlinked parent to the file
+        if let Ok(relative) = file.dest_path.strip_prefix(&symlinked_parent) {
+            let resolved_file_path = resolved_parent.join(relative);
+            let normalized_resolved = normalize_path(&resolved_file_path);
+            let normalized_repo = normalize_path(&file.repo_path);
+
+            // If the resolved path through the symlinked parent matches the repo path,
+            // we need to convert the directory symlink to individual file symlinks
+            if normalized_resolved == normalized_repo {
+                if verbose {
+                    println!(
+                        "  File is effectively synced via directory symlink, will convert to individual symlink"
+                    );
+                }
+                // Files are effectively the same (via directory symlink), convert to individual symlink
+                return Ok(SyncAction::CreateSymlink);
+            }
+        }
     }
 
     // Safety check: prevent overwriting non-empty destination with empty repo file
@@ -569,7 +655,7 @@ fn determine_sync_action(file: &TrackedFile, verbose: bool) -> Result<SyncAction
 /// Assumes backup has already been created.
 fn handle_file_conflict(
     file: &TrackedFile,
-    resolution: &SymlinkResolution,
+    resolution: SymlinkResolution,
     fs_manager: &mut FileSystemManager,
     verbose: bool,
 ) -> Result<()> {
@@ -598,7 +684,13 @@ fn handle_file_conflict(
             return Ok(());
         }
         ConflictResolution::ViewDiff => {
-            if !fs_manager.is_dry_run {
+            if fs_manager.is_dry_run {
+                if verbose {
+                    println!("  [DRY RUN] Would show diff and prompt again");
+                    println!("  [DRY RUN] Assuming: Backup and Replace");
+                }
+                create_symlink_managed(file, resolution, fs_manager, verbose)?;
+            } else {
                 show_diff(&file.repo_path, &file.dest_path)?;
                 // Ask again after showing diff
                 let post_diff_resolution = prompt_conflict(&file.dest_path)?;
@@ -614,14 +706,8 @@ fn handle_file_conflict(
                     ConflictResolution::Cancel => {
                         return Err(DotfilesError::Cancelled);
                     }
-                    _ => {} // ViewDiff again is not an option here
+                    ConflictResolution::ViewDiff => {} // ViewDiff again is not an option here
                 }
-            } else {
-                if verbose {
-                    println!("  [DRY RUN] Would show diff and prompt again");
-                    println!("  [DRY RUN] Assuming: Backup and Replace");
-                }
-                create_symlink_managed(file, resolution, fs_manager, verbose)?;
             }
         }
         ConflictResolution::Cancel => {
@@ -631,23 +717,15 @@ fn handle_file_conflict(
     Ok(())
 }
 
-/// Creates a symlink, managed by the FileSystemManager.
+/// Creates a symlink, managed by the `FileSystemManager`.
 /// Assumes backups have *already been created* by the caller.
 fn create_symlink_managed(
     file: &TrackedFile,
-    resolution: &SymlinkResolution,
+    resolution: SymlinkResolution,
     fs_manager: &mut FileSystemManager,
     verbose: bool,
 ) -> Result<()> {
-    // SECURITY: Validate symlink target is within repo
-    if let Err(e) = security::validate_symlink_target(&file.repo_path, &file.repo_path) {
-        warn!(
-            "Symlink validation failed for {}: {}",
-            file.repo_path.display(),
-            e
-        );
-        return Err(e);
-    }
+    validate_symlink_security(file)?;
 
     debug!(
         "Creating symlink from {} to {}",
@@ -655,124 +733,183 @@ fn create_symlink_managed(
         file.repo_path.display()
     );
 
-    // 1. Create parent directory if needed
-    if let Some(parent) = file.dest_path.parent() {
-        fs_manager.create_dir_all(parent)?;
-    }
+    ensure_parent_directory(file, fs_manager, verbose)?;
 
     // Handle "Replace" strategy: copy file instead of creating symlink
-    if *resolution == SymlinkResolution::Replace {
-        // Use atomic rename for safe file replacement
-        let temp_path = file.dest_path.with_extension("flux-temp-copy");
-        if verbose {
-            println!("    Copying file instead of symlinking (Replace strategy)...");
-        }
-
-        // If this is a secret file with a secret_key, resolve the secret instead of copying
-        if file.is_secret && file.secret_key.is_some() {
-            use crate::services::secrets::SecretsManager;
-            let secrets_mgr = SecretsManager::with_defaults();
-            let secret_key = file.secret_key.as_ref().ok_or_else(|| {
-                crate::utils::error::DotfilesError::Config(
-                    "Secret file missing secret_key".to_string(),
-                )
-            })?;
-            let secret_mat = secrets_mgr.resolve(file.secret_backend.as_deref(), secret_key)?;
-
-            if !fs_manager.is_dry_run {
-                if let Some(parent) = temp_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::write(&temp_path, secret_mat.value.as_bytes())?;
-            } else if verbose {
-                println!(
-                    "    [DRY RUN] Would write secret content to {}",
-                    temp_path.display()
-                );
-            }
-        } else {
-            fs_manager.copy(&file.repo_path, &temp_path)?;
-        }
-
-        fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
-
-        // For secret files, tighten permissions on the destination.
-        if file.is_secret
-            && !fs_manager.is_dry_run
-            && let Err(e) = security::set_secure_permissions(&file.dest_path)
-        {
-            warn!(
-                "Could not set secure permissions on secret file {}: {}",
-                file.dest_path.display(),
-                e
-            );
-        }
-
-        if verbose && !fs_manager.is_dry_run {
-            if file.is_secret && file.secret_key.is_some() {
-                println!(
-                    "{} Wrote secret content to {}",
-                    "✓".green(),
-                    file.dest_path.display()
-                );
-            } else {
-                println!(
-                    "{} Copied {} -> {}",
-                    "✓".green(),
-                    file.repo_path.display(),
-                    file.dest_path.display()
-                );
-            }
-        }
+    if resolution == SymlinkResolution::Replace {
+        handle_replace_strategy(file, fs_manager, verbose)?;
         return Ok(());
     }
 
     // If this is a secret file with a secret_key, write secret content directly instead of symlinking
     if file.is_secret && file.secret_key.is_some() {
-        use crate::services::secrets::SecretsManager;
-        let secrets_mgr = SecretsManager::with_defaults();
-        let secret_key = file.secret_key.as_ref().ok_or_else(|| {
-            crate::utils::error::DotfilesError::Config("Secret file missing secret_key".to_string())
-        })?;
-        let secret_mat = secrets_mgr.resolve(file.secret_backend.as_deref(), secret_key)?;
+        write_secret_file(file, fs_manager, verbose)?;
+        return Ok(());
+    }
 
-        if !fs_manager.is_dry_run {
-            if let Some(parent) = file.dest_path.parent() {
-                std::fs::create_dir_all(parent)?;
+    // Handle regular symlink creation (non-Replace strategies)
+    let link_target = compute_symlink_target(file, resolution, verbose)?;
+    create_symlink_atomic(file, &link_target, fs_manager, verbose)?;
+
+    Ok(())
+}
+
+/// Validates symlink security constraints.
+fn validate_symlink_security(file: &TrackedFile) -> Result<()> {
+    if let Err(error) = security::validate_symlink_target(&file.repo_path, &file.repo_path) {
+        warn!(
+            "Symlink validation failed for {}: {}",
+            file.repo_path.display(),
+            error
+        );
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Ensures the parent directory exists, handling symlinked parent cases.
+fn ensure_parent_directory(
+    file: &TrackedFile,
+    fs_manager: &mut FileSystemManager,
+    verbose: bool,
+) -> Result<()> {
+    if let Some(parent) = file.dest_path.parent() {
+        // Check if parent is a symlink pointing to repo - if so, warn but continue
+        if let Ok(link_target) = fs::read_link(parent) {
+            let resolved_target = resolve_symlink_target(parent, &link_target);
+            let normalized_target = normalize_path(&resolved_target);
+            if let Some(repo_parent) = file.repo_path.parent() {
+                let normalized_repo_parent = normalize_path(repo_parent);
+                if normalized_target == normalized_repo_parent && verbose {
+                    println!(
+                        "    {} Warning: Parent directory {} is symlinked to repo. ",
+                        "⚠".yellow(),
+                        parent.display()
+                    );
+                    println!(
+                        "    To convert to individual file symlinks, remove the directory symlink first."
+                    );
+                }
             }
-            std::fs::write(&file.dest_path, secret_mat.value.as_bytes())?;
-        } else if verbose {
-            println!(
-                "    [DRY RUN] Would write secret content to {}",
-                file.dest_path.display()
-            );
         }
+        fs_manager.create_dir_all(parent)?;
+    }
+    Ok(())
+}
 
-        // For secret files, tighten permissions on the destination.
-        if file.is_secret
-            && !fs_manager.is_dry_run
-            && let Err(e) = security::set_secure_permissions(&file.dest_path)
-        {
-            warn!(
-                "Could not set secure permissions on secret file {}: {}",
-                file.dest_path.display(),
-                e
-            );
-        }
+/// Handles the Replace strategy by copying files instead of creating symlinks.
+fn handle_replace_strategy(
+    file: &TrackedFile,
+    fs_manager: &mut FileSystemManager,
+    verbose: bool,
+) -> Result<()> {
+    let temp_path = file.dest_path.with_extension("flux-temp-copy");
+    if verbose {
+        println!("    Copying file instead of symlinking (Replace strategy)...");
+    }
 
-        if verbose && !fs_manager.is_dry_run {
+    // If this is a secret file with a secret_key, resolve the secret instead of copying
+    if file.is_secret && file.secret_key.is_some() {
+        write_secret_to_path(file, &temp_path, fs_manager, verbose)?;
+    } else {
+        fs_manager.copy(&file.repo_path, &temp_path)?;
+    }
+
+    fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
+
+    set_secret_permissions_if_needed(file, &file.dest_path, fs_manager);
+
+    if verbose && !fs_manager.is_dry_run {
+        if file.is_secret && file.secret_key.is_some() {
             println!(
                 "{} Wrote secret content to {}",
                 "✓".green(),
                 file.dest_path.display()
             );
+        } else {
+            println!(
+                "{} Copied {} -> {}",
+                "✓".green(),
+                file.repo_path.display(),
+                file.dest_path.display()
+            );
         }
-        return Ok(());
     }
+    Ok(())
+}
 
-    // Handle regular symlink creation (non-Replace strategies)
+/// Writes secret file content directly to the destination path.
+fn write_secret_file(
+    file: &TrackedFile,
+    fs_manager: &mut FileSystemManager,
+    verbose: bool,
+) -> Result<()> {
+    write_secret_to_path(file, &file.dest_path, fs_manager, verbose)?;
+    set_secret_permissions_if_needed(file, &file.dest_path, fs_manager);
+
+    if verbose && !fs_manager.is_dry_run {
+        println!(
+            "{} Wrote secret content to {}",
+            "✓".green(),
+            file.dest_path.display()
+        );
+    }
+    Ok(())
+}
+
+/// Writes secret content to a given path.
+fn write_secret_to_path(
+    file: &TrackedFile,
+    target_path: &Path,
+    fs_manager: &mut FileSystemManager,
+    verbose: bool,
+) -> Result<()> {
+    use crate::services::secrets::SecretsManager;
+    let secrets_mgr = SecretsManager::with_defaults();
+    let secret_key = file.secret_key.as_ref().ok_or_else(|| {
+        crate::utils::error::DotfilesError::Config("Secret file missing secret_key".to_string())
+    })?;
+    let secret_mat = secrets_mgr.resolve(file.secret_backend.as_deref(), secret_key)?;
+
+    if !fs_manager.is_dry_run {
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(target_path, secret_mat.value.as_bytes())?;
+    } else if verbose {
+        println!(
+            "    [DRY RUN] Would write secret content to {}",
+            target_path.display()
+        );
+    }
+    Ok(())
+}
+
+/// Sets secure permissions on secret files if needed.
+fn set_secret_permissions_if_needed(
+    file: &TrackedFile,
+    path: &Path,
+    fs_manager: &mut FileSystemManager,
+) {
+    if file.is_secret
+        && !fs_manager.is_dry_run
+        && let Err(error) = security::set_secure_permissions(path)
+    {
+        warn!(
+            "Could not set secure permissions on secret file {}: {}",
+            path.display(),
+            error
+        );
+    }
+}
+
+/// Computes the symlink target path based on the resolution strategy.
+fn compute_symlink_target(
+    file: &TrackedFile,
+    resolution: SymlinkResolution,
+    verbose: bool,
+) -> Result<std::path::PathBuf> {
     let link_target = match resolution {
-        // Compute symlink target based on resolution strategy
         SymlinkResolution::Auto => {
             if let Some(parent) = file.dest_path.parent() {
                 match pathdiff::diff_paths(&file.repo_path, parent) {
@@ -804,11 +941,18 @@ fn create_symlink_managed(
                 file.repo_path.clone()
             }
         }
-        SymlinkResolution::Replace => unreachable!(), // Handled above
+        SymlinkResolution::Replace => unreachable!(), // Handled earlier
     };
+    Ok(link_target)
+}
 
-    // Create symlink atomically using temporary path
-    // This prevents broken symlinks if the operation is interrupted
+/// Creates a symlink atomically using a temporary path.
+fn create_symlink_atomic(
+    file: &TrackedFile,
+    link_target: &Path,
+    fs_manager: &mut FileSystemManager,
+    verbose: bool,
+) -> Result<()> {
     let ext_str = file
         .dest_path
         .extension()
@@ -816,7 +960,7 @@ fn create_symlink_managed(
         .unwrap_or_default();
     let temp_link_path = file
         .dest_path
-        .with_extension(format!("{}.flux-temp", ext_str));
+        .with_extension(format!("{ext_str}.flux-temp"));
 
     if verbose {
         println!(
@@ -827,7 +971,7 @@ fn create_symlink_managed(
     }
     // Remove any existing temporary symlink from previous failed operations
     let _ = fs_manager.remove_file(&temp_link_path);
-    fs_manager.symlink(&link_target, &temp_link_path)?;
+    fs_manager.symlink(link_target, &temp_link_path)?;
 
     // Atomically rename temporary symlink to final destination
     if verbose {
@@ -843,12 +987,12 @@ fn create_symlink_managed(
     // the actual secret material.
     if file.is_secret
         && !fs_manager.is_dry_run
-        && let Err(e) = security::set_secure_permissions(&file.repo_path)
+        && let Err(error) = security::set_secure_permissions(&file.repo_path)
     {
         warn!(
             "Could not set secure permissions on secret repo file {}: {}",
             file.repo_path.display(),
-            e
+            error
         );
     }
 
@@ -872,9 +1016,9 @@ fn create_symlink_managed(
 ///
 /// Returns `Some(SyncResult::Skipped)` if the file is locked and should be skipped,
 /// or `None` if the file is not locked or lock check failed (continues processing).
-fn check_file_lock_status(file_path: &Path, verbose: bool) -> Result<Option<SyncResult>> {
+fn check_file_lock_status(file_path: &Path, verbose: bool) -> Option<SyncResult> {
     if !file_path.exists() {
-        return Ok(None);
+        return None;
     }
 
     match security::is_file_locked(file_path) {
@@ -895,20 +1039,20 @@ fn check_file_lock_status(file_path: &Path, verbose: bool) -> Result<Option<Sync
                     file_path.display()
                 );
             }
-            Ok(Some(SyncResult::Skipped))
+            Some(SyncResult::Skipped)
         }
         Ok(false) => {
             debug!("File {} is not locked", file_path.display());
-            Ok(None)
+            None
         }
-        Err(e) => {
+        Err(error) => {
             warn!(
                 "Could not check lock status for {}: {}",
                 file_path.display(),
-                e
+                error
             );
             debug!("Continuing despite lock check error");
-            Ok(None)
+            None
         }
     }
 }

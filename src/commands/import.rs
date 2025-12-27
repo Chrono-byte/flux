@@ -18,6 +18,11 @@ use std::path::Path;
 ///
 /// This function scans the stow directory and generates a flux config
 /// that mirrors the structure.
+///
+/// # Errors
+///
+/// Returns an error if the stow directory does not exist, is not a directory,
+/// or if there are issues writing the configuration file.
 pub fn import_stow(stow_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<()> {
     if !stow_dir.exists() {
         return Err(DotfilesError::Path(format!(
@@ -131,12 +136,17 @@ pub fn import_stow(stow_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
     config.save(true)?;
 
     println!("\n{} Import complete!", "✓".green());
-    println!("  {} tool(s) imported", tool_count);
+    println!("  {tool_count} tool(s) imported");
 
     Ok(())
 }
 
 /// Scan home directory for known dotfile patterns and suggest a config.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading the home directory or
+/// writing the configuration file.
 pub fn import_scan(home_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<()> {
     println!("{} Scanning home directory for dotfiles...", "→".cyan());
 
@@ -213,18 +223,20 @@ pub fn import_scan(home_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
         config.tools.insert(tool_name.clone(), tool_config);
 
         // Copy files from home to repo
-        for entry in &config.tools[&tool_name].files {
-            let home_file = home_dir.join(&entry.dest);
-            let repo_file = repo_path.join(&tool_name).join(&entry.repo);
+        if let Some(tool_config) = config.tools.get(&tool_name) {
+            for entry in &tool_config.files {
+                let home_file = home_dir.join(&entry.dest);
+                let repo_file = repo_path.join(&tool_name).join(&entry.repo);
 
-            if home_file.exists() {
-                if let Some(parent) = repo_file.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                if home_file.is_dir() {
-                    copy_dir_all(&home_file, &repo_file)?;
-                } else {
-                    fs::copy(&home_file, &repo_file)?;
+                if home_file.exists() {
+                    if let Some(parent) = repo_file.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    if home_file.is_dir() {
+                        copy_dir_all(&home_file, &repo_file)?;
+                    } else {
+                        fs::copy(&home_file, &repo_file)?;
+                    }
                 }
             }
         }
@@ -238,8 +250,11 @@ pub fn import_scan(home_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
     Ok(())
 }
 
-// Helper functions
-
+/// Collect files from a Stow directory.
+///
+/// # Errors
+///
+/// Returns an error if the relative path cannot be computed.
 fn collect_stow_files(
     base: &Path,
     current: &Path,
@@ -259,7 +274,7 @@ fn collect_stow_files(
             let dest_rel = if repo_rel.starts_with('.') {
                 repo_rel.clone()
             } else {
-                format!(".{}", repo_rel)
+                format!(".{repo_rel}")
             };
             files.push((repo_rel, dest_rel));
         } else if path.is_dir() {
@@ -269,6 +284,11 @@ fn collect_stow_files(
     Ok(())
 }
 
+/// Copy files from a Stow directory to a repository directory.
+///
+/// # Errors
+///
+/// Returns an error if the relative path cannot be computed.
 fn copy_stow_files(src: &Path, dst: &Path) -> Result<()> {
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -292,6 +312,11 @@ fn copy_stow_files(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Copy a directory and all its contents to a destination directory.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be created or if there are issues copying the files.
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {

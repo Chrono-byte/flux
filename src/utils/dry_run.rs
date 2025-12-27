@@ -5,49 +5,97 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub enum Operation {
     /// Create a symlink
-    CreateSymlink { from: PathBuf, to: PathBuf },
+    CreateSymlink {
+        /// Source path for the symlink.
+        from: PathBuf,
+        /// Destination path for the symlink.
+        to: PathBuf,
+    },
     /// Create a directory
-    CreateDirectory { path: PathBuf },
+    CreateDirectory {
+        /// Path of the directory to create.
+        path: PathBuf,
+    },
     /// Copy a file
-    CopyFile { from: PathBuf, to: PathBuf },
+    CopyFile {
+        /// Source file path.
+        from: PathBuf,
+        /// Destination file path.
+        to: PathBuf,
+    },
     /// Remove a file
-    RemoveFile { path: PathBuf },
+    RemoveFile {
+        /// Path of the file to remove.
+        path: PathBuf,
+    },
     /// Git commit operation
-    GitCommit { message: String },
+    GitCommit {
+        /// Commit message.
+        message: String,
+    },
     /// Git stage operation
-    GitStage { files: Vec<PathBuf> },
+    GitStage {
+        /// Files to stage.
+        files: Vec<PathBuf>,
+    },
     /// Add a git remote
-    GitRemoteAdd { name: String, url: String },
+    GitRemoteAdd {
+        /// Remote name.
+        name: String,
+        /// Remote URL.
+        url: String,
+    },
     /// Remove a git remote
-    GitRemoteRemove { name: String },
+    GitRemoteRemove {
+        /// Remote name to remove.
+        name: String,
+    },
     /// Set URL for a git remote
-    GitRemoteSetUrl { name: String, url: String },
+    GitRemoteSetUrl {
+        /// Remote name.
+        name: String,
+        /// New remote URL.
+        url: String,
+    },
     /// Push to git remote
     GitPush {
+        /// Remote name.
         remote: String,
+        /// Branch name.
         branch: String,
+        /// Whether to set upstream.
         set_upstream: bool,
     },
     /// Pull from git remote
-    GitPull { remote: String, branch: String },
+    GitPull {
+        /// Remote name.
+        remote: String,
+        /// Branch name.
+        branch: String,
+    },
 }
 
 /// Tracks operations for dry-run mode.
 pub struct DryRun {
+    /// Operations to perform.
     operations: Vec<Operation>,
 }
 
 impl DryRun {
+    /// Create a new dry-run tracker.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             operations: Vec::new(),
         }
     }
 
+    /// Log an operation for dry-run display.
     pub fn log_operation(&mut self, operation: Operation) {
         self.operations.push(operation);
     }
 
+    /// Display a summary of all logged operations.
     pub fn display_summary(&self) {
         if self.operations.is_empty() {
             println!("{}", "No operations to perform.".yellow());
@@ -63,7 +111,7 @@ impl DryRun {
         println!("{}", "=".repeat(60).cyan());
 
         for (i, op) in self.operations.iter().enumerate() {
-            println!("\n{}. {}", i + 1, format!("{:?}", op).bright_white());
+            println!("\n{}. {}", i + 1, format!("{op:?}").bright_white());
             match op {
                 Operation::CreateSymlink { from, to } => {
                     println!(

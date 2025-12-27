@@ -1,8 +1,14 @@
+/// Diff utilities for comparing file states.
 pub mod diff;
+/// Git operations and repository management.
 pub mod git;
+/// History tracking for operations.
 pub mod history;
+/// Hook execution for pre/post operations.
 pub mod hooks;
+/// Secret management and backend resolution.
 pub mod secrets;
+/// Transaction management for atomic operations.
 pub mod transactions;
 pub use diff::unified_diff;
 pub use git::{

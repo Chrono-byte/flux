@@ -4,13 +4,24 @@ use colored::Colorize;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use std::path::Path;
 
+/// Type of conflict resolution.
+#[derive(Debug, Clone)]
 pub enum ConflictResolution {
+    /// Backup and replace the conflicting file.
     BackupAndReplace,
+    /// Skip the conflicting file.
     Skip,
+    /// View the diff of the conflicting file.
     ViewDiff,
+    /// Cancel the operation.
     Cancel,
 }
 
+/// Prompt the user for a conflict resolution.
+///
+/// # Errors
+///
+/// Returns an error if the user cannot be prompted.
 pub fn prompt_conflict(file_path: &Path) -> Result<ConflictResolution> {
     let options = vec!["Backup and replace", "Skip", "View diff", "Cancel"];
 
@@ -22,7 +33,7 @@ pub fn prompt_conflict(file_path: &Path) -> Result<ConflictResolution> {
         .items(&options)
         .default(0)
         .interact()
-        .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
+        .map_err(|error| DotfilesError::Io(std::io::Error::other(error)))?;
 
     match selection {
         0 => Ok(ConflictResolution::BackupAndReplace),
@@ -33,6 +44,11 @@ pub fn prompt_conflict(file_path: &Path) -> Result<ConflictResolution> {
     }
 }
 
+/// Prompt the user for a yes/no answer.
+///
+/// # Errors
+///
+/// Returns an error if the prompt interaction fails.
 pub fn prompt_yes_no(question: &str) -> Result<bool> {
     let options = vec!["Yes", "No"];
 
@@ -41,11 +57,16 @@ pub fn prompt_yes_no(question: &str) -> Result<bool> {
         .items(&options)
         .default(0)
         .interact()
-        .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
+        .map_err(|error| DotfilesError::Io(std::io::Error::other(error)))?;
 
     Ok(selection == 0)
 }
 
+/// Prompt the user for a commit message.
+///
+/// # Errors
+///
+/// Returns an error if the prompt interaction fails.
 pub fn prompt_commit_message(changes: &[FileChange]) -> Result<String> {
     if changes.is_empty() {
         return Ok("Update dotfiles".to_string());
@@ -80,7 +101,7 @@ pub fn prompt_commit_message(changes: &[FileChange]) -> Result<String> {
         .with_prompt(prompt_text)
         .allow_empty(true)
         .interact_text()
-        .map_err(|e| DotfilesError::Io(std::io::Error::other(e)))?;
+        .map_err(|error| DotfilesError::Io(std::io::Error::other(error)))?;
 
     // --- 3. Handle the response ---
     Ok(if message.trim().is_empty() {

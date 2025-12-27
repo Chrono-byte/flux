@@ -4,8 +4,13 @@ use crate::utils::error_utils;
 use colored::Colorize;
 use std::path::PathBuf;
 
+/// Create a new profile directory in the repository.
+///
+/// # Errors
+///
+/// Returns an error if there are issues creating the directory or accessing the repository.
 pub fn create_profile(config: &mut Config, name: &str) -> Result<()> {
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
     let profile_dir = repo_path.join("profiles").join(name);
 
     std::fs::create_dir_all(&profile_dir)?;
@@ -14,9 +19,14 @@ pub fn create_profile(config: &mut Config, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Switch to a different profile.
+///
+/// # Errors
+///
+/// Returns an error if the profile does not exist or there are issues saving the configuration.
 pub fn switch_profile(config: &mut Config, name: &str) -> Result<()> {
     // Verify profile exists
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
     let profile_dir = repo_path.join("profiles").join(name);
 
     if !profile_dir.exists() {
@@ -31,8 +41,13 @@ pub fn switch_profile(config: &mut Config, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// List all available profiles in the repository.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading the repository directory.
 pub fn list_profiles(config: &Config) -> Result<Vec<String>> {
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
     let profiles_dir = repo_path.join("profiles");
 
     if !profiles_dir.exists() {
@@ -53,8 +68,13 @@ pub fn list_profiles(config: &Config) -> Result<Vec<String>> {
     Ok(profiles)
 }
 
+/// Get all files associated with a specific profile.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading the profile directory.
 pub fn get_profile_files(config: &Config, profile: &str) -> Result<Vec<(PathBuf, PathBuf)>> {
-    let repo_path = config.get_repo_path()?;
+    let repo_path = config.get_repo_path();
     let profile_dir = repo_path.join("profiles").join(profile);
 
     if !profile_dir.exists() {

@@ -5,6 +5,7 @@ use crate::utils::path_utils::{
     files_differ, resolve_symlink_target, symlink_points_to_correct_target,
 };
 use colored::Colorize;
+use std::collections::HashMap;
 use std::fs;
 
 /// A discrepancy found in a tracked file.
@@ -17,6 +18,7 @@ pub struct Discrepancy {
     pub message: String,
 }
 
+/// Type of issue detected in a tracked file.
 #[derive(Debug, Clone)]
 pub enum IssueType {
     /// File doesn't exist at expected location
@@ -33,6 +35,11 @@ pub enum IssueType {
     BrokenSymlink,
 }
 
+/// Find discrepancies between tracked files and actual filesystem state.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 pub fn find_discrepancies(config: &Config, profile: Option<&str>) -> Result<Vec<Discrepancy>> {
     let tracked_files = config.get_tracked_files(profile)?;
     let mut discrepancies = Vec::new();
@@ -44,16 +51,22 @@ pub fn find_discrepancies(config: &Config, profile: Option<&str>) -> Result<Vec<
     }
 
     // Sort by tool, then by path
-    discrepancies.sort_by(|a, b| {
-        a.file
+    discrepancies.sort_by(|first, second| {
+        first
+            .file
             .tool
-            .cmp(&b.file.tool)
-            .then_with(|| a.file.dest_path.cmp(&b.file.dest_path))
+            .cmp(&second.file.tool)
+            .then_with(|| first.file.dest_path.cmp(&second.file.dest_path))
     });
 
     Ok(discrepancies)
 }
 
+/// Check if a file has a discrepancy with the tracked file.
+///
+/// # Errors
+///
+/// Returns an error if there are issues reading files or the configuration.
 fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
     // First check: repo file exists
     if !file.repo_path.exists() {
@@ -113,12 +126,16 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
                 // For symlinks, we consider them correct if they point to the right place
                 Ok(None)
             }
-            Err(e) => {
+            Err(error) => {
                 // Can't read symlink - treat as broken
                 Ok(Some(Discrepancy {
                     file: file.clone(),
                     issue: IssueType::BrokenSymlink,
-                    message: format!("Cannot read symlink: {} ({})", file.dest_path.display(), e),
+                    message: format!(
+                        "Cannot read symlink: {} ({})",
+                        file.dest_path.display(),
+                        error
+                    ),
                 }))
             }
         }
@@ -150,6 +167,7 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
     }
 }
 
+/// Display the discrepancies found in the tracked files.
 pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
     if discrepancies.is_empty() {
         println!(
@@ -163,7 +181,6 @@ pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
     println!("{}", "=".repeat(80).red());
 
     // Group by tool
-    use std::collections::HashMap;
     let mut by_tool: HashMap<String, Vec<&Discrepancy>> = HashMap::new();
     for discrepancy in discrepancies {
         by_tool
@@ -175,8 +192,9 @@ pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
     let mut tool_names: Vec<_> = by_tool.keys().collect();
     tool_names.sort();
 
+    let empty_vec = Vec::new();
     for tool in tool_names {
-        let tool_discrepancies = &by_tool[tool];
+        let tool_discrepancies = by_tool.get(tool).unwrap_or(&empty_vec);
         println!(
             "\n{} {} ({} issue(s))",
             "Tool:".bold().yellow(),
@@ -188,14 +206,13 @@ pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
             let icon = match discrepancy.issue {
                 IssueType::Missing => "⊘".red(),
                 IssueType::NotSymlink => "⚠".yellow(),
-                IssueType::WrongTarget => "↻".yellow(),
-                IssueType::ContentDiffers => "↻".yellow(),
+                IssueType::WrongTarget | IssueType::ContentDiffers => "↻".yellow(),
                 IssueType::MissingRepo => "✗".red(),
                 IssueType::BrokenSymlink => "⚠".red(),
             };
 
             let profile_info = if let Some(profile) = &discrepancy.file.profile {
-                format!(" [profile: {}]", profile).yellow()
+                format!(" [profile: {profile}]").yellow()
             } else {
                 "".normal()
             };

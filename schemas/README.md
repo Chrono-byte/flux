@@ -97,6 +97,7 @@ Note: This depends on your editor's TOML language server support.
 ### Other Editors
 
 Most modern editors support JSON schemas for TOML files. Check your editor's documentation for:
+
 - TOML language server support
 - JSON schema association for TOML files
 - Configuration file validation
@@ -122,4 +123,3 @@ Once configured, when editing `config.toml`, you'll get:
 ## Updating the Schema
 
 If the configuration format changes, update `config.schema.json` to match the new structure. The schema follows JSON Schema Draft 7 specification.
-

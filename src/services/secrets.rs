@@ -7,6 +7,7 @@ use std::collections::HashMap;
 /// extended to support binary data or streaming.
 #[derive(Debug, Clone)]
 pub struct SecretMaterial {
+    /// The secret value as a string.
     pub value: String,
 }
 
@@ -16,6 +17,10 @@ pub trait SecretBackend: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Resolve a logical key to secret material.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the secret cannot be resolved by this backend.
     fn resolve(&self, key: &str) -> Result<SecretMaterial>;
 
     /// Whether this backend can handle the given backend identifier.
@@ -37,11 +42,10 @@ impl SecretBackend for EnvSecretBackend {
 
     fn resolve(&self, key: &str) -> Result<SecretMaterial> {
         let value = match std::env::var(key) {
-            Ok(v) => v,
-            Err(e) => {
+            Ok(value) => value,
+            Err(error) => {
                 return Err(crate::utils::error::DotfilesError::Config(format!(
-                    "Failed to read secret from environment variable '{}': {}",
-                    key, e
+                    "Failed to read secret from environment variable '{key}': {error}"
                 )));
             }
         };
@@ -51,11 +55,13 @@ impl SecretBackend for EnvSecretBackend {
 
 /// Manager that dispatches to the appropriate backend.
 pub struct SecretsManager {
+    /// List of secret backends available for resolution.
     backends: Vec<Box<dyn SecretBackend>>,
 }
 
 impl SecretsManager {
     /// Create a manager with the default set of backends.
+    #[must_use]
     pub fn with_defaults() -> Self {
         let backends: Vec<Box<dyn SecretBackend>> = vec![Box::new(EnvSecretBackend)];
         Self { backends }
@@ -63,11 +69,15 @@ impl SecretsManager {
 
     /// Resolve a secret using the requested backend (or fall back to any that
     /// support the key).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no backend can resolve the secret, or if the resolution fails.
     pub fn resolve(&self, backend: Option<&str>, key: &str) -> Result<SecretMaterial> {
         // Try specific backend first if provided.
-        if let Some(b) = backend {
+        if let Some(backend_name) = backend {
             for be in &self.backends {
-                if be.supports_backend(b) {
+                if be.supports_backend(backend_name) {
                     return be.resolve(key);
                 }
             }
@@ -81,12 +91,15 @@ impl SecretsManager {
         }
 
         Err(crate::utils::error::DotfilesError::Config(format!(
-            "No secret backend available that can resolve key '{}'",
-            key
+            "No secret backend available that can resolve key '{key}'"
         )))
     }
 
     /// Convenience helper to resolve multiple secrets into a map.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any secret cannot be resolved.
     pub fn resolve_many(
         &self,
         backend: Option<&str>,

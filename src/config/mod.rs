@@ -1,4 +1,6 @@
+/// Command-line interface configuration.
 pub mod cli;
+/// Profile management functionality.
 pub mod profile;
 
 pub use cli::EnvironmentConfig;
@@ -10,7 +12,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::types::{ConditionSpec, EnvironmentSpec, FileEntry, SymlinkResolution};
+use crate::types::{ConditionSpec, FileEntry, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
 
 /// General configuration settings.
@@ -66,17 +68,16 @@ pub struct ToolConfig {
     pub files: Vec<FileEntry>,
 }
 
+/// Configuration for the Flux dotfiles manager.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
+    /// General configuration
     pub general: GeneralConfig,
+    /// Tools configuration
     #[serde(default)]
     pub tools: HashMap<String, ToolConfig>,
 
-    // ==================== New Declarative System Layer ====================
-    /// Environment configuration (e.g., [environment])
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<EnvironmentSpec>,
-    /// Hooks configuration for pre/post operations
+    /// Hooks configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hooks: Option<crate::types::HooksConfig>,
 }
@@ -86,6 +87,10 @@ impl Config {
     ///
     /// Checks `DOTFILES_CONFIG` environment variable first. XDG config
     /// (`~/.config/flux/config.toml`) is authoritative and overwrites repo version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration file cannot be loaded.
     pub fn load() -> Result<Self> {
         // Check for custom config path from environment variable
         let config_path = if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
@@ -100,16 +105,15 @@ impl Config {
                 let repo_config = Self::get_repo_config_path()?;
                 // Create parent directory if needed
                 if let Some(parent) = repo_config.parent() {
-                    fs::create_dir_all(parent).map_err(|e| {
+                    fs::create_dir_all(parent).map_err(|error| {
                         DotfilesError::Config(format!(
-                            "Failed to create repo config directory: {}",
-                            e
+                            "Failed to create repo config directory: {error}"
                         ))
                     })?;
                 }
                 // Copy XDG config to repo to keep them in sync
-                fs::copy(&xdg_config, &repo_config).map_err(|e| {
-                    DotfilesError::Config(format!("Failed to copy XDG config to repo: {}", e))
+                fs::copy(&xdg_config, &repo_config).map_err(|error| {
+                    DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
                 })?;
                 return Ok(config);
             }
@@ -132,7 +136,10 @@ impl Config {
 
         // Detect include cycles
         if visited.contains(&config_path) {
-            let mut chain: Vec<String> = visited.iter().map(|p| p.display().to_string()).collect();
+            let mut chain: Vec<String> = visited
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
             chain.push(config_path.display().to_string());
             return Err(DotfilesError::Config(format!(
                 "Detected configuration include cycle: {}",
@@ -149,28 +156,27 @@ impl Config {
                 config.save(false)?;
                 visited.pop();
                 return Ok(config);
-            } else {
-                visited.pop();
-                return Err(DotfilesError::Config(format!(
-                    "Included config file does not exist: {}",
-                    config_path.display()
-                )));
             }
+            visited.pop();
+            return Err(DotfilesError::Config(format!(
+                "Included config file does not exist: {}",
+                config_path.display()
+            )));
         }
 
-        let content = fs::read_to_string(&config_path).map_err(|e| {
+        let content = fs::read_to_string(&config_path).map_err(|error| {
             DotfilesError::Config(format!(
                 "Failed to read config {}: {}",
                 config_path.display(),
-                e
+                error
             ))
         })?;
 
-        let mut current: Config = toml::from_str(&content).map_err(|e| {
+        let mut current: Config = toml::from_str(&content).map_err(|error| {
             DotfilesError::Config(format!(
                 "Failed to parse config {}: {}",
                 config_path.display(),
-                e
+                error
             ))
         })?;
 
@@ -178,12 +184,12 @@ impl Config {
         let mut merged: Option<Config> = None;
         if let Some(include_paths) = current.general.include.clone() {
             let base_dir = match config_path.parent() {
-                Some(p) => PathBuf::from(p),
+                Some(path) => PathBuf::from(path),
                 None => PathBuf::from("."),
             };
 
             for raw in include_paths {
-                let include_path = Self::resolve_include_path(&base_dir, &raw)?;
+                let include_path = Self::resolve_include_path(&base_dir, &raw);
                 let included = Self::load_from_path(&include_path, visited)?;
                 merged = Some(match merged {
                     Some(base) => Self::merge_configs(base, included),
@@ -208,6 +214,12 @@ impl Config {
         Ok(result)
     }
 
+    /// Save the configuration to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are issues writing the configuration file or
+    /// if validation fails.
     pub fn save(&self, validate: bool) -> Result<()> {
         if validate {
             self.validate()?;
@@ -228,15 +240,15 @@ impl Config {
         // Use toml_edit to preserve comments and formatting
         let mut doc = if config_path.exists() {
             // Read existing file to preserve comments
-            let content = fs::read_to_string(&config_path).map_err(|e| {
+            let content = fs::read_to_string(&config_path).map_err(|error| {
                 DotfilesError::Config(format!(
                     "Failed to read config {}: {}",
                     config_path.display(),
-                    e
+                    error
                 ))
             })?;
-            content.parse::<toml_edit::DocumentMut>().map_err(|e| {
-                DotfilesError::Config(format!("Failed to parse existing config: {}", e))
+            content.parse::<toml_edit::DocumentMut>().map_err(|error| {
+                DotfilesError::Config(format!("Failed to parse existing config: {error}"))
             })?
         } else {
             // Create new document
@@ -244,11 +256,14 @@ impl Config {
         };
 
         // Serialize current config to TOML and merge into existing document
-        let new_toml = toml::to_string_pretty(self)
-            .map_err(|e| DotfilesError::Config(format!("Failed to serialize config: {}", e)))?;
-        let mut new_doc = new_toml.parse::<toml_edit::DocumentMut>().map_err(|e| {
-            DotfilesError::Config(format!("Failed to parse serialized config: {}", e))
+        let new_toml = toml::to_string_pretty(self).map_err(|error| {
+            DotfilesError::Config(format!("Failed to serialize config: {error}"))
         })?;
+        let mut new_doc = new_toml
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|error| {
+                DotfilesError::Config(format!("Failed to parse serialized config: {error}"))
+            })?;
 
         // Manually format tools section to use per-tool format [tools.X] files = [...]
         // instead of array-of-tables [[tools.X.files]]
@@ -270,13 +285,15 @@ impl Config {
             let repo_config = Self::get_repo_config_path()?;
             // Create parent directory if needed
             if let Some(parent) = repo_config.parent() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    DotfilesError::Config(format!("Failed to create repo config directory: {}", e))
+                fs::create_dir_all(parent).map_err(|error| {
+                    DotfilesError::Config(format!(
+                        "Failed to create repo config directory: {error}"
+                    ))
                 })?;
             }
             // Copy XDG config to repo to keep them in sync
-            fs::copy(&xdg_config, &repo_config).map_err(|e| {
-                DotfilesError::Config(format!("Failed to copy XDG config to repo: {}", e))
+            fs::copy(&xdg_config, &repo_config).map_err(|error| {
+                DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
             })?;
         }
 
@@ -297,8 +314,8 @@ impl Config {
 
         for (tool_name, tool_config) in tools {
             // Create table for this tool
-            let mut tool_table = Table::new();
-            tool_table.set_implicit(true);
+            let mut current_tool_table = Table::new();
+            current_tool_table.set_implicit(true);
 
             // Create array of file entries
             let mut files_array = Array::new();
@@ -331,8 +348,8 @@ impl Config {
                 files_array.push_formatted(Value::InlineTable(file_table));
             }
 
-            tool_table.insert("files", Item::Value(Value::Array(files_array)));
-            tools_table.insert(tool_name, Item::Table(tool_table));
+            current_tool_table.insert("files", Item::Value(Value::Array(files_array)));
+            tools_table.insert(tool_name, Item::Table(current_tool_table));
         }
 
         doc.insert("tools", Item::Table(tools_table));
@@ -347,7 +364,11 @@ impl Config {
             .iter()
             .filter_map(|(key, _)| {
                 // Check for keys like "tools.cursor.files" (array-of-tables format)
-                if key.starts_with("tools.") && key.ends_with(".files") {
+                if key.starts_with("tools.")
+                    && std::path::Path::new(key)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("files"))
+                {
                     Some(key.to_string())
                 } else {
                     None
@@ -387,7 +408,7 @@ impl Config {
 
     /// Recursively merge two TOML tables.
     fn merge_toml_tables(target: &mut toml_edit::Table, source: &toml_edit::Table) {
-        for (key, source_item) in source.iter() {
+        for (key, source_item) in source {
             let target_item = target.get_mut(key);
             match (target_item, source_item) {
                 (Some(target_item), toml_edit::Item::Table(_)) => {
@@ -414,6 +435,10 @@ impl Config {
     ///
     /// Checks locations in order: `DOTFILES_CONFIG` env var (handled in `load()`),
     /// `~/.config/flux/config.toml` (authoritative), `~/.dotfiles/config.toml` (fallback).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory or home directory cannot be found.
     pub fn get_config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
@@ -438,6 +463,10 @@ impl Config {
     }
 
     /// Get the XDG config path (authoritative location)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config directory cannot be found.
     pub fn get_xdg_config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
@@ -451,11 +480,20 @@ impl Config {
         Ok(home.join(".dotfiles").join("config.toml"))
     }
 
-    pub fn get_repo_path(&self) -> Result<PathBuf> {
+    /// Get the repository path, expanding ~ if present.
+    ///
+    /// Get the repository path, expanding `~` to the home directory.
+    #[must_use]
+    pub fn get_repo_path(&self) -> PathBuf {
         let expanded = shellexpand::tilde(&self.general.repo_path).into_owned();
-        Ok(PathBuf::from(expanded))
+        PathBuf::from(expanded)
     }
 
+    /// Get the backup directory path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backup directory cannot be determined.
     pub fn get_backup_dir(&self) -> Result<PathBuf> {
         let backup_dir = if let Some(ref dir) = self.general.backup_dir {
             shellexpand::tilde(dir).into_owned()
@@ -473,6 +511,11 @@ impl Config {
         Ok(PathBuf::from(backup_dir))
     }
 
+    /// Validate that the configuration is correct.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration has invalid values.
     pub fn validate(&self) -> Result<()> {
         if self.general.repo_path.is_empty() {
             return Err(DotfilesError::Config(
@@ -490,7 +533,7 @@ impl Config {
             .general
             .current_profile
             .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            .all(|char| char.is_alphanumeric() || char == '_' || char == '-')
         {
             return Err(DotfilesError::Config(format!(
                 "Invalid profile name '{}': only alphanumeric, underscore, and hyphen allowed",
@@ -501,19 +544,22 @@ impl Config {
         Ok(())
     }
 
+    /// Add a file to a tool's configuration.
+    ///
+    /// Add a file entry to a tool configuration.
     pub fn add_file_to_tool(
         &mut self,
         tool: &str,
         repo_file: &str,
         dest_path: &Path,
         profile: Option<&str>,
-    ) -> Result<()> {
+    ) {
         let dest_str = dest_path.to_string_lossy().to_string();
 
         let entry = FileEntry {
             repo: repo_file.to_string(),
             dest: dest_str,
-            profile: profile.map(|p| p.to_string()),
+            profile: profile.map(std::string::ToString::to_string),
             conditions: None,
             secret: false,
             secret_backend: None,
@@ -525,22 +571,26 @@ impl Config {
             .or_insert(ToolConfig { files: Vec::new() })
             .files
             .push(entry);
-
-        Ok(())
     }
 
+    /// Get all tracked files for the given profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are issues reading the repository path or
+    /// if file paths are invalid.
     pub fn get_tracked_files(
         &self,
         profile: Option<&str>,
     ) -> Result<Vec<crate::types::TrackedFile>> {
-        let repo_path = self.get_repo_path()?;
+        let repo_path = self.get_repo_path();
         let current_profile = match profile {
-            Some(p) => p,
+            Some(path) => path,
             None => &self.general.current_profile,
         };
 
         // Build template context once per call for deterministic rendering.
-        let template_context = self.build_template_context(current_profile)?;
+        let template_context = Self::build_template_context(current_profile);
 
         let mut tracked_files = Vec::new();
 
@@ -563,22 +613,22 @@ impl Config {
 
                 // Render templates in repo and dest paths, if any
                 let rendered_repo =
-                    Self::render_template(&file.repo, &template_context).map_err(|e| {
+                    Self::render_template(&file.repo, &template_context).map_err(|error| {
                         DotfilesError::Config(format!(
                             "Failed to render template for repo path '{}': {}",
-                            file.repo, e
+                            file.repo, error
                         ))
                     })?;
                 let rendered_dest =
-                    Self::render_template(&file.dest, &template_context).map_err(|e| {
+                    Self::render_template(&file.dest, &template_context).map_err(|error| {
                         DotfilesError::Config(format!(
                             "Failed to render template for dest path '{}': {}",
-                            file.dest, e
+                            file.dest, error
                         ))
                     })?;
 
                 // Handle both cases: repo may or may not include the tool name prefix
-                let repo_file_path = if rendered_repo.starts_with(&format!("{}/", tool)) {
+                let repo_file_path = if rendered_repo.starts_with(&format!("{tool}/")) {
                     // repo already includes tool name (e.g., "cursor/settings.json")
                     repo_path.join(&rendered_repo)
                 } else {
@@ -608,10 +658,7 @@ impl Config {
     }
 
     /// Build the template context used for rendering repo/dest paths.
-    fn build_template_context(
-        &self,
-        current_profile: &str,
-    ) -> Result<std::collections::HashMap<String, String>> {
+    fn build_template_context(current_profile: &str) -> std::collections::HashMap<String, String> {
         use std::collections::HashMap;
 
         let mut values: HashMap<String, String> = HashMap::new();
@@ -634,17 +681,7 @@ impl Config {
         values.insert("profile".to_string(), current_profile.to_string());
         values.insert("os".to_string(), std::env::consts::OS.to_string());
 
-        // Merge values from [environment] section, if present
-        if let Some(env_spec) = &self.environment {
-            for (k, v) in &env_spec.variables {
-                values.insert(k.clone(), v.clone());
-            }
-            for (k, v) in &env_spec.values {
-                values.insert(k.clone(), v.clone());
-            }
-        }
-
-        Ok(values)
+        values
     }
 
     /// Very small, deterministic template renderer supporting `{{ var }}` placeholders.
@@ -663,7 +700,7 @@ impl Config {
             output.push_str(&rest[..start]);
             let after_start = &rest[start + 2..];
             let end_rel = after_start.find("}}").ok_or_else(|| {
-                DotfilesError::Config(format!("Unclosed template variable in '{}'", input))
+                DotfilesError::Config(format!("Unclosed template variable in '{input}'"))
             })?;
             let key_raw = &after_start[..end_rel];
             let key = key_raw.trim();
@@ -674,7 +711,7 @@ impl Config {
             }
 
             let value = values.get(key).ok_or_else(|| {
-                DotfilesError::Config(format!("Unknown template variable '{{{{{}}}}}'", key))
+                DotfilesError::Config(format!("Unknown template variable '{{{{{key}}}}}'"))
             })?;
             output.push_str(value);
 
@@ -686,6 +723,7 @@ impl Config {
     }
 
     /// Determine if a set of conditions matches the current runtime environment.
+    #[must_use]
     pub fn conditions_match(conditions: &ConditionSpec) -> bool {
         // OS check
         if !conditions.os.is_empty() {
@@ -709,14 +747,13 @@ impl Config {
 
         // Hostname check
         if !conditions.host.is_empty() {
-            let hostname = match Self::detect_hostname() {
-                Ok(name) => name,
-                Err(_) => return false,
+            let Ok(hostname) = Self::detect_hostname() else {
+                return false;
             };
             if !conditions
                 .host
                 .iter()
-                .any(|h| h.eq_ignore_ascii_case(&hostname))
+                .any(|hostname_item| hostname_item.eq_ignore_ascii_case(&hostname))
             {
                 return false;
             }
@@ -789,7 +826,7 @@ impl Config {
     }
 
     /// Resolve an include path relative to a base directory, supporting `~` expansion.
-    fn resolve_include_path(base_dir: &Path, raw: &str) -> Result<PathBuf> {
+    fn resolve_include_path(base_dir: &Path, raw: &str) -> PathBuf {
         use shellexpand::tilde;
 
         // Expand leading ~
@@ -801,9 +838,9 @@ impl Config {
 
         let path = PathBuf::from(&expanded);
         if path.is_absolute() {
-            Ok(path)
+            path
         } else {
-            Ok(base_dir.join(path))
+            base_dir.join(path)
         }
     }
 
@@ -821,17 +858,16 @@ impl Config {
                 .extend(tool_cfg.files);
         }
 
-        // Environment: overlay wins if present.
-        if overlay.environment.is_some() {
-            base.environment = overlay.environment;
-        }
-
         base
     }
 
     /// Sync XDG config to repo (overwrite repo config with XDG config).
     ///
     /// Useful for manually forcing sync when XDG config is authoritative.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are issues reading or writing configuration files.
     pub fn sync_xdg_to_repo(dry_run: bool) -> Result<()> {
         let xdg_config = Self::get_xdg_config_path()?;
         let repo_config = Self::get_repo_config_path()?;
@@ -854,14 +890,14 @@ impl Config {
 
         // Create parent directory if needed
         if let Some(parent) = repo_config.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                DotfilesError::Config(format!("Failed to create repo config directory: {}", e))
+            fs::create_dir_all(parent).map_err(|error| {
+                DotfilesError::Config(format!("Failed to create repo config directory: {error}"))
             })?;
         }
 
         // Copy XDG config to repo
-        fs::copy(&xdg_config, &repo_config).map_err(|e| {
-            DotfilesError::Config(format!("Failed to copy XDG config to repo: {}", e))
+        fs::copy(&xdg_config, &repo_config).map_err(|error| {
+            DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
         })?;
 
         println!(

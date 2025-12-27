@@ -25,6 +25,8 @@ pub struct HookResult {
 
 /// Execute a single hook command.
 ///
+/// # Errors
+///
 /// Returns an error if the command fails to start or times out.
 /// The hook's exit code is captured in the result.
 pub fn execute_hook(
@@ -49,10 +51,11 @@ pub fn execute_hook(
     }
 
     // Determine shell to use
-    let shell_cmd = if let Some(s) = shell {
-        s
-    } else if let Some(env) = config.environment.as_ref() {
-        env.shell.as_deref().unwrap_or("/bin/sh")
+    let shell_cmd = if let Some(shell_str) = shell {
+        shell_str
+    } else if let Some(_hooks_config) = &config.hooks {
+        // HooksConfig doesn't currently have a shell field, default to /bin/sh
+        "/bin/sh"
     } else {
         "/bin/sh"
     };
@@ -70,10 +73,10 @@ pub fn execute_hook(
     // Execute with timeout
     let output = match cmd.output() {
         Ok(output) => output,
-        Err(e) => {
+        Err(error) => {
             return Err(DotfilesError::Config(format!(
                 "Failed to execute hook '{}': {}",
-                hook.command, e
+                hook.command, error
             )));
         }
     };
@@ -109,6 +112,10 @@ pub fn execute_hook(
 /// Execute a list of hooks sequentially.
 ///
 /// Stops on first failure if `fail_fast` is true.
+///
+/// # Errors
+///
+/// Returns an error if a hook fails and `fail_fast` is true, or if there are issues executing hooks.
 pub fn execute_hooks(
     hooks: &[HookCommand],
     config: &Config,
