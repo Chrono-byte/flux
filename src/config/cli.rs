@@ -71,11 +71,11 @@ impl LogLevel {
     /// Returns an error if the log level string is invalid.
     pub fn from_env(input_str: &str) -> Result<Self> {
         match input_str.to_lowercase().as_str() {
-            "trace" => Ok(LogLevel::Trace),
-            "debug" => Ok(LogLevel::Debug),
-            "info" => Ok(LogLevel::Info),
-            "warn" => Ok(LogLevel::Warn),
-            "error" => Ok(LogLevel::Error),
+            "trace" => Ok(Self::Trace),
+            "debug" => Ok(Self::Debug),
+            "info" => Ok(Self::Info),
+            "warn" => Ok(Self::Warn),
+            "error" => Ok(Self::Error),
             _ => Err(DotfilesError::Config(format!(
                 "Invalid log level '{input_str}'. Supported values: trace, debug, info, warn, error"
             ))),
@@ -84,13 +84,13 @@ impl LogLevel {
 
     /// Convert to string for log configuration
     #[must_use]
-    pub fn to_string(self) -> &'static str {
+    pub const fn to_string(self) -> &'static str {
         match self {
-            LogLevel::Trace => "trace",
-            LogLevel::Debug => "debug",
-            LogLevel::Info => "info",
-            LogLevel::Warn => "warn",
-            LogLevel::Error => "error",
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
         }
     }
 }
@@ -114,9 +114,9 @@ impl LogFormat {
     /// Returns an error if the log format string is invalid.
     pub fn from_env(input_str: &str) -> Result<Self> {
         match input_str.to_lowercase().as_str() {
-            "default" => Ok(LogFormat::Default),
-            "json" => Ok(LogFormat::Json),
-            "compact" => Ok(LogFormat::Compact),
+            "default" => Ok(Self::Default),
+            "json" => Ok(Self::Json),
+            "compact" => Ok(Self::Compact),
             _ => Err(DotfilesError::Config(format!(
                 "Invalid log format '{input_str}'. Supported values: default, json, compact"
             ))),
@@ -125,11 +125,11 @@ impl LogFormat {
 
     /// Convert to string
     #[must_use]
-    pub fn to_string(self) -> &'static str {
+    pub const fn to_string(self) -> &'static str {
         match self {
-            LogFormat::Default => "default",
-            LogFormat::Json => "json",
-            LogFormat::Compact => "compact",
+            Self::Default => "default",
+            Self::Json => "json",
+            Self::Compact => "compact",
         }
     }
 }
@@ -157,7 +157,7 @@ impl EnvironmentConfig {
     ///
     /// Returns an error if any environment variable has an invalid value.
     pub fn load() -> Result<Self> {
-        let mut config = EnvironmentConfig::default();
+        let mut config = Self::default();
 
         // Load config file path from environment
         if let Ok(config_path_str) = env::var(env_keys::CONFIG_FILE) {
@@ -209,10 +209,7 @@ impl EnvironmentConfig {
             debug!(
                 "Git username loaded from {} (length: {} chars)",
                 env_keys::GIT_USERNAME,
-                config
-                    .git_username
-                    .as_ref()
-                    .map_or(0, std::string::String::len)
+                config.git_username.as_ref().map_or(0, String::len)
             );
         }
 
@@ -227,10 +224,7 @@ impl EnvironmentConfig {
             debug!(
                 "Git password loaded from {} (length: {} chars)",
                 env_keys::GIT_PASSWORD,
-                config
-                    .git_password
-                    .as_ref()
-                    .map_or(0, std::string::String::len)
+                config.git_password.as_ref().map_or(0, String::len)
             );
         }
 

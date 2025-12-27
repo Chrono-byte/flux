@@ -168,19 +168,15 @@ pub fn display_diffs(diff: &StateDiff) {
 
     if !secret_files.is_empty() {
         // Batch resolve all secrets using resolve_many
-        let secret_keys: Vec<String> = secret_files
-            .iter()
-            .filter_map(|file| file.secret_key.clone())
-            .collect();
+        let secret_keys: Vec<String> =
+            secret_files.iter().filter_map(|file| file.secret_key.clone()).collect();
 
         if let Ok(resolved_secrets) = secrets_mgr.resolve_many(
-            secret_files
-                .first()
-                .and_then(|file| file.secret_backend.as_deref()),
+            secret_files.first().and_then(|file| file.secret_backend.as_deref()),
             &secret_keys,
         ) {
             for (key, material) in resolved_secrets {
-                secret_cache.insert(key, material.value);
+                let _ = secret_cache.insert(key, material.value);
             }
         }
     }
@@ -319,7 +315,7 @@ pub fn apply_config(options: &ApplyOptions<'_>) -> Result<()> {
     run_post_apply_hooks(options)?;
 
     // Record history event
-    let profile_str = options.profile.map(std::string::ToString::to_string);
+    let profile_str = options.profile.map(ToString::to_string);
     history::record_event(&history::HistoryEvent {
         timestamp: chrono::Utc::now(),
         command: "apply".to_string(),
@@ -372,16 +368,12 @@ fn create_and_setup_transaction(
 
     // Add metadata
     if let Some(desc) = options.description {
-        transaction
-            .metadata
-            .insert("description".to_string(), desc.to_string());
+        let _ = transaction.metadata.insert("description".to_string(), desc.to_string());
     }
     if let Some(prof) = options.profile {
-        transaction
-            .metadata
-            .insert("profile".to_string(), prof.to_string());
+        let _ = transaction.metadata.insert("profile".to_string(), prof.to_string());
     }
-    transaction
+    let _ = transaction
         .metadata
         .insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
 

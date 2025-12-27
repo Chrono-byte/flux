@@ -11,7 +11,7 @@ use std::fs;
 use std::time::SystemTime;
 
 /// Status of a tracked file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum FileStatus {
     /// File is correctly synced
     Synced,
@@ -26,7 +26,7 @@ pub enum FileStatus {
 }
 
 /// Status report for a tracked file.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StatusReport {
     /// The tracked file
     pub file: TrackedFile,
@@ -37,7 +37,7 @@ pub struct StatusReport {
 }
 
 /// JSON-serializable status report for scripting.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct JsonStatusReport {
     /// Tool name
     pub tool: String,
@@ -60,26 +60,19 @@ pub struct JsonStatusReport {
 impl From<&StatusReport> for JsonStatusReport {
     fn from(report: &StatusReport) -> Self {
         // Get file size if available
-        let size = report
+        let size = report.file.repo_path.metadata().map(|metadata| metadata.len()).ok();
+
+        // Get last modified time as seconds since UNIX_EPOCH (as string), if available
+        let modified = report
             .file
             .repo_path
             .metadata()
-            .map(|metadata| metadata.len())
-            .ok();
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|mtime| mtime.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs().to_string());
 
-        // Get last modified time as seconds since UNIX_EPOCH (as string), if available
-        let modified = match report.file.repo_path.metadata() {
-            Ok(metadata) => match metadata.modified() {
-                Ok(mtime) => match mtime.duration_since(SystemTime::UNIX_EPOCH) {
-                    Ok(duration) => Some(duration.as_secs().to_string()),
-                    Err(_) => None,
-                },
-                Err(_) => None,
-            },
-            Err(_) => None,
-        };
-
-        JsonStatusReport {
+        Self {
             tool: report.file.tool.clone(),
             repo_path: report.file.repo_path.display().to_string(),
             dest_path: report.file.dest_path.display().to_string(),
@@ -103,7 +96,7 @@ pub fn check_status(config: &Config, profile: Option<&str>) -> Result<Vec<Status
 
     for file in tracked_files {
         let status = check_file_status(&file)?;
-        let message = status_message(&file, &status);
+        let message = status_message(&file, status);
         reports.push(StatusReport {
             file,
             status,
@@ -184,7 +177,7 @@ fn check_file_status(file: &TrackedFile) -> Result<FileStatus> {
 /// # Returns
 ///
 /// Returns the status message for a tracked file.
-fn status_message(file: &TrackedFile, status: &FileStatus) -> String {
+fn status_message(file: &TrackedFile, status: FileStatus) -> String {
     match status {
         FileStatus::Synced => format!("✓ {}", file.dest_path.display()),
         FileStatus::MissingSymlink => format!("⊘ Missing: {}", file.dest_path.display()),
@@ -210,8 +203,8 @@ pub fn check_conflicts(config: &Config, profile: Option<&str>) -> Result<Vec<Sta
 
     // Get git status entries
     let mut status_options = git2::StatusOptions::new();
-    status_options.include_ignored(false);
-    status_options.include_untracked(false);
+    let _ = status_options.include_ignored(false);
+    let _ = status_options.include_untracked(false);
     let statuses = repo.statuses(Some(&mut status_options))?;
 
     let tracked_files = config.get_tracked_files(profile)?;
@@ -405,5 +398,8 @@ fn format_file_path(path: &std::path::Path) -> String {
     std::env::current_dir()
         .ok()
         .and_then(|cwd| path.strip_prefix(&cwd).ok())
-        .map_or_else(|| path.display().to_string(), |rel| rel.display().to_string())
+        .map_or_else(
+            || path.display().to_string(),
+            |rel| rel.display().to_string(),
+        )
 }

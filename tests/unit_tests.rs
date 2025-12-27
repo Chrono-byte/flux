@@ -435,16 +435,17 @@ mod error_handling_extended_tests {
         assert!(ok_result.is_ok());
         assert!(err_result.is_err());
 
-        // Test extracting Ok value - use pattern matching to avoid clippy warning
-        let Ok(ok_value) = ok_result else {
-            unreachable!();
-        };
-        assert_eq!(ok_value, "success");
+        // Test extracting Ok value using if let
+        if let Ok(ok_value) = ok_result {
+            assert_eq!(ok_value, "success");
+        } else {
+            unreachable!("Expected Ok variant");
+        }
 
-        // Test unwrap_or_else - for Err values, we use unwrap_or_else
+        // Test error handling - use pattern matching to handle Err case
         let err_value = match err_result {
-            Ok(value) => value,
             Err(_) => "default".to_string(),
+            Ok(value) => value,
         };
         assert_eq!(err_value, "default");
     }

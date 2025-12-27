@@ -40,10 +40,7 @@ fn history_file() -> Result<PathBuf> {
 /// Returns an error if the history file cannot be created, opened, or written to.
 pub fn record_event(event: &HistoryEvent) -> Result<()> {
     let path = history_file()?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
+    let mut file = fs::OpenOptions::new().create(true).append(true).open(&path)?;
 
     let json = serde_json::to_string(&event).map_err(|error| {
         DotfilesError::Config(format!("Failed to serialize history event: {error}"))

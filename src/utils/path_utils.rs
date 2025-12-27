@@ -4,10 +4,7 @@ use std::path::{Path, PathBuf};
 /// Normalize a path by canonicalizing it, falling back to the path itself if canonicalization fails.
 #[must_use]
 pub fn normalize_path(path: &Path) -> PathBuf {
-    match path.canonicalize() {
-        Ok(canonical) => canonical,
-        Err(_) => path.to_path_buf(),
-    }
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Check if two files have different content.
@@ -43,10 +40,10 @@ pub fn resolve_symlink_target(symlink_path: &Path, link_target: &Path) -> PathBu
     if link_target.is_absolute() {
         link_target.to_path_buf()
     } else {
-        match symlink_path.parent() {
-            Some(parent) => parent.join(link_target),
-            None => link_target.to_path_buf(),
-        }
+        symlink_path.parent().map_or_else(
+            || link_target.to_path_buf(),
+            |parent| parent.join(link_target),
+        )
     }
 }
 
@@ -64,6 +61,7 @@ pub fn symlink_points_to_correct_target(
 }
 
 /// Check if any parent directory of the given path is a symlink.
+///
 /// Returns the symlinked parent directory path if found, and the resolved target.
 /// This helps detect cases where a directory is symlinked instead of individual files.
 #[must_use]

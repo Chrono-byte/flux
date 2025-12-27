@@ -44,7 +44,7 @@ mod file_operations_integration_tests {
         fs::write(&source_file, "test content")?;
 
         let dest_file = repo_path.join("config.txt");
-        fs::copy(&source_file, &dest_file)?;
+        let _ = fs::copy(&source_file, &dest_file)?;
 
         assert!(dest_file.exists(), "File should be copied to repo");
         assert_eq!(fs::read_to_string(&dest_file)?, "test content");
@@ -127,7 +127,7 @@ mod file_operations_integration_tests {
         std::os::unix::fs::symlink(&relative_path, &symlink_path)?;
 
         assert!(symlink_path.is_symlink());
-        let target = std::fs::read_link(&symlink_path)?;
+        let target = fs::read_link(&symlink_path)?;
         assert!(!target.is_absolute(), "Symlink should be relative");
         Ok(())
     }
@@ -145,7 +145,7 @@ mod file_operations_integration_tests {
         std::os::unix::fs::symlink(&repo_file, &symlink_path)?;
 
         assert!(symlink_path.is_symlink());
-        let target = std::fs::read_link(&symlink_path)?;
+        let target = fs::read_link(&symlink_path)?;
         assert!(target.is_absolute(), "Symlink should be absolute");
         Ok(())
     }
@@ -273,7 +273,7 @@ mod file_operations_integration_tests {
         fs::write(&source_file, original_content)?;
 
         let dest_file = repo_path.join("test.conf");
-        fs::copy(&source_file, &dest_file)?;
+        let _ = fs::copy(&source_file, &dest_file)?;
 
         let copied_content = fs::read_to_string(&dest_file)?;
         assert_eq!(copied_content, original_content);
@@ -285,12 +285,12 @@ mod file_operations_integration_tests {
     fn test_binary_file_handling() -> Result<(), Box<dyn std::error::Error>> {
         let (_temp, repo_path, home_path) = setup_test_environment()?;
 
-        let binary_data = vec![0u8, 1, 2, 255, 254, 127];
+        let binary_data = vec![0_u8, 1, 2, 255, 254, 127];
         let source_file = home_path.join("binary.bin");
         fs::write(&source_file, &binary_data)?;
 
         let dest_file = repo_path.join("binary.bin");
-        fs::copy(&source_file, &dest_file)?;
+        let _ = fs::copy(&source_file, &dest_file)?;
 
         let copied_data = fs::read(&dest_file)?;
         assert_eq!(copied_data, binary_data);
@@ -323,7 +323,7 @@ mod file_operations_integration_tests {
         fs::write(&original_file, "original content")?;
 
         let backup_file = repo_path.join("original.txt.backup");
-        fs::copy(&original_file, &backup_file)?;
+        let _ = fs::copy(&original_file, &backup_file)?;
 
         assert!(original_file.exists());
         assert!(backup_file.exists());
@@ -343,10 +343,10 @@ mod file_operations_integration_tests {
         let backup1 = repo_path.join("config.backup.1");
         let backup2 = repo_path.join("config.backup.2");
 
-        fs::copy(&original_file, &backup1)?;
+        let _ = fs::copy(&original_file, &backup1)?;
 
         fs::write(&original_file, "version 2")?;
-        fs::copy(&original_file, &backup2)?;
+        let _ = fs::copy(&original_file, &backup2)?;
 
         assert_eq!(fs::read_to_string(&backup1)?, "version 1");
         assert_eq!(fs::read_to_string(&backup2)?, "version 2");
@@ -373,7 +373,7 @@ mod file_operations_integration_tests {
         fs::set_permissions(&source_file, Permissions::from_mode(0o755))?;
 
         let dest_file = repo_path.join("executable.sh");
-        fs::copy(&source_file, &dest_file)?;
+        let _ = fs::copy(&source_file, &dest_file)?;
 
         let metadata = fs::metadata(&dest_file)?;
         let permissions = metadata.permissions();
@@ -452,7 +452,7 @@ mod file_operations_integration_tests {
             if path.is_dir() {
                 copy_recursive(&path, &dest_path)?;
             } else {
-                fs::copy(&path, &dest_path)?;
+                let _ = fs::copy(&path, &dest_path)?;
             }
         }
         Ok(())

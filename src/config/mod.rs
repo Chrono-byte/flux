@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::types::{ConditionSpec, FileEntry, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
@@ -42,7 +43,7 @@ pub struct GeneralConfig {
     pub include: Option<Vec<String>>,
 }
 
-fn default_symlink_resolution() -> SymlinkResolution {
+const fn default_symlink_resolution() -> SymlinkResolution {
     SymlinkResolution::Auto
 }
 
@@ -82,7 +83,14 @@ pub struct Config {
     pub hooks: Option<crate::types::HooksConfig>,
 }
 
+/// Static storage for config path override from CLI
+static CONFIG_PATH_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
 impl Config {
+    /// Set the config path override (called from CLI parsing)
+    pub fn set_path_override(path: &Path) {
+        let _ = CONFIG_PATH_OVERRIDE.set(path.to_path_buf());
+    }
     /// Load configuration from default locations.
     ///
     /// Checks `DOTFILES_CONFIG` environment variable first. XDG config
@@ -92,8 +100,28 @@ impl Config {
     ///
     /// Returns an error if the configuration file cannot be loaded.
     pub fn load() -> Result<Self> {
-        // Check for custom config path from environment variable
-        let config_path = if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
+        // Check for static override first, then fall back to environment variable
+        let override_path = CONFIG_PATH_OVERRIDE.get().map(PathBuf::as_path);
+        Self::load_with_override(override_path)
+    }
+
+    /// Load configuration from default locations with optional path override.
+    ///
+    /// Checks `config_path_override` parameter first, then `DOTFILES_CONFIG` environment variable.
+    /// XDG config (`~/.config/flux/config.toml`) is authoritative and overwrites repo version.
+    ///
+    /// # Parameters
+    ///
+    /// * `config_path_override`: Optional path to configuration file (overrides environment variable)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration file cannot be loaded.
+    pub fn load_with_override(config_path_override: Option<&Path>) -> Result<Self> {
+        // Check for custom config path from parameter or environment variable
+        let config_path = if let Some(override_path) = config_path_override {
+            override_path.to_path_buf()
+        } else if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
             PathBuf::from(&config_path_str)
         } else {
             // Check XDG config first (authoritative)
@@ -112,7 +140,7 @@ impl Config {
                     })?;
                 }
                 // Copy XDG config to repo to keep them in sync
-                fs::copy(&xdg_config, &repo_config).map_err(|error| {
+                fs::copy(&xdg_config, &repo_config).map(|_| ()).map_err(|error| {
                     DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
                 })?;
                 return Ok(config);
@@ -129,17 +157,12 @@ impl Config {
     ///
     /// Supports includes with cycle-safe merging. Later configs override earlier ones.
     fn load_from_path(config_path: &Path, visited: &mut Vec<PathBuf>) -> Result<Self> {
-        let config_path = match config_path.canonicalize() {
-            Ok(path) => path,
-            Err(_) => config_path.to_path_buf(),
-        };
+        let config_path = config_path.canonicalize().unwrap_or_else(|_| config_path.to_path_buf());
 
         // Detect include cycles
         if visited.contains(&config_path) {
-            let mut chain: Vec<String> = visited
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect();
+            let mut chain: Vec<String> =
+                visited.iter().map(|path| path.display().to_string()).collect();
             chain.push(config_path.display().to_string());
             return Err(DotfilesError::Config(format!(
                 "Detected configuration include cycle: {}",
@@ -152,12 +175,12 @@ impl Config {
             // For the root config, create a default file if it doesn't exist.
             // For included configs, treat missing files as an error.
             if visited.len() == 1 {
-                let config = Config::default();
+                let config = Self::default();
                 config.save(false)?;
-                visited.pop();
+                let _ = visited.pop();
                 return Ok(config);
             }
-            visited.pop();
+            let _ = visited.pop();
             return Err(DotfilesError::Config(format!(
                 "Included config file does not exist: {}",
                 config_path.display()
@@ -172,7 +195,7 @@ impl Config {
             ))
         })?;
 
-        let mut current: Config = toml::from_str(&content).map_err(|error| {
+        let mut current: Self = toml::from_str(&content).map_err(|error| {
             DotfilesError::Config(format!(
                 "Failed to parse config {}: {}",
                 config_path.display(),
@@ -181,12 +204,9 @@ impl Config {
         })?;
 
         // First, load and merge any included configs (if present).
-        let mut merged: Option<Config> = None;
+        let mut merged: Option<Self> = None;
         if let Some(include_paths) = current.general.include.clone() {
-            let base_dir = match config_path.parent() {
-                Some(path) => PathBuf::from(path),
-                None => PathBuf::from("."),
-            };
+            let base_dir = config_path.parent().map_or_else(|| PathBuf::from("."), PathBuf::from);
 
             for raw in include_paths {
                 let include_path = Self::resolve_include_path(&base_dir, &raw);
@@ -209,7 +229,7 @@ impl Config {
         // Validate the final merged config
         result.validate()?;
 
-        visited.pop();
+        let _ = visited.pop();
 
         Ok(result)
     }
@@ -259,11 +279,9 @@ impl Config {
         let new_toml = toml::to_string_pretty(self).map_err(|error| {
             DotfilesError::Config(format!("Failed to serialize config: {error}"))
         })?;
-        let mut new_doc = new_toml
-            .parse::<toml_edit::DocumentMut>()
-            .map_err(|error| {
-                DotfilesError::Config(format!("Failed to parse serialized config: {error}"))
-            })?;
+        let mut new_doc = new_toml.parse::<toml_edit::DocumentMut>().map_err(|error| {
+            DotfilesError::Config(format!("Failed to parse serialized config: {error}"))
+        })?;
 
         // Manually format tools section to use per-tool format [tools.X] files = [...]
         // instead of array-of-tables [[tools.X.files]]
@@ -292,7 +310,7 @@ impl Config {
                 })?;
             }
             // Copy XDG config to repo to keep them in sync
-            fs::copy(&xdg_config, &repo_config).map_err(|error| {
+            fs::copy(&xdg_config, &repo_config).map(|_| ()).map_err(|error| {
                 DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
             })?;
         }
@@ -306,7 +324,7 @@ impl Config {
         use toml_edit::{Array, Item, Table, Value};
 
         // Remove existing tools section if present
-        doc.remove("tools");
+        let _ = doc.remove("tools");
 
         // Create new tools table
         let mut tools_table = Table::new();
@@ -326,20 +344,20 @@ impl Config {
                 let mut file_table = toml_edit::InlineTable::new();
 
                 // Add repo field
-                file_table.insert(
+                let _ = file_table.insert(
                     "repo",
                     Value::String(toml_edit::Formatted::new(file_entry.repo.clone())),
                 );
 
                 // Add dest field
-                file_table.insert(
+                let _ = file_table.insert(
                     "dest",
                     Value::String(toml_edit::Formatted::new(file_entry.dest.clone())),
                 );
 
                 // Add profile field if present
                 if let Some(profile) = &file_entry.profile {
-                    file_table.insert(
+                    let _ = file_table.insert(
                         "profile",
                         Value::String(toml_edit::Formatted::new(profile.clone())),
                     );
@@ -348,11 +366,11 @@ impl Config {
                 files_array.push_formatted(Value::InlineTable(file_table));
             }
 
-            current_tool_table.insert("files", Item::Value(Value::Array(files_array)));
-            tools_table.insert(tool_name, Item::Table(current_tool_table));
+            let _ = current_tool_table.insert("files", Item::Value(Value::Array(files_array)));
+            let _ = tools_table.insert(tool_name, Item::Table(current_tool_table));
         }
 
-        doc.insert("tools", Item::Table(tools_table));
+        let _ = doc.insert("tools", Item::Table(tools_table));
     }
 
     /// Remove old array-of-tables format `[[tools.X.files]]` from document.
@@ -365,7 +383,7 @@ impl Config {
             .filter_map(|(key, _)| {
                 // Check for keys like "tools.cursor.files" (array-of-tables format)
                 if key.starts_with("tools.")
-                    && std::path::Path::new(key)
+                    && Path::new(key)
                         .extension()
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("files"))
                 {
@@ -377,7 +395,7 @@ impl Config {
             .collect();
 
         for key in keys_to_remove {
-            doc.remove(&key);
+            let _ = doc.remove(&key);
         }
     }
 
@@ -421,11 +439,11 @@ impl Config {
                 }
                 (Some(_), _) => {
                     // Target exists, replace it with source value
-                    target.insert(key, source_item.clone());
+                    let _ = target.insert(key, source_item.clone());
                 }
                 (None, _) => {
                     // Key doesn't exist in target, add it
-                    target.insert(key, source_item.clone());
+                    let _ = target.insert(key, source_item.clone());
                 }
             }
         }
@@ -502,11 +520,7 @@ impl Config {
             let data_dir = dirs::data_local_dir().ok_or_else(|| {
                 DotfilesError::Config("Could not find data directory".to_string())
             })?;
-            data_dir
-                .join("flux")
-                .join("backups")
-                .to_string_lossy()
-                .to_string()
+            data_dir.join("flux").join("backups").to_string_lossy().to_string()
         };
         Ok(PathBuf::from(backup_dir))
     }
@@ -559,7 +573,7 @@ impl Config {
         let entry = FileEntry {
             repo: repo_file.to_string(),
             dest: dest_str,
-            profile: profile.map(std::string::ToString::to_string),
+            profile: profile.map(ToString::to_string),
             conditions: None,
             secret: false,
             secret_backend: None,
@@ -658,37 +672,34 @@ impl Config {
     }
 
     /// Build the template context used for rendering repo/dest paths.
-    fn build_template_context(current_profile: &str) -> std::collections::HashMap<String, String> {
+    fn build_template_context(current_profile: &str) -> HashMap<String, String> {
         use std::collections::HashMap;
 
         let mut values: HashMap<String, String> = HashMap::new();
 
         // Built-in values
         if let Some(home) = dirs::home_dir() {
-            values.insert("home".to_string(), home.display().to_string());
+            let _ = values.insert("home".to_string(), home.display().to_string());
         }
 
         if let Ok(user) = std::env::var("USER") {
-            values.insert("user".to_string(), user.clone());
-            values.insert("username".to_string(), user);
+            let _ = values.insert("user".to_string(), user.clone());
+            let _ = values.insert("username".to_string(), user);
         }
 
         // Hostname (best-effort)
         if let Ok(hostname) = Self::detect_hostname() {
-            values.insert("host".to_string(), hostname);
+            let _ = values.insert("host".to_string(), hostname);
         }
 
-        values.insert("profile".to_string(), current_profile.to_string());
-        values.insert("os".to_string(), std::env::consts::OS.to_string());
+        let _ = values.insert("profile".to_string(), current_profile.to_string());
+        let _ = values.insert("os".to_string(), std::env::consts::OS.to_string());
 
         values
     }
 
     /// Very small, deterministic template renderer supporting `{{ var }}` placeholders.
-    fn render_template(
-        input: &str,
-        values: &std::collections::HashMap<String, String>,
-    ) -> Result<String> {
+    fn render_template(input: &str, values: &HashMap<String, String>) -> Result<String> {
         if !input.contains("{{") {
             return Ok(input.to_string());
         }
@@ -790,7 +801,7 @@ impl Config {
         // Fallback: try reading /etc/hostname on Unix-like systems.
         #[cfg(unix)]
         {
-            if let Ok(contents) = std::fs::read_to_string("/etc/hostname") {
+            if let Ok(contents) = fs::read_to_string("/etc/hostname") {
                 let trimmed = contents.trim();
                 if !trimmed.is_empty() {
                     return Ok(trimmed.to_string());
@@ -845,7 +856,7 @@ impl Config {
     }
 
     /// Merge two configs, with `overlay` taking precedence over `base`.
-    fn merge_configs(mut base: Config, overlay: Config) -> Config {
+    fn merge_configs(mut base: Self, overlay: Self) -> Self {
         // General settings: overlay wins entirely.
         base.general = overlay.general;
 
@@ -896,7 +907,7 @@ impl Config {
         }
 
         // Copy XDG config to repo
-        fs::copy(&xdg_config, &repo_config).map_err(|error| {
+        fs::copy(&xdg_config, &repo_config).map(|_| ()).map_err(|error| {
             DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
         })?;
 

@@ -76,6 +76,7 @@ pub enum Operation {
 }
 
 /// Tracks operations for dry-run mode.
+#[derive(Debug)]
 pub struct DryRun {
     /// Operations to perform.
     operations: Vec<Operation>,
@@ -84,7 +85,7 @@ pub struct DryRun {
 impl DryRun {
     /// Create a new dry-run tracker.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             operations: Vec::new(),
         }
@@ -104,9 +105,7 @@ impl DryRun {
 
         println!(
             "\n{}",
-            "DRY RUN - Operations that would be performed:"
-                .bold()
-                .cyan()
+            "DRY RUN - Operations that would be performed:".bold().cyan()
         );
         println!("{}", "=".repeat(60).cyan());
 

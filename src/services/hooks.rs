@@ -31,14 +31,14 @@ pub struct HookResult {
 /// The hook's exit code is captured in the result.
 pub fn execute_hook(
     hook: &HookCommand,
-    config: &Config,
+    _config: &Config,
     shell: Option<&str>,
 ) -> Result<HookResult> {
     let start = std::time::Instant::now();
 
     // Evaluate conditions if present
     if let Some(conditions) = &hook.conditions
-        && !crate::config::Config::conditions_match(conditions)
+        && !Config::conditions_match(conditions)
     {
         return Ok(HookResult {
             command: hook.command.clone(),
@@ -51,20 +51,14 @@ pub fn execute_hook(
     }
 
     // Determine shell to use
-    let shell_cmd = if let Some(shell_str) = shell {
-        shell_str
-    } else if let Some(_hooks_config) = &config.hooks {
-        // HooksConfig doesn't currently have a shell field, default to /bin/sh
-        "/bin/sh"
-    } else {
-        "/bin/sh"
-    };
+    // HooksConfig doesn't currently have a shell field, default to /bin/sh
+    let shell_cmd = shell.unwrap_or("/bin/sh");
 
     // Build command: shell -c "hook.command"
     let mut cmd = Command::new(shell_cmd);
-    cmd.arg("-c").arg(&hook.command);
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
+    let _ = cmd.arg("-c").arg(&hook.command);
+    let _ = cmd.stdout(Stdio::piped());
+    let _ = cmd.stderr(Stdio::piped());
 
     // Set timeout if specified
     let timeout = hook.timeout.unwrap_or(30);

@@ -62,22 +62,18 @@ impl DotfilesError {
     #[must_use]
     pub fn with_context(self, context: &str) -> Self {
         match self {
-            DotfilesError::Config(msg) => {
-                DotfilesError::Config(format!("{msg}\n  Context: {context}"))
+            Self::Config(msg) => Self::Config(format!("{msg}\n  Context: {context}")),
+            Self::Path(msg) => Self::Path(format!("{msg}\n  Context: {context}")),
+            Self::Io(error) => Self::Io(error),
+            Self::Git(error) => Self::Git(error),
+            Self::Toml(error) => Self::Toml(error),
+            Self::TomlSerialize(error) => Self::TomlSerialize(error),
+            Self::JsonSerialize(error) => Self::JsonSerialize(error),
+            Self::InvalidTool(msg) => Self::InvalidTool(format!("{msg}\n  Context: {context}")),
+            Self::ProfileNotFound(msg) => {
+                Self::ProfileNotFound(format!("{msg}\n  Context: {context}"))
             }
-            DotfilesError::Path(msg) => DotfilesError::Path(format!("{msg}\n  Context: {context}")),
-            DotfilesError::Io(error) => DotfilesError::Io(error),
-            DotfilesError::Git(error) => DotfilesError::Git(error),
-            DotfilesError::Toml(error) => DotfilesError::Toml(error),
-            DotfilesError::TomlSerialize(error) => DotfilesError::TomlSerialize(error),
-            DotfilesError::JsonSerialize(error) => DotfilesError::JsonSerialize(error),
-            DotfilesError::InvalidTool(msg) => {
-                DotfilesError::InvalidTool(format!("{msg}\n  Context: {context}"))
-            }
-            DotfilesError::ProfileNotFound(msg) => {
-                DotfilesError::ProfileNotFound(format!("{msg}\n  Context: {context}"))
-            }
-            DotfilesError::Cancelled => DotfilesError::Cancelled,
+            Self::Cancelled => Self::Cancelled,
         }
     }
 }

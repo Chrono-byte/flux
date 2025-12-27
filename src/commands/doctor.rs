@@ -59,6 +59,7 @@ pub enum HealthIssue {
 use std::path::PathBuf;
 
 /// Health report from doctor command.
+#[derive(Debug)]
 pub struct HealthReport {
     /// The issues found in the health report
     pub issues: Vec<HealthIssue>,
@@ -91,10 +92,7 @@ impl HealthReport {
                 HealthIssue::BadGitRemote { .. } => "Git Remotes",
                 HealthIssue::UnsafePermissions { .. } => "Permissions",
             };
-            by_cat
-                .entry(cat.to_string())
-                .or_insert_with(Vec::new)
-                .push(issue);
+            by_cat.entry(cat.to_string()).or_insert_with(Vec::new).push(issue);
         }
         by_cat
     }
@@ -143,10 +141,8 @@ fn check_symlinks(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<()> 
         }
 
         if let Ok(link_target) = fs::read_link(&file.dest_path) {
-            let resolved = file
-                .dest_path
-                .parent()
-                .map(|parent_path| parent_path.join(&link_target));
+            let resolved =
+                file.dest_path.parent().map(|parent_path| parent_path.join(&link_target));
             if let Some(resolved_path) = resolved {
                 if !resolved_path.exists() {
                     issues.push(HealthIssue::BrokenSymlink {
@@ -310,9 +306,8 @@ fn check_unsafe_permissions(config: &Config, issues: &mut Vec<HealthIssue>) -> R
     for file in tracked_files {
         // Check sensitive directories
         let sensitive_dirs = [".ssh", ".gnupg", ".aws"];
-        let is_sensitive = sensitive_dirs
-            .iter()
-            .any(|dir| file.dest_path.starts_with(home.join(dir)));
+        let is_sensitive =
+            sensitive_dirs.iter().any(|dir| file.dest_path.starts_with(home.join(dir)));
 
         if is_sensitive
             && file.dest_path.exists()

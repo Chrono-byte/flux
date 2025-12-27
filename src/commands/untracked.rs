@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 
 /// A discrepancy found in a tracked file.
+#[derive(Debug)]
 pub struct Discrepancy {
     /// The tracked file with the issue
     pub file: TrackedFile,
@@ -19,7 +20,7 @@ pub struct Discrepancy {
 }
 
 /// Type of issue detected in a tracked file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum IssueType {
     /// File doesn't exist at expected location
     Missing,
@@ -183,10 +184,7 @@ pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
     // Group by tool
     let mut by_tool: HashMap<String, Vec<&Discrepancy>> = HashMap::new();
     for discrepancy in discrepancies {
-        by_tool
-            .entry(discrepancy.file.tool.clone())
-            .or_default()
-            .push(discrepancy);
+        by_tool.entry(discrepancy.file.tool.clone()).or_default().push(discrepancy);
     }
 
     let mut tool_names: Vec<_> = by_tool.keys().collect();
@@ -211,30 +209,19 @@ pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
                 IssueType::BrokenSymlink => "⚠".red(),
             };
 
-            let profile_info = if let Some(profile) = &discrepancy.file.profile {
-                format!(" [profile: {profile}]").yellow()
-            } else {
-                "".normal()
-            };
+            let profile_info = discrepancy.file.profile.as_ref().map_or_else(
+                || "".normal(),
+                |profile| format!(" [profile: {profile}]").yellow(),
+            );
 
             println!("  {} {}", icon, discrepancy.message.bright_white());
             println!(
                 "      Repo: {}",
-                discrepancy
-                    .file
-                    .repo_path
-                    .display()
-                    .to_string()
-                    .bright_black()
+                discrepancy.file.repo_path.display().to_string().bright_black()
             );
             println!(
                 "      Dest: {}{}",
-                discrepancy
-                    .file
-                    .dest_path
-                    .display()
-                    .to_string()
-                    .bright_black(),
+                discrepancy.file.dest_path.display().to_string().bright_black(),
                 profile_info
             );
         }
@@ -248,8 +235,6 @@ pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
     );
     println!(
         "\n{}",
-        "Tip: Run 'sync' command to fix these issues"
-            .yellow()
-            .italic()
+        "Tip: Run 'sync' command to fix these issues".yellow().italic()
     );
 }

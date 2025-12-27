@@ -72,7 +72,7 @@ pub fn migrate_files(
 
         match migrate_file(
             &discrepancy.file,
-            &discrepancy.issue,
+            discrepancy.issue,
             symlink_resolution,
             &mut fs_manager,
             no_backup,
@@ -113,7 +113,7 @@ enum MigrationResult {
 /// the configuration is invalid.
 fn migrate_file(
     file: &TrackedFile,
-    issue: &IssueType,
+    issue: IssueType,
     resolution: SymlinkResolution,
     fs_manager: &mut FileSystemManager,
     no_backup: bool,
@@ -309,70 +309,64 @@ fn migrate_wrong_target_or_broken(
 fn find_source_to_copy(file: &TrackedFile) -> Option<std::path::PathBuf> {
     if file.dest_path.is_symlink() {
         // It's a symlink - try to read what it points to
-        match fs::read_link(&file.dest_path) {
-            Ok(link_target) => {
-                // Resolve relative symlink targets relative to symlink's parent directory
-                let resolved_target = if link_target.is_absolute() {
-                    link_target
+        fs::read_link(&file.dest_path).map_or(None, |link_target| {
+            // Resolve relative symlink targets relative to symlink's parent directory
+            let resolved_target = if link_target.is_absolute() {
+                link_target
+            } else {
+                match file.dest_path.parent() {
+                    Some(parent) => parent.join(&link_target),
+                    None => link_target,
+                }
+            };
+
+            // Check if the link target exists and has content
+            if resolved_target.exists() {
+                // Check if target is empty
+                let is_empty = if resolved_target.is_file() {
+                    fs::metadata(&resolved_target).is_ok_and(|metadata| metadata.len() == 0)
                 } else {
-                    match file.dest_path.parent() {
-                        Some(parent) => parent.join(&link_target),
-                        None => link_target.clone(),
-                    }
+                    false
                 };
 
-                // Check if the link target exists and has content
-                if resolved_target.exists() {
-                    // Check if target is empty
-                    let is_empty = if resolved_target.is_file() {
-                        match fs::metadata(&resolved_target) {
-                            Ok(metadata) => metadata.len() == 0,
-                            Err(_) => false,
-                        }
-                    } else {
-                        false
-                    };
-
-                    if is_empty {
-                        // Target exists but is empty - try to read content through the symlink
-                        // (in case there's content accessible via the symlink path)
-                        if file.dest_path.exists() {
-                            // Try reading through the symlink to see if there's content
-                            match fs::read(&file.dest_path) {
-                                Ok(content) if !content.is_empty() => {
-                                    // There's content accessible through the symlink
-                                    Some(file.dest_path.clone())
-                                }
-                                _ => {
-                                    // Empty or can't read - use the empty target
-                                    Some(resolved_target)
-                                }
-                            }
-                        } else {
-                            // Can't read through symlink - use empty target
-                            Some(resolved_target)
-                        }
-                    } else {
-                        // Target exists and has content
-                        Some(resolved_target)
-                    }
-                } else {
-                    // Broken symlink - try to read content through the symlink path
+                if is_empty {
+                    // Target exists but is empty - try to read content through the symlink
+                    // (in case there's content accessible via the symlink path)
                     if file.dest_path.exists() {
+                        // Try reading through the symlink to see if there's content
                         match fs::read(&file.dest_path) {
                             Ok(content) if !content.is_empty() => {
                                 // There's content accessible through the symlink
                                 Some(file.dest_path.clone())
                             }
-                            _ => None,
+                            _ => {
+                                // Empty or can't read - use the empty target
+                                Some(resolved_target)
+                            }
                         }
                     } else {
-                        None
+                        // Can't read through symlink - use empty target
+                        Some(resolved_target)
                     }
+                } else {
+                    // Target exists and has content
+                    Some(resolved_target)
+                }
+            } else {
+                // Broken symlink - try to read content through the symlink path
+                if file.dest_path.exists() {
+                    match fs::read(&file.dest_path) {
+                        Ok(content) if !content.is_empty() => {
+                            // There's content accessible through the symlink
+                            Some(file.dest_path.clone())
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
                 }
             }
-            Err(_) => None,
-        }
+        })
     } else if file.dest_path.exists() {
         // It's a real file, use it directly
         Some(file.dest_path.clone())
@@ -394,9 +388,7 @@ fn copy_source_to_repo(
 ) -> Result<()> {
     // Check if source is empty
     let source_is_empty = if source.is_file() {
-        fs::metadata(source)
-            .map(|metadata| metadata.len() == 0)
-            .unwrap_or(false)
+        fs::metadata(source).map(|metadata| metadata.len() == 0).unwrap_or(false)
     } else {
         false
     };
@@ -444,14 +436,13 @@ fn compute_link_target(
     Ok(match resolution {
         SymlinkResolution::Auto => {
             // Try relative, fall back to absolute
-            if let Some(parent) = file.dest_path.parent() {
-                match pathdiff::diff_paths(&file.repo_path, parent) {
-                    Some(relative) => relative,
-                    None => file.repo_path.clone(),
-                }
-            } else {
-                file.repo_path.clone()
-            }
+            file.dest_path.parent().map_or_else(
+                || file.repo_path.clone(),
+                |parent| {
+                    pathdiff::diff_paths(&file.repo_path, parent)
+                        .unwrap_or_else(|| file.repo_path.clone())
+                },
+            )
         }
         SymlinkResolution::Relative => {
             let parent = file.dest_path.parent().ok_or_else(|| {
@@ -463,26 +454,24 @@ fn compute_link_target(
         SymlinkResolution::Absolute => file.repo_path.clone(),
         SymlinkResolution::Follow => {
             // For migration, just use relative
-            if let Some(parent) = file.dest_path.parent() {
-                match pathdiff::diff_paths(&file.repo_path, parent) {
-                    Some(relative) => relative,
-                    None => file.repo_path.clone(),
-                }
-            } else {
-                file.repo_path.clone()
-            }
+            file.dest_path.parent().map_or_else(
+                || file.repo_path.clone(),
+                |parent| {
+                    pathdiff::diff_paths(&file.repo_path, parent)
+                        .unwrap_or_else(|| file.repo_path.clone())
+                },
+            )
         }
         SymlinkResolution::Replace => {
             // Replace mode doesn't use symlinks, but we'll still compute a target
             // (This shouldn't be called in Replace mode, but handle it anyway)
-            if let Some(parent) = file.dest_path.parent() {
-                match pathdiff::diff_paths(&file.repo_path, parent) {
-                    Some(relative) => relative,
-                    None => file.repo_path.clone(),
-                }
-            } else {
-                file.repo_path.clone()
-            }
+            file.dest_path.parent().map_or_else(
+                || file.repo_path.clone(),
+                |parent| {
+                    pathdiff::diff_paths(&file.repo_path, parent)
+                        .unwrap_or_else(|| file.repo_path.clone())
+                },
+            )
         }
     })
 }

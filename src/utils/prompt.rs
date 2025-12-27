@@ -5,7 +5,7 @@ use dialoguer::{Input, Select, theme::ColorfulTheme};
 use std::path::Path;
 
 /// Type of conflict resolution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ConflictResolution {
     /// Backup and replace the conflicting file.
     BackupAndReplace,

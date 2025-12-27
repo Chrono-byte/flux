@@ -7,25 +7,19 @@ pub fn init_logging(log_level: Option<&str>) {
     let mut builder = env_logger::Builder::new();
 
     // Set log level with precedence: CLI flag > environment variable > default
-    let level = if let Some(level_str) = log_level {
-        match level_str.parse::<LevelFilter>() {
-            Ok(level) => level,
-            Err(_) => LevelFilter::Warn,
-        }
-    } else {
-        match std::env::var("DOTFILES_LOG")
-            .ok()
-            .and_then(|log_var| log_var.parse::<LevelFilter>().ok())
-        {
-            Some(level) => level,
-            None => LevelFilter::Warn,
-        }
-    };
+    let level = log_level
+        .and_then(|level_str| level_str.parse::<LevelFilter>().ok())
+        .or_else(|| {
+            std::env::var("DOTFILES_LOG")
+                .ok()
+                .and_then(|log_var| log_var.parse::<LevelFilter>().ok())
+        })
+        .unwrap_or(LevelFilter::Warn);
 
-    builder.filter_level(level);
+    let _ = builder.filter_level(level);
 
     // Custom format: [LEVEL] message
-    builder.format(|buf, record| {
+    let _ = builder.format(|buf, record| {
         let level_string = match record.level() {
             Level::Error => record.level().to_string().red().bold().to_string(),
             Level::Warn => record.level().to_string().yellow().bold().to_string(),

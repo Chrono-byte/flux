@@ -122,11 +122,11 @@ impl std::str::FromStr for SymlinkResolution {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "auto" => Ok(SymlinkResolution::Auto),
-            "relative" => Ok(SymlinkResolution::Relative),
-            "absolute" => Ok(SymlinkResolution::Absolute),
-            "follow" => Ok(SymlinkResolution::Follow),
-            "replace" => Ok(SymlinkResolution::Replace),
+            "auto" => Ok(Self::Auto),
+            "relative" => Ok(Self::Relative),
+            "absolute" => Ok(Self::Absolute),
+            "follow" => Ok(Self::Follow),
+            "replace" => Ok(Self::Replace),
             _ => Err(format!("Invalid symlink resolution: {s}")),
         }
     }

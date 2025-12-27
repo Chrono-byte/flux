@@ -12,7 +12,7 @@ pub struct SecretMaterial {
 }
 
 /// Trait implemented by concrete secret backends.
-pub trait SecretBackend: Send + Sync {
+pub trait SecretBackend: Send + Sync + std::fmt::Debug {
     /// Logical name of this backend (e.g., "env", "age").
     fn name(&self) -> &'static str;
 
@@ -33,6 +33,7 @@ pub trait SecretBackend: Send + Sync {
 ///
 /// This is primarily useful for CI/testing and provides a simple, portable
 /// default implementation.
+#[derive(Debug, Copy, Clone)]
 pub struct EnvSecretBackend;
 
 impl SecretBackend for EnvSecretBackend {
@@ -54,6 +55,7 @@ impl SecretBackend for EnvSecretBackend {
 }
 
 /// Manager that dispatches to the appropriate backend.
+#[derive(Debug)]
 pub struct SecretsManager {
     /// List of secret backends available for resolution.
     backends: Vec<Box<dyn SecretBackend>>,
@@ -108,7 +110,7 @@ impl SecretsManager {
         let mut out = HashMap::new();
         for key in keys {
             let mat = self.resolve(backend, key)?;
-            out.insert(key.clone(), mat);
+            let _ = out.insert(key.clone(), mat);
         }
         Ok(out)
     }

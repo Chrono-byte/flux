@@ -78,10 +78,7 @@ pub fn import_stow(stow_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
                 secret_backend: None,
                 secret_key: None,
             };
-            tool_configs
-                .entry(tool_name.clone())
-                .or_default()
-                .push(entry);
+            tool_configs.entry(tool_name.clone()).or_default().push(entry);
         }
     }
 
@@ -118,7 +115,7 @@ pub fn import_stow(stow_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
     // Add tools to config
     for (tool_name, entries) in tool_configs {
         let tool_config = crate::config::ToolConfig { files: entries };
-        config.tools.insert(tool_name.clone(), tool_config);
+        let _ = config.tools.insert(tool_name.clone(), tool_config);
 
         // Copy files from stow to repo
         let stow_tool_dir = stow_dir.join(&tool_name);
@@ -181,10 +178,7 @@ pub fn import_scan(home_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
                 secret_backend: None,
                 secret_key: None,
             };
-            tool_configs
-                .entry(tool_name.to_string())
-                .or_default()
-                .push(entry);
+            tool_configs.entry(tool_name.to_string()).or_default().push(entry);
         }
     }
 
@@ -220,7 +214,7 @@ pub fn import_scan(home_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
     // Add tools to config
     for (tool_name, entries) in tool_configs {
         let tool_config = crate::config::ToolConfig { files: entries };
-        config.tools.insert(tool_name.clone(), tool_config);
+        let _ = config.tools.insert(tool_name.clone(), tool_config);
 
         // Copy files from home to repo
         if let Some(tool_config) = config.tools.get(&tool_name) {
@@ -235,7 +229,7 @@ pub fn import_scan(home_dir: &Path, repo_path: &Path, dry_run: bool) -> Result<(
                     if home_file.is_dir() {
                         copy_dir_all(&home_file, &repo_file)?;
                     } else {
-                        fs::copy(&home_file, &repo_file)?;
+                        let _ = fs::copy(&home_file, &repo_file)?;
                     }
                 }
             }
@@ -306,7 +300,7 @@ fn copy_stow_files(src: &Path, dst: &Path) -> Result<()> {
             if let Some(parent) = dst_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::copy(&src_path, &dst_path)?;
+            let _ = fs::copy(&src_path, &dst_path)?;
         }
     }
     Ok(())
@@ -327,7 +321,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
         if src_path.is_dir() {
             copy_dir_all(&src_path, &dst_path)?;
         } else {
-            fs::copy(&src_path, &dst_path)?;
+            let _ = fs::copy(&src_path, &dst_path)?;
         }
     }
     Ok(())

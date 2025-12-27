@@ -36,7 +36,7 @@ pub fn add_file(
     let home = dirs::home_dir().ok_or_else(crate::utils::error_utils::home_dir_not_found)?;
 
     // Validate destination path is within home directory
-    crate::utils::security::validate_dest_path(dest_path, &home)?;
+    security::validate_dest_path(dest_path, &home)?;
 
     let repo_path = config.get_repo_path();
     let tool_dir = repo_path.join(tool);
@@ -82,12 +82,8 @@ pub fn add_file(
         );
     } else {
         config.save(fs_manager.is_dry_run)?;
-        println!(
-            "{} Added {} to {} tool",
-            "✓".green(),
-            source_path.display(),
-            tool
-        );
+        // Git-like output: "add 'file'"
+        println!("add '{}'", dest_path.display());
     }
 
     Ok(())
@@ -194,7 +190,7 @@ struct SyncStats {
 
 impl SyncStats {
     /// Update statistics based on a sync result.
-    fn update(&mut self, result: SyncResult) {
+    const fn update(&mut self, result: SyncResult) {
         match result {
             SyncResult::Synced => self.synced += 1,
             SyncResult::Skipped => self.skipped += 1,
@@ -281,7 +277,7 @@ pub fn remove_file(
     if let Some(tool_config) = config.tools.get_mut(tool) {
         tool_config.files.retain(|entry| entry.repo != file);
         if tool_config.files.is_empty() {
-            config.tools.remove(tool);
+            let _ = config.tools.remove(tool);
         }
     }
 
@@ -290,7 +286,8 @@ pub fn remove_file(
         println!("  [DRY RUN] Would remove {file} from {tool} tool");
     } else {
         config.save(fs_manager.is_dry_run)?;
-        println!("{} Removed {} from {} tool", "✓".green(), file, tool);
+        // Git-like output: "rm 'file'"
+        println!("rm '{}'", dest_path.display());
     }
 
     Ok(())
@@ -301,6 +298,7 @@ pub fn remove_file(
 // #############################################################################
 
 /// Manages file system operations with dry-run support.
+#[derive(Debug)]
 pub struct FileSystemManager<'a> {
     /// Dry-run tracker for logging operations.
     dry_run: &'a mut DryRun,
@@ -310,7 +308,7 @@ pub struct FileSystemManager<'a> {
 
 impl<'a> FileSystemManager<'a> {
     /// Create a new `FileSystemManager`.
-    pub fn new(dry_run: &'a mut DryRun, is_dry_run: bool) -> Self {
+    pub const fn new(dry_run: &'a mut DryRun, is_dry_run: bool) -> Self {
         Self {
             dry_run,
             is_dry_run,
@@ -650,18 +648,12 @@ fn determine_sync_action(file: &TrackedFile, verbose: bool) -> Result<SyncAction
 
     // Safety check: prevent overwriting non-empty destination with empty repo file
     let repo_is_empty = if file.repo_path.is_file() {
-        match fs::metadata(&file.repo_path) {
-            Ok(metadata) => metadata.len() == 0,
-            Err(_) => false,
-        }
+        fs::metadata(&file.repo_path).is_ok_and(|metadata| metadata.len() == 0)
     } else {
         false // Dirs aren't "empty" for this check
     };
     let dest_has_content = if file.dest_path.is_file() {
-        match fs::metadata(&file.dest_path) {
-            Ok(metadata) => metadata.len() > 0,
-            Err(_) => false,
-        }
+        fs::metadata(&file.dest_path).is_ok_and(|metadata| metadata.len() > 0)
     } else {
         false
     };
@@ -909,16 +901,17 @@ fn write_secret_to_path(
 ) -> Result<()> {
     use crate::services::secrets::SecretsManager;
     let secrets_mgr = SecretsManager::with_defaults();
-    let secret_key = file.secret_key.as_ref().ok_or_else(|| {
-        crate::utils::error::DotfilesError::Config("Secret file missing secret_key".to_string())
-    })?;
+    let secret_key = file
+        .secret_key
+        .as_ref()
+        .ok_or_else(|| DotfilesError::Config("Secret file missing secret_key".to_string()))?;
     let secret_mat = secrets_mgr.resolve(file.secret_backend.as_deref(), secret_key)?;
 
     if !fs_manager.is_dry_run {
         if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)?;
         }
-        std::fs::write(target_path, secret_mat.value.as_bytes())?;
+        fs::write(target_path, secret_mat.value.as_bytes())?;
     } else if verbose {
         println!(
             "    [DRY RUN] Would write secret content to {}",
@@ -953,16 +946,13 @@ fn compute_symlink_target(
     verbose: bool,
 ) -> Result<std::path::PathBuf> {
     let link_target = match resolution {
-        SymlinkResolution::Auto => {
-            if let Some(parent) = file.dest_path.parent() {
-                match pathdiff::diff_paths(&file.repo_path, parent) {
-                    Some(relative) => relative,
-                    None => file.repo_path.clone(),
-                }
-            } else {
-                file.repo_path.clone()
-            }
-        }
+        SymlinkResolution::Auto => file.dest_path.parent().map_or_else(
+            || file.repo_path.clone(),
+            |parent| {
+                pathdiff::diff_paths(&file.repo_path, parent)
+                    .unwrap_or_else(|| file.repo_path.clone())
+            },
+        ),
         SymlinkResolution::Relative => {
             let parent = file.dest_path.parent().ok_or_else(|| {
                 DotfilesError::Path("Cannot determine parent for destination path".to_string())
@@ -975,14 +965,13 @@ fn compute_symlink_target(
             if verbose {
                 println!("    'Follow' resolution strategy is treated as 'Auto'.");
             }
-            if let Some(parent) = file.dest_path.parent() {
-                match pathdiff::diff_paths(&file.repo_path, parent) {
-                    Some(relative) => relative,
-                    None => file.repo_path.clone(),
-                }
-            } else {
-                file.repo_path.clone()
-            }
+            file.dest_path.parent().map_or_else(
+                || file.repo_path.clone(),
+                |parent| {
+                    pathdiff::diff_paths(&file.repo_path, parent)
+                        .unwrap_or_else(|| file.repo_path.clone())
+                },
+            )
         }
         SymlinkResolution::Replace => unreachable!(), // Handled earlier
     };
@@ -996,14 +985,8 @@ fn create_symlink_atomic(
     fs_manager: &mut FileSystemManager,
     verbose: bool,
 ) -> Result<()> {
-    let ext_str = file
-        .dest_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or_default();
-    let temp_link_path = file
-        .dest_path
-        .with_extension(format!("{ext_str}.flux-temp"));
+    let ext_str = file.dest_path.extension().and_then(|ext| ext.to_str()).unwrap_or_default();
+    let temp_link_path = file.dest_path.with_extension(format!("{ext_str}.flux-temp"));
 
     if verbose {
         println!(
@@ -1113,7 +1096,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
         if path.is_dir() {
             copy_dir_all(&path, &dst_path)?;
         } else {
-            fs::copy(&path, &dst_path)?;
+            let _ = fs::copy(&path, &dst_path)?;
         }
     }
 
@@ -1124,11 +1107,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 fn show_diff(path1: &Path, path2: &Path) -> Result<()> {
     use std::process::Command;
 
-    let output = Command::new("diff")
-        .arg("-u")
-        .arg(path1)
-        .arg(path2)
-        .output()?;
+    let output = Command::new("diff").arg("-u").arg(path1).arg(path2).output()?;
 
     // `diff` returns 1 if files differ, 0 if same, 2 on error.
     // We want to print stdout for both 0 and 1.

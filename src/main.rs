@@ -17,7 +17,7 @@ mod types;
 mod utils;
 
 use clap::{CommandFactory, Parser, Subcommand};
-use colored::Colorize;
+use colored::{Colorize, control};
 use commands::{
     apply_config, check_status, compare_states, display_discrepancies, display_health_report,
     display_preview, display_status, display_validation, find_discrepancies, import_scan,
@@ -371,18 +371,14 @@ enum ConfigCommands {
 fn main() {
     let cli = Cli::parse();
 
-    // Handle --no-color flag (sets NO_COLOR env var, which colored crate respects)
+    // Handle --no-color flag (disable colored output programmatically)
     if cli.no_color {
-        unsafe {
-            std::env::set_var("NO_COLOR", "1");
-        }
+        control::set_override(false);
     }
 
-    // Handle --config flag (overrides DOTFILES_CONFIG env var)
+    // Handle --config flag (set static override for Config::load() to use)
     if let Some(config_path) = &cli.config {
-        unsafe {
-            std::env::set_var("DOTFILES_CONFIG", config_path);
-        }
+        Config::set_path_override(config_path.as_ref());
     }
 
     // Load and validate environment configuration early
@@ -605,12 +601,10 @@ fn handle_add_command(
             )));
         }
 
-        let dest_path = if let Some(dest) = dest {
-            std::path::Path::new(dest).to_path_buf()
-        } else {
-            // Default destination is same filename in home directory
-            std::path::Path::new(file).to_path_buf()
-        };
+        let dest_path = dest.map_or_else(
+            || std::path::Path::new(file).to_path_buf(),
+            |dest| std::path::Path::new(dest).to_path_buf(),
+        );
 
         // Register file in config without copying (file already in repo)
         let repo_relative = repo_file
@@ -628,11 +622,8 @@ fn handle_add_command(
             );
         } else {
             config.save(false)?;
-            println!(
-                "{} Registered {} from repo (no copy needed)",
-                "✓".green(),
-                repo_file.display()
-            );
+            // Git-like output: "add 'file'"
+            println!("add '{}'", dest_path.display());
         }
     } else {
         // Standard flow: copy source file to repository
@@ -650,10 +641,9 @@ fn handle_add_command(
             let home = dirs::home_dir().ok_or_else(|| {
                 DotfilesError::Config("Could not find home directory".to_string())
             })?;
-            match source_path.strip_prefix(&home) {
-                Ok(path) => path.to_path_buf(),
-                Err(_) => source_path.to_path_buf(),
-            }
+            source_path
+                .strip_prefix(&home)
+                .map_or_else(|_| source_path.to_path_buf(), std::path::Path::to_path_buf)
         };
 
         add_file(
@@ -721,6 +711,7 @@ fn handle_commit_command(
         }
     }
 
+    // Sync files first (quietly unless verbose)
     sync_files(&config, profile, &mut dry_run_tracker, dry_run, verbose)?;
 
     if dry_run {
@@ -813,13 +804,16 @@ fn handle_ls_files_command(profile: Option<&str>) -> Result<()> {
     let config = Config::load()?;
     let files = config.get_tracked_files(profile)?;
 
-    println!("\n{}", "Tracked files:".bold().cyan());
+    // Git-like output: one file per line, no header, just paths
     for file in files {
-        println!(
-            "  {} -> {}",
-            file.repo_path.display(),
-            file.dest_path.display()
-        );
+        // Show repo-relative path (like git ls-files shows paths relative to repo root)
+        let repo_path = config.get_repo_path();
+        if let Ok(rel_path) = file.repo_path.strip_prefix(&repo_path) {
+            println!("{}", rel_path.display());
+        } else {
+            // Fallback to full path if we can't compute relative
+            println!("{}", file.repo_path.display());
+        }
     }
     Ok(())
 }
@@ -846,7 +840,7 @@ fn handle_apply_command(
         let state_diff = compare_states(&config, profile, force)?;
         display_preview(&state_diff);
         if diff && !state_diff.files_to_sync.is_empty() {
-            crate::commands::display_diffs(&state_diff);
+            commands::display_diffs(&state_diff);
         }
     } else {
         use crate::commands::ApplyOptions;
@@ -873,29 +867,43 @@ fn handle_apply_command(
 ///
 /// Returns the parsed `DateTime`.
 fn parse_since_time(since_str: &str) -> Result<chrono::DateTime<chrono::Utc>> {
-    if let Ok(hours) = since_str.parse::<i64>() {
-        // Interpret as hours ago
-        Ok(chrono::Utc::now() - chrono::Duration::hours(hours))
-    } else if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(since_str) {
-        Ok(dt.with_timezone(&chrono::Utc))
-    } else if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(since_str, "%Y-%m-%d %H:%M:%S") {
-        Ok(dt.and_utc())
-    } else {
-        // Try just date
-        if let Ok(date) = chrono::NaiveDate::parse_from_str(since_str, "%Y-%m-%d") {
-            date.and_hms_opt(0, 0, 0)
-                .ok_or_else(|| {
-                    DotfilesError::Config(format!(
-                        "Invalid date: {since_str}. Could not create datetime from date"
-                    ))
-                })
-                .map(|dt| dt.and_utc())
-        } else {
-            Err(DotfilesError::Config(format!(
-                "Invalid 'since' format: {since_str}. Use ISO 8601, 'YYYY-MM-DD', or hours as number"
-            )))
-        }
-    }
+    since_str.parse::<i64>().map_or_else(
+        |_| {
+            chrono::DateTime::parse_from_rfc3339(since_str).map_or_else(
+                |_| {
+                    chrono::NaiveDateTime::parse_from_str(since_str, "%Y-%m-%d %H:%M:%S")
+                        .map_or_else(
+                            |_| {
+                                // Try just date
+                                chrono::NaiveDate::parse_from_str(since_str, "%Y-%m-%d")
+                                    .map_or_else(
+                                        |_| {
+                                            Err(DotfilesError::Config(format!(
+                                                "Invalid 'since' format: {since_str}. Use ISO 8601, 'YYYY-MM-DD', or hours as number"
+                                            )))
+                                        },
+                                        |date| {
+                                            date.and_hms_opt(0, 0, 0)
+                                                .ok_or_else(|| {
+                                                    DotfilesError::Config(format!(
+                                                        "Invalid date: {since_str}. Could not create datetime from date"
+                                                    ))
+                                                })
+                                                .map(|dt| dt.and_utc())
+                                        },
+                                    )
+                            },
+                            |dt| Ok(dt.and_utc()),
+                        )
+                },
+                |dt| Ok(dt.with_timezone(&chrono::Utc)),
+            )
+        },
+        |hours| {
+            // Interpret as hours ago
+            Ok(chrono::Utc::now() - chrono::Duration::hours(hours))
+        },
+    )
 }
 
 /// Handle the history command.
@@ -961,10 +969,9 @@ fn handle_history_command(
     } else {
         println!("\n{} Operation History:", "→".cyan().bold());
         for event in &events {
-            let profile_str = match event.profile.as_deref() {
-                Some(profile_name) => format!(" [profile: {profile_name}]"),
-                None => String::new(),
-            };
+            let profile_str = event.profile.as_deref().map_or_else(String::new, |profile_name| {
+                format!(" [profile: {profile_name}]")
+            });
             let dry_run_str = if event.dry_run { " [DRY RUN]" } else { "" };
             let summary = event.summary.as_deref().unwrap_or("(no summary)");
             println!(
@@ -1023,7 +1030,7 @@ fn handle_profile_command(command: ProfileCommands) -> Result<()> {
             }
         }
         ProfileCommands::Create { name } => {
-            create_profile(&mut config, &name)?;
+            create_profile(&config, &name)?;
         }
         ProfileCommands::Switch { name } => {
             switch_profile(&mut config, &name)?;
@@ -1172,19 +1179,15 @@ fn handle_push_command(
     let mut dry_run_tracker = DryRun::default();
 
     // Resolve remote with precedence: CLI flag > config default_remote > "origin"
-    let resolved_remote = match remote.or_else(|| config.general.default_remote.clone()) {
-        Some(name) => name,
-        None => "origin".to_string(),
-    };
+    let resolved_remote = remote
+        .or_else(|| config.general.default_remote.clone())
+        .unwrap_or_else(|| "origin".to_string());
 
     // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
-    let resolved_branch = match branch
+    let resolved_branch = branch
         .or_else(|| git::get_current_branch(&repo).ok())
         .or_else(|| config.general.default_branch.clone())
-    {
-        Some(name) => name,
-        None => "main".to_string(),
-    };
+        .unwrap_or_else(|| "main".to_string());
 
     // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
     let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);
@@ -1233,19 +1236,15 @@ fn handle_pull_command(
     let mut dry_run_tracker = DryRun::default();
 
     // Resolve remote with precedence: CLI flag > config default_remote > "origin"
-    let resolved_remote = match remote.or_else(|| config.general.default_remote.clone()) {
-        Some(name) => name,
-        None => "origin".to_string(),
-    };
+    let resolved_remote = remote
+        .or_else(|| config.general.default_remote.clone())
+        .unwrap_or_else(|| "origin".to_string());
 
     // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
-    let resolved_branch = match branch
+    let resolved_branch = branch
         .or_else(|| git::get_current_branch(&repo).ok())
         .or_else(|| config.general.default_branch.clone())
-    {
-        Some(name) => name,
-        None => "main".to_string(),
-    };
+        .unwrap_or_else(|| "main".to_string());
 
     // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
     let resolved_timeout = timeout.or(config.general.push_timeout).unwrap_or(60);

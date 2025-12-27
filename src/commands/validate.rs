@@ -22,6 +22,7 @@ pub enum ValidationIssue {
 }
 
 /// Report from configuration validation.
+#[derive(Debug)]
 pub struct ValidationReport {
     /// All issues found during validation
     pub issues: Vec<ValidationIssue>,
@@ -88,9 +89,7 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
     }
 
     // Check if current profile directory exists
-    let current_profile_dir = repo_path
-        .join("profiles")
-        .join(&config.general.current_profile);
+    let current_profile_dir = repo_path.join("profiles").join(&config.general.current_profile);
     if config.general.current_profile != "default" && !current_profile_dir.exists() {
         issues.push(ValidationIssue::MissingProfileDir(
             config.general.current_profile.clone(),
@@ -141,14 +140,14 @@ fn check_orphaned_entries(
         for file_entry in &tool_config.files {
             let normalized_repo = if file_entry.repo.starts_with(&format!("{tool}/")) {
                 // Remove tool name prefix (e.g., "cursor/settings.json" -> "settings.json")
-                match file_entry.repo.strip_prefix(&format!("{tool}/")) {
-                    Some(stripped) => stripped.to_string(),
-                    None => file_entry.repo.clone(),
-                }
+                file_entry
+                    .repo
+                    .strip_prefix(&format!("{tool}/"))
+                    .map_or_else(|| file_entry.repo.clone(), ToString::to_string)
             } else {
                 file_entry.repo.clone()
             };
-            tracked_files.insert(normalized_repo);
+            let _ = tracked_files.insert(normalized_repo);
         }
 
         // Find orphaned files
@@ -184,7 +183,7 @@ fn collect_files(
 
         if path.is_file() {
             if let Ok(relative) = path.strip_prefix(base) {
-                files.insert(relative.to_string_lossy().to_string());
+                let _ = files.insert(relative.to_string_lossy().to_string());
             }
         } else if path.is_dir() {
             collect_files(base, &path, files)?;

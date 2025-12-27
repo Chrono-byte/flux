@@ -13,7 +13,7 @@ use std::time::Duration;
 /// Handles both SSH (via SSH agent) and HTTPS (via environment variables or system keyring) authentication
 fn setup_credential_callbacks() -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(|_url, username, allowed_types| {
+    let _ = callbacks.credentials(|_url, username, allowed_types| {
         let username = username.unwrap_or("git");
 
         // For HTTPS authentication
@@ -73,7 +73,7 @@ where
     let timeout_duration = Duration::from_secs(timeout_seconds);
 
     // Spawn the operation in a thread
-    thread::spawn(move || {
+    let _ = thread::spawn(move || {
         let result = operation();
         let _ = tx.send(result);
     });
@@ -177,9 +177,8 @@ pub fn stage_changes(
             FileChange::Added(path) | FileChange::Modified(path) => {
                 // If it's a directory, recursively add all files in it
                 if path.is_dir() {
-                    for entry in walkdir::WalkDir::new(path)
-                        .into_iter()
-                        .filter_map(std::result::Result::ok)
+                    for entry in
+                        walkdir::WalkDir::new(path).into_iter().filter_map(std::result::Result::ok)
                     {
                         if entry.path().is_file()
                             && let Ok(relative) = entry.path().strip_prefix(repo_path)
@@ -194,9 +193,8 @@ pub fn stage_changes(
             FileChange::Deleted(path) => {
                 // If it's a directory, recursively remove all files in it
                 if path.is_dir() {
-                    for entry in walkdir::WalkDir::new(path)
-                        .into_iter()
-                        .filter_map(std::result::Result::ok)
+                    for entry in
+                        walkdir::WalkDir::new(path).into_iter().filter_map(std::result::Result::ok)
                     {
                         if entry.path().is_file()
                             && let Ok(relative) = entry.path().strip_prefix(repo_path)
@@ -252,7 +250,7 @@ pub fn commit_changes(
 
     let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
 
-    repo.commit(
+    let _ = repo.commit(
         Some("HEAD"),
         &signature,
         &signature,
@@ -268,17 +266,22 @@ pub fn commit_changes(
     new_index.write()?;
 
     // Get the commit we just created
-    let commit_id = repo.head()?.target().ok_or_else(|| {
-        DotfilesError::Config("Could not get commit ID after commit".to_string())
-    })?;
+    let commit_id = repo
+        .head()?
+        .target()
+        .ok_or_else(|| DotfilesError::Config("Could not get commit ID after commit".to_string()))?;
     let short_id = commit_id.to_string()[..7].to_string();
 
     // Get branch name (or "detached HEAD" if not on a branch)
-    let branch_name = get_current_branch(repo)
-        .unwrap_or_else(|_| "detached HEAD".to_string());
+    let branch_name = get_current_branch(repo).unwrap_or_else(|_| "detached HEAD".to_string());
 
     // Show git-like output: [branch-name abc1234] commit message
-    println!("[{} {}] {}", branch_name.cyan(), short_id.cyan(), commit_message);
+    println!(
+        "[{} {}] {}",
+        branch_name.cyan(),
+        short_id.cyan(),
+        commit_message
+    );
     Ok(())
 }
 
@@ -290,8 +293,8 @@ pub fn commit_changes(
 pub fn detect_changes(repo: &Repository) -> Result<Vec<FileChange>> {
     let mut changes = Vec::new();
     let mut status_options = git2::StatusOptions::new();
-    status_options.include_untracked(true);
-    status_options.include_ignored(false);
+    let _ = status_options.include_untracked(true);
+    let _ = status_options.include_ignored(false);
 
     let statuses = repo.statuses(Some(&mut status_options))?;
     let repo_root = repo
@@ -356,7 +359,7 @@ pub fn add_remote(
         return Ok(());
     }
 
-    repo.remote(name, url)?;
+    let _ = repo.remote(name, url)?;
     println!("{} Added remote '{}': {}", "✓".green(), name, url);
     Ok(())
 }
@@ -434,10 +437,7 @@ pub fn list_remotes(repo: &Repository) -> Result<()> {
             println!("{}  {} (fetch)", remote_name.cyan(), fetch_url);
 
             // Show push URL (use fetch URL if push URL not set, or show if different)
-            let actual_push_url = match push_url {
-                Some(url) => url,
-                None => fetch_url,
-            };
+            let actual_push_url = push_url.unwrap_or(fetch_url);
             println!("{}  {} (push)", remote_name.cyan(), actual_push_url);
         }
     }
@@ -455,7 +455,7 @@ fn execute_push_operation(
     let repo_path_clone = repo_path.to_path_buf();
     let remote_name_clone = remote_name.to_string();
     let refspec = format!("refs/heads/{branch_name}:refs/heads/{branch_name}");
-    let refspec_clone = refspec.clone();
+    let refspec_clone = refspec;
 
     execute_with_timeout(
         move || -> Result<()> {
@@ -463,7 +463,7 @@ fn execute_push_operation(
             let mut remote = repo_in_thread.find_remote(&remote_name_clone)?;
             let mut push_options_in_thread = git2::PushOptions::new();
             let callbacks_in_thread = setup_credential_callbacks();
-            push_options_in_thread.remote_callbacks(callbacks_in_thread);
+            let _ = push_options_in_thread.remote_callbacks(callbacks_in_thread);
             remote.push(&[&refspec_clone], Some(&mut push_options_in_thread))?;
             Ok(())
         },
@@ -480,10 +480,8 @@ fn is_push_up_to_date(
     remote_ref_before: Option<git2::Oid>,
 ) -> bool {
     let remote_branch_ref = format!("refs/remotes/{remote_name}/{branch_name}");
-    let remote_ref_after = repo
-        .find_reference(&remote_branch_ref)
-        .ok()
-        .and_then(|ref_| ref_.target());
+    let remote_ref_after =
+        repo.find_reference(&remote_branch_ref).ok().and_then(|ref_| ref_.target());
 
     if let (Some(before), Some(after)) = (remote_ref_before, remote_ref_after) {
         before == after && head_before == Some(before)
@@ -492,43 +490,36 @@ fn is_push_up_to_date(
     }
 }
 
-/// Display push success message with commit information.
+/// Display push success message with git-like ref update output.
 fn display_push_success(
     repo: &Repository,
     branch_name: &str,
-    remote_name: &str,
+    _remote_name: &str,
     remote_url: &str,
-    elapsed: Duration,
+    head_before: Option<git2::Oid>,
+    _remote_ref_before: Option<git2::Oid>,
 ) {
-    println!(
-        "{} Pushed {} to remote '{}' at {} (took {:.2}s)",
-        "✓".green(),
-        branch_name,
-        remote_name,
-        remote_url,
-        elapsed.as_secs_f64()
-    );
+    // Git-like output: "To <url>"
+    println!("To {remote_url}");
 
-    if let Ok(head) = repo.head()
-        && let Ok(commit) = head.peel_to_commit()
-    {
-        let message_raw = commit.message().unwrap_or("(no message)");
-        let message = message_raw.lines().next().unwrap_or("(no message)");
-        let short_id = commit.id().to_string()[..7].to_string();
-        let author_name = {
-            let author = commit.author();
-            match author.name() {
-                Some(name) => name.to_string(),
-                None => "unknown".to_string(),
-            }
-        };
-        println!(
-            "  {} {} {} {}",
-            "→".cyan(),
-            short_id.cyan(),
-            message,
-            author_name.dimmed()
-        );
+    // Get current HEAD after push
+    let head_after = repo.head().ok().and_then(|head| head.target());
+
+    // Show ref update in git format: "abc1234..def5678  branch -> branch"
+    if let (Some(before), Some(after)) = (head_before, head_after) {
+        if before == after {
+            // New branch (no before)
+            let after_short = after.to_string()[..7].to_string();
+            println!("   {after_short}  {branch_name} -> {branch_name} (new branch)");
+        } else {
+            let before_short = before.to_string()[..7].to_string();
+            let after_short = after.to_string()[..7].to_string();
+            println!("   {before_short}..{after_short}  {branch_name} -> {branch_name}");
+        }
+    } else if let Some(after) = head_after {
+        // New branch
+        let after_short = after.to_string()[..7].to_string();
+        println!("   {after_short}  {branch_name} -> {branch_name} (new branch)");
     }
 }
 
@@ -582,14 +573,12 @@ pub fn push_to_remote(
 
     let head_before = repo.head().ok().and_then(|head| head.target());
     let remote_branch_ref = format!("refs/remotes/{remote_name}/{branch_name}");
-    let remote_ref_before = repo
-        .find_reference(&remote_branch_ref)
-        .ok()
-        .and_then(|ref_| ref_.target());
+    let remote_ref_before =
+        repo.find_reference(&remote_branch_ref).ok().and_then(|ref_| ref_.target());
 
     let start_time = std::time::Instant::now();
     let push_result = execute_push_operation(repo_path, remote_name, branch_name, timeout_seconds);
-    let elapsed = start_time.elapsed();
+    let _elapsed = start_time.elapsed();
 
     match push_result {
         Ok(()) => {
@@ -602,14 +591,17 @@ pub fn push_to_remote(
             );
 
             if is_up_to_date {
-                println!(
-                    "{} Everything up-to-date with {}/{}",
-                    "✓".green(),
-                    remote_name,
-                    branch_name
-                );
+                // Git-like output for up-to-date
+                println!("Everything up-to-date");
             } else {
-                display_push_success(repo, branch_name, remote_name, remote_url, elapsed);
+                display_push_success(
+                    repo,
+                    branch_name,
+                    remote_name,
+                    remote_url,
+                    head_before,
+                    remote_ref_before,
+                );
             }
         }
         Err(err) => {
@@ -650,7 +642,7 @@ fn execute_fetch_operation(
             let mut remote = repo_in_thread.find_remote(&remote_name_clone)?;
             let mut fetch_options_in_thread = FetchOptions::new();
             let callbacks_in_thread = setup_credential_callbacks();
-            fetch_options_in_thread.remote_callbacks(callbacks_in_thread);
+            let _ = fetch_options_in_thread.remote_callbacks(callbacks_in_thread);
             let refspec_in_thread = format!(
                 "refs/heads/{branch_name_clone}:refs/remotes/{remote_name_clone}/{branch_name_clone}"
             );
@@ -666,25 +658,27 @@ fn execute_fetch_operation(
 }
 
 /// Perform merge after fetch (fast-forward or regular merge).
+/// Returns whether the merge was a fast-forward.
 fn perform_merge(
     repo: &Repository,
     remote_name: &str,
     branch_name: &str,
     remote_branch: &git2::Reference,
     remote_commit: &git2::Commit,
-) -> Result<()> {
+) -> Result<bool> {
     let annotated_commit = repo.reference_to_annotated_commit(remote_branch)?;
     let (analysis, _) = repo.merge_analysis(&[&annotated_commit])?;
 
     if analysis.is_up_to_date() {
-        return Ok(());
+        return Ok(false);
     }
 
     if analysis.is_fast_forward() {
         let mut ref_ = repo.find_reference(&format!("refs/heads/{branch_name}"))?;
-        ref_.set_target(remote_commit.id(), "Fast-forward")?;
+        let _ = ref_.set_target(remote_commit.id(), "Fast-forward")?;
         repo.set_head(&format!("refs/heads/{branch_name}"))?;
         repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))?;
+        Ok(true)
     } else {
         let signature = get_user_signature(repo)?;
         repo.merge(&[&annotated_commit], None, None)?;
@@ -695,7 +689,7 @@ fn perform_merge(
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
         let head = repo.head()?.peel_to_commit()?;
-        repo.commit(
+        let _ = repo.commit(
             Some("HEAD"),
             &signature,
             &signature,
@@ -703,9 +697,8 @@ fn perform_merge(
             &tree,
             &[&head, remote_commit],
         )?;
+        Ok(false)
     }
-
-    Ok(())
 }
 
 /// Check for merge conflicts and blocking untracked files.
@@ -716,11 +709,10 @@ fn check_merge_conflicts(repo: &Repository) -> Result<()> {
             .conflicts()?
             .filter_map(|conflict| {
                 conflict.ok().and_then(|conf| {
-                    conf.our
-                        .map(|entry| match std::str::from_utf8(&entry.path) {
-                            Ok(path) => path.to_string(),
-                            Err(_) => String::new(),
-                        })
+                    conf.our.map(|entry| {
+                        std::str::from_utf8(&entry.path)
+                            .map_or_else(|_| String::new(), ToString::to_string)
+                    })
                 })
             })
             .collect();
@@ -740,7 +732,7 @@ fn check_merge_conflicts(repo: &Repository) -> Result<()> {
         .iter()
         .filter_map(|entry| {
             if entry.status().is_wt_new() {
-                entry.path().map(std::string::ToString::to_string)
+                entry.path().map(ToString::to_string)
             } else {
                 None
             }
@@ -758,97 +750,99 @@ fn check_merge_conflicts(repo: &Repository) -> Result<()> {
     Ok(())
 }
 
-/// Display pull success message with commit information.
-fn display_pull_success(
+/// Calculate file statistics for a commit range (like git diff --stat).
+fn calculate_file_stats(
     repo: &Repository,
-    branch_name: &str,
-    remote_name: &str,
-    remote_url: &str,
-    elapsed: Duration,
-    head_before: Option<git2::Commit>,
-    head_after: Option<git2::Commit>,
-) {
-    if let (Some(head_before), Some(head_after)) = (head_before, head_after)
+    old_commit: &git2::Commit,
+    new_commit: &git2::Commit,
+) -> (usize, usize, usize) {
+    let Ok(old_tree) = old_commit.tree() else {
+        return (0, 0, 0);
+    };
+    let Ok(new_tree) = new_commit.tree() else {
+        return (0, 0, 0);
+    };
+
+    let Ok(diff) = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None) else {
+        return (0, 0, 0);
+    };
+
+    // Use diff stats for accurate file statistics
+    let Ok(stats) = diff.stats() else {
+        return (0, 0, 0);
+    };
+
+    let files_changed = stats.files_changed();
+    let insertions = stats.insertions();
+    let deletions = stats.deletions();
+
+    (files_changed, insertions, deletions)
+}
+
+/// Parameters for displaying pull success message.
+struct PullDisplayParams<'a> {
+    /// Repository reference.
+    repo: &'a Repository,
+    /// Commit before pull.
+    head_before: Option<git2::Commit<'a>>,
+    /// Commit after pull.
+    head_after: Option<git2::Commit<'a>>,
+    /// Whether the merge was a fast-forward.
+    was_fast_forward: bool,
+}
+
+/// Display pull success message with git-like output.
+fn display_pull_success(params: PullDisplayParams<'_>) {
+    use std::fmt::Write;
+
+    if let (Some(head_before), Some(head_after)) = (params.head_before, params.head_after)
         && head_before.id() != head_after.id()
     {
-        let Ok(mut revwalk) = repo.revwalk() else {
-            println!(
-                "{} Pulled {} from remote '{}' at {} (took {:.2}s)",
-                "✓".green(),
-                branch_name,
-                remote_name,
-                remote_url,
-                elapsed.as_secs_f64()
-            );
-            return;
-        };
+        let before_short = head_before.id().to_string()[..7].to_string();
+        let after_short = head_after.id().to_string()[..7].to_string();
 
-        if revwalk.push(head_after.id()).is_err()
-            || revwalk.hide(head_before.id()).is_err()
-            || revwalk
-                .set_sorting(git2::Sort::TIME | git2::Sort::TOPOLOGICAL)
-                .is_err()
-        {
-            println!(
-                "{} Pulled {} from remote '{}' at {} (took {:.2}s)",
-                "✓".green(),
-                branch_name,
-                remote_name,
-                remote_url,
-                elapsed.as_secs_f64()
-            );
-            return;
+        // Git-like output: "Updating abc1234..def5678"
+        println!("Updating {before_short}..{after_short}");
+
+        // Show fast-forward or merge info
+        if params.was_fast_forward {
+            println!("Fast-forward");
+        } else {
+            println!("Merge made by the 'recursive' strategy.");
         }
 
-        let commits: Vec<_> = revwalk
-            .take(10)
-            .filter_map(std::result::Result::ok)
-            .filter_map(|oid| repo.find_commit(oid).ok())
-            .collect();
-
-        println!(
-            "{} Pulled {} from remote '{}' at {} (took {:.2}s)",
-            "✓".green(),
-            branch_name,
-            remote_name,
-            remote_url,
-            elapsed.as_secs_f64()
-        );
-
-        if commits.is_empty() {
-            return;
-        }
-
-        println!("  {} {} new commit(s):", "→".cyan(), commits.len());
-        for commit in commits.iter().rev() {
-            let message_raw = commit.message().unwrap_or("(no message)");
-            let message = message_raw.lines().next().unwrap_or("(no message)");
-            let short_id = commit.id().to_string()[..7].to_string();
-            let author_name = {
-                let author = commit.author();
-                match author.name() {
-                    Some(name) => name.to_string(),
-                    None => "unknown".to_string(),
+        // Calculate and show file statistics
+        let (files_changed, insertions, deletions) =
+            calculate_file_stats(params.repo, &head_before, &head_after);
+        if files_changed > 0 {
+            let mut stats = format!(
+                " {files_changed} file{} changed",
+                if files_changed == 1 { "" } else { "s" }
+            );
+            if insertions > 0 || deletions > 0 {
+                let mut parts = Vec::new();
+                if insertions > 0 {
+                    parts.push(format!(
+                        "{insertions} insertion{}",
+                        if insertions == 1 { "" } else { "s" }
+                    ));
                 }
-            };
-            println!(
-                "    {} {} {}",
-                short_id.cyan(),
-                message,
-                author_name.dimmed()
-            );
+                if deletions > 0 {
+                    parts.push(format!(
+                        "{deletions} deletion{}",
+                        if deletions == 1 { "" } else { "s" }
+                    ));
+                }
+                let _ = write!(stats, ", {}", parts.join(", "));
+            }
+            println!("{stats}");
         }
+
         return;
     }
 
-    println!(
-        "{} Pulled {} from remote '{}' at {} (took {:.2}s)",
-        "✓".green(),
-        branch_name,
-        remote_name,
-        remote_url,
-        elapsed.as_secs_f64()
-    );
+    // Already up-to-date
+    println!("Already up-to-date.");
 }
 
 /// Pull from a remote repository.
@@ -878,7 +872,7 @@ pub fn pull_from_remote(
         .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
 
     let remote = repo.find_remote(remote_name)?;
-    let remote_url = remote.url().unwrap_or("unknown");
+    let _remote_url = remote.url().unwrap_or("unknown");
 
     let head_before = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
     let head_oid_before = head_before.as_ref().map(git2::Commit::id);
@@ -886,7 +880,7 @@ pub fn pull_from_remote(
     let start_time = std::time::Instant::now();
     let fetch_result =
         execute_fetch_operation(repo_path, remote_name, branch_name, timeout_seconds);
-    let elapsed = start_time.elapsed();
+    let _elapsed = start_time.elapsed();
 
     match fetch_result {
         Ok(()) => {
@@ -903,16 +897,11 @@ pub fn pull_from_remote(
             if let Some(head_oid) = head_oid_before
                 && head_oid == remote_oid
             {
-                println!(
-                    "{} Already up to date with {}/{}",
-                    "✓".green(),
-                    remote_name,
-                    branch_name
-                );
+                // Already up-to-date (no changes)
                 return Ok(());
             }
 
-            perform_merge(
+            let was_fast_forward = perform_merge(
                 repo,
                 remote_name,
                 branch_name,
@@ -926,24 +915,16 @@ pub fn pull_from_remote(
             if let (Some(oid_before), Some(oid_after)) = (head_oid_before, head_oid_after)
                 && oid_before == oid_after
             {
-                println!(
-                    "{} Already up to date with {}/{}",
-                    "✓".green(),
-                    remote_name,
-                    branch_name
-                );
+                // Already up-to-date (no changes)
                 return Ok(());
             }
 
-            display_pull_success(
+            display_pull_success(PullDisplayParams {
                 repo,
-                branch_name,
-                remote_name,
-                remote_url,
-                elapsed,
                 head_before,
                 head_after,
-            );
+                was_fast_forward,
+            });
         }
         Err(err) => {
             if err.to_string().contains("timed out") {
@@ -1002,10 +983,10 @@ pub fn show_git_status(repo: &Repository) -> Result<()> {
         })?;
 
         let (ahead, behind) = repo.graph_ahead_behind(head_oid, upstream_oid)?;
-        let upstream_name = match upstream_branch.get().name() {
-            Some(name) => name.to_string(),
-            None => "unknown".to_string(),
-        };
+        let upstream_name = upstream_branch
+            .get()
+            .name()
+            .map_or_else(|| "unknown".to_string(), ToString::to_string);
         (Some(ahead), Some(behind), Some(upstream_name))
     } else {
         (None, None, None)
@@ -1034,11 +1015,7 @@ pub fn show_git_status(repo: &Repository) -> Result<()> {
             status_parts.push(format!("{ahead_count} commit(s) ahead").green().to_string());
         }
         if behind_count > 0 {
-            status_parts.push(
-                format!("{behind_count} commit(s) behind")
-                    .yellow()
-                    .to_string(),
-            );
+            status_parts.push(format!("{behind_count} commit(s) behind").yellow().to_string());
         }
         if !status_parts.is_empty() {
             println!("  {}", status_parts.join(", "));

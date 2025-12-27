@@ -9,7 +9,7 @@ use std::path::PathBuf;
 /// # Errors
 ///
 /// Returns an error if there are issues creating the directory or accessing the repository.
-pub fn create_profile(config: &mut Config, name: &str) -> Result<()> {
+pub fn create_profile(config: &Config, name: &str) -> Result<()> {
     let repo_path = config.get_repo_path();
     let profile_dir = repo_path.join("profiles").join(name);
 
