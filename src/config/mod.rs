@@ -93,8 +93,8 @@ impl Config {
     }
     /// Load configuration from default locations.
     ///
-    /// Checks `DOTFILES_CONFIG` environment variable first. XDG config
-    /// (`~/.config/flux/config.toml`) is authoritative and overwrites repo version.
+    /// Checks `DOTFILES_CONFIG` environment variable first, then repo config,
+    /// then XDG config as fallback. Repo config is the source of truth.
     ///
     /// # Errors
     ///
@@ -107,8 +107,8 @@ impl Config {
 
     /// Load configuration from default locations with optional path override.
     ///
-    /// Checks `config_path_override` parameter first, then `DOTFILES_CONFIG` environment variable.
-    /// XDG config (`~/.config/flux/config.toml`) is authoritative and overwrites repo version.
+    /// Checks `config_path_override` parameter first, then `DOTFILES_CONFIG` environment variable,
+    /// then repo config, then XDG config as fallback. Repo config is the source of truth.
     ///
     /// # Parameters
     ///
@@ -124,29 +124,7 @@ impl Config {
         } else if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
             PathBuf::from(&config_path_str)
         } else {
-            // Check XDG config first (authoritative)
-            let xdg_config = Self::get_xdg_config_path()?;
-            if xdg_config.exists() {
-                // XDG config exists - use it and overwrite repo version
-                let config = Self::load_from_path(&xdg_config, &mut Vec::new())?;
-                // Overwrite repo version with XDG contents
-                let repo_config = Self::get_repo_config_path()?;
-                // Create parent directory if needed
-                if let Some(parent) = repo_config.parent() {
-                    fs::create_dir_all(parent).map_err(|error| {
-                        DotfilesError::Config(format!(
-                            "Failed to create repo config directory: {error}"
-                        ))
-                    })?;
-                }
-                // Copy XDG config to repo to keep them in sync
-                fs::copy(&xdg_config, &repo_config).map(|_| ()).map_err(|error| {
-                    DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
-                })?;
-                return Ok(config);
-            }
-
-            // Fall back to repo config or default location
+            // Use repo config as source of truth, fall back to XDG
             Self::get_config_path()?
         };
 
@@ -296,25 +274,6 @@ impl Config {
 
         // Write back
         fs::write(&config_path, doc.to_string())?;
-
-        // If we saved to XDG config, also update repo version
-        let xdg_config = Self::get_xdg_config_path()?;
-        if config_path == xdg_config {
-            let repo_config = Self::get_repo_config_path()?;
-            // Create parent directory if needed
-            if let Some(parent) = repo_config.parent() {
-                fs::create_dir_all(parent).map_err(|error| {
-                    DotfilesError::Config(format!(
-                        "Failed to create repo config directory: {error}"
-                    ))
-                })?;
-            }
-            // Copy XDG config to repo to keep them in sync
-            fs::copy(&xdg_config, &repo_config).map(|_| ()).map_err(|error| {
-                DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
-            })?;
-        }
-
         Ok(())
     }
 
@@ -458,16 +417,21 @@ impl Config {
     ///
     /// Returns an error if the config directory or home directory cannot be found.
     pub fn get_config_path() -> Result<PathBuf> {
+        // Repo config is the source of truth - prefer it if it exists
+        let repo_config = Self::get_repo_config_path()?;
+        if repo_config.exists() {
+            return Ok(repo_config);
+        }
+
+        // Fall back to XDG config
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
         let xdg_config = config_dir.join("flux/config.toml");
-
-        // XDG config is authoritative - prefer it if it exists
         if xdg_config.exists() {
             return Ok(xdg_config);
         }
 
-        // Fall back to repo config
+        // Return repo config path as default (even if it doesn't exist)
         let home = dirs::home_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
         let repo_config = home.join(".dotfiles").join("config.toml");
@@ -480,7 +444,7 @@ impl Config {
         Ok(xdg_config)
     }
 
-    /// Get the XDG config path (authoritative location)
+    /// Get the XDG config path (fallback location)
     ///
     /// # Errors
     ///
@@ -875,20 +839,21 @@ impl Config {
         base
     }
 
-    /// Sync XDG config to repo (overwrite repo config with XDG config).
+    /// Sync repo config to XDG location (copy repo config to XDG).
     ///
-    /// Useful for manually forcing sync when XDG config is authoritative.
+    /// Useful for manually syncing the repo config to the XDG location for tools
+    /// that might check there.
     ///
     /// # Errors
     ///
     /// Returns an error if there are issues reading or writing configuration files.
-    pub fn sync_xdg_to_repo(dry_run: bool) -> Result<()> {
-        let xdg_config = Self::get_xdg_config_path()?;
+    pub fn sync_repo_to_xdg(dry_run: bool) -> Result<()> {
         let repo_config = Self::get_repo_config_path()?;
+        let xdg_config = Self::get_xdg_config_path()?;
 
-        if !xdg_config.exists() {
+        if !repo_config.exists() {
             return Err(DotfilesError::Config(
-                "XDG config does not exist. Nothing to sync.".to_string(),
+                "Repo config does not exist. Nothing to sync.".to_string(),
             ));
         }
 
@@ -896,29 +861,29 @@ impl Config {
             println!(
                 "{} [DRY RUN] Would copy {} to {}",
                 "⊘".yellow(),
-                xdg_config.display(),
-                repo_config.display()
+                repo_config.display(),
+                xdg_config.display()
             );
             return Ok(());
         }
 
         // Create parent directory if needed
-        if let Some(parent) = repo_config.parent() {
+        if let Some(parent) = xdg_config.parent() {
             fs::create_dir_all(parent).map_err(|error| {
-                DotfilesError::Config(format!("Failed to create repo config directory: {error}"))
+                DotfilesError::Config(format!("Failed to create XDG config directory: {error}"))
             })?;
         }
 
-        // Copy XDG config to repo
-        fs::copy(&xdg_config, &repo_config).map(|_| ()).map_err(|error| {
-            DotfilesError::Config(format!("Failed to copy XDG config to repo: {error}"))
+        // Copy repo config to XDG
+        fs::copy(&repo_config, &xdg_config).map(|_| ()).map_err(|error| {
+            DotfilesError::Config(format!("Failed to copy repo config to XDG: {error}"))
         })?;
 
         println!(
-            "{} Synced XDG config to repo: {} -> {}",
+            "{} Synced repo config to XDG: {} -> {}",
             "✓".green(),
-            xdg_config.display(),
-            repo_config.display()
+            repo_config.display(),
+            xdg_config.display()
         );
 
         Ok(())

@@ -1068,7 +1068,7 @@ fn handle_profile_command(command: ProfileCommands) -> Result<()> {
 fn handle_config_command(command: &ConfigCommands) -> Result<()> {
     match command {
         ConfigCommands::Sync { dry_run } => {
-            Config::sync_xdg_to_repo(*dry_run)?;
+            Config::sync_repo_to_xdg(*dry_run)?;
         }
         ConfigCommands::Format { dry_run } => {
             let xdg_config = Config::get_xdg_config_path()?;
