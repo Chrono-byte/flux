@@ -45,7 +45,16 @@ pub fn find_discrepancies(config: &Config, profile: Option<&str>) -> Result<Vec<
     let tracked_files = config.get_tracked_files(profile)?;
     let mut discrepancies = Vec::new();
 
+    // Get the path to the flux config file to skip it in discrepancy checks
+    let flux_config_path = Config::get_xdg_config_path().ok();
+
     for file in tracked_files {
+        // Skip checking the flux config file itself to avoid circular dependency issues
+        if let Some(ref config_path) = flux_config_path
+            && file.dest_path == *config_path {
+                continue;
+            }
+
         if let Some(discrepancy) = check_file_discrepancy(&file)? {
             discrepancies.push(discrepancy);
         }
