@@ -124,11 +124,6 @@ files = [
 files = [
     { repo = "settings.json", dest = ".config/Cursor/User/settings.json" }
 ]
-
-[tools.flux]
-files = [
-    { repo = "./config.toml", dest = ".config/flux/config.toml" }
-]
 ```
 
 ### Repository Paths
@@ -140,7 +135,17 @@ File paths in the `repo` field support the following patterns:
 - `./filename` - File at repository root, not in tool directory (e.g., `./config.toml` becomes `~/.dotfiles/config.toml`)
 - `toolname/filename` - Explicit tool prefix (e.g., `cursor/settings.json` becomes `~/.dotfiles/cursor/settings.json`)
 
-The `./` prefix is useful for configuration files that should live at the repository root, such as Flux's own configuration file.
+The `./` prefix is useful for configuration files that should live at the repository root rather than in a tool-specific directory.
+
+## Flux Configuration
+
+Flux's own configuration (`~/.dotfiles/config.toml`) is the source of truth and not tracked as a managed file. To ensure Flux always uses your repository configuration, set the environment variable:
+
+```bash
+export DOTFILES_CONFIG="$HOME/.dotfiles/config.toml"
+```
+
+Add this to your shell config (e.g., `~/.zshrc`) so Flux always reads from your repository config, not from the XDG location.
 
 ### Symlink Resolution
 
