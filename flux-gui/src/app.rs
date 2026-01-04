@@ -2,8 +2,7 @@
 
 use crate::state::{AppView, FileStatus};
 use crate::styles::{
-    accent_color, border_color, card_bg, dimensions, sidebar_bg, text_primary, text_secondary,
-    window_bg,
+    accent_color, border_color, dimensions, sidebar_bg, text_primary, text_secondary, window_bg,
 };
 use flux::config::Config;
 use flux::services::history::HistoryEvent;
@@ -201,7 +200,6 @@ impl AppState {
                 FileStatus::OutOfSync => summary.out_of_sync += 1,
                 FileStatus::Pending => summary.missing += 1,
                 FileStatus::Conflict => summary.broken += 1,
-                FileStatus::Pending => {}
             }
         }
         self.sync_summary = summary;
@@ -211,6 +209,8 @@ impl AppState {
 pub struct FluxApp {
     pub state: AppState,
 }
+
+impl gpui::Global for FluxApp {}
 
 impl FluxApp {
     pub fn new(repo_path: PathBuf, _cx: &mut Context<Self>) -> Self {
@@ -300,7 +300,7 @@ impl FluxApp {
     ) -> impl IntoElement {
         let is_active = current_view == view;
         let label = label.to_string();
-        let target_view = view;
+        let _target_view = view;
         let entity = entity.clone();
 
         let mut item = div()
@@ -325,7 +325,7 @@ impl FluxApp {
             let entity = entity.clone();
             item = item.on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(move |_this, _event, window, cx| {
+                cx.listener(move |_this, _event, window, _cx| {
                     let target_view = target_view;
                     let entity = entity.clone();
                     let entity_id = entity.entity_id();
