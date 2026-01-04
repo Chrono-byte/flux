@@ -21,12 +21,8 @@ impl Render for HomeView {
                     .text_color(text_primary())
                     .child("Welcome to Flux"),
             )
-            .child(
-                div()
-                    .p_4()
-                    .bg(card_bg())
-                    .rounded_md()
-                    .child(div().text_color(text_secondary()).child("Dashboard content will appear here")),
-            )
+            .child(div().p_4().bg(card_bg()).rounded_md().child(
+                div().text_color(text_secondary()).child("Dashboard content will appear here"),
+            ))
     }
 }

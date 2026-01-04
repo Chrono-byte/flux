@@ -1,6 +1,5 @@
 //! Main application state and component.
 
-use crate::async_executor::{FluxExecutor, TaskResult};
 use crate::state::{AppView, FileStatus};
 use crate::styles::{
     accent_color, border_color, card_bg, dimensions, sidebar_bg, text_primary, text_secondary,
@@ -42,7 +41,7 @@ pub struct Notification {
     pub is_error: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct TrackedFileState {
     pub tool: String,
     pub repo_path: String,
@@ -51,6 +50,20 @@ pub struct TrackedFileState {
     pub status: FileStatus,
     pub selected: bool,
     pub expanding_diff: bool,
+}
+
+impl Default for TrackedFileState {
+    fn default() -> Self {
+        Self {
+            tool: String::new(),
+            repo_path: String::new(),
+            dest_path: String::new(),
+            profile: None,
+            status: FileStatus::Pending,
+            selected: false,
+            expanding_diff: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -186,7 +199,7 @@ impl AppState {
             match file.status {
                 FileStatus::Synced => summary.synced += 1,
                 FileStatus::OutOfSync => summary.out_of_sync += 1,
-                FileStatus::Missing => summary.missing += 1,
+                FileStatus::Pending => summary.missing += 1,
                 FileStatus::Conflict => summary.broken += 1,
                 FileStatus::Pending => {}
             }
@@ -197,36 +210,13 @@ impl AppState {
 
 pub struct FluxApp {
     pub state: AppState,
-    executor: FluxExecutor,
 }
 
 impl FluxApp {
-    pub fn new(repo_path: PathBuf, cx: &mut Context<Self>) -> Self {
-        let executor = FluxExecutor::new();
-        let mut state = AppState::new(repo_path);
-
-        let entity = cx.entity().clone();
-        cx.spawn(|_, mut cx| async move {
-            if let Ok(reply) =
-                executor.execute(async { crate::async_executor::Operation::LoadConfig }).await
-            {
-                if let TaskResult::Config(config_result) = reply {
-                    entity.update(&mut cx, |state, _| match config_result {
-                        Ok(config) => {
-                            state.config = Ok(config.clone());
-                            state.current_profile = config.general.current_profile;
-                            state.repo_path = config.get_repo_path();
-                        }
-                        Err(e) => {
-                            state.config = Err(e.to_string());
-                        }
-                    });
-                }
-            }
-        })
-        .detach();
-
-        Self { state, executor }
+    pub fn new(repo_path: PathBuf, _cx: &mut Context<Self>) -> Self {
+        Self {
+            state: AppState::new(repo_path),
+        }
     }
 }
 

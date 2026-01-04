@@ -1,6 +1,7 @@
 //! Flux - A dotfiles manager GUI built with GPUI.
 
 mod app;
+mod async_executor;
 mod components;
 mod events;
 mod state;

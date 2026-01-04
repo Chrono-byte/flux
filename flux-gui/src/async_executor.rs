@@ -398,7 +398,7 @@ impl FluxExecutor {
         T: Future<Output = TaskResult> + Send + 'static,
     {
         let op = operation.await;
-        let (reply_tx, reply_rx) = mpsc::channel(1);
+        let (reply_tx, mut reply_rx) = mpsc::channel(1);
         let task = AsyncTask {
             operation: op,
             reply: reply_tx,
