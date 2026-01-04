@@ -606,12 +606,12 @@ impl Config {
                     })?;
 
                 // Handle both cases: repo may or may not include the tool name prefix
-                let repo_file_path = if rendered_repo.starts_with("./") {
+                let repo_file_path = if let Some(stripped) = rendered_repo.strip_prefix("./") {
                     // repo starts with ./ - treat as repo root relative (e.g., "./config.toml")
-                    repo_path.join(&rendered_repo[2..])
-                } else if rendered_repo.starts_with(&format!("{tool}/")) {
+                    repo_path.join(stripped)
+                } else if let Some(stripped) = rendered_repo.strip_prefix(&format!("{tool}/")) {
                     // repo already includes tool name (e.g., "cursor/settings.json")
-                    repo_path.join(&rendered_repo)
+                    repo_path.join(stripped)
                 } else {
                     // repo doesn't include tool name (e.g., "config")
                     repo_path.join(tool).join(&rendered_repo)

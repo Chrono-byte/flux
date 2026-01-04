@@ -1,6 +1,6 @@
 [package]
 name = "flux"
-version = "1.3.0"
+version = "1.3.1"
 edition = "2024"
 
 [lib]
@@ -8,148 +8,141 @@ name = "flux"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.9"
-toml_edit = "0.24"
-anyhow = "1.0"
 colored = "3.0"
 dialoguer = "0.12"
-git2 = "0.20.3"
 dirs = "6.0"
-chrono = { version = "0.4", features = ["serde"] }
-thiserror = "2.0.17"
-pathdiff = "0.2"
-walkdir = "2"
-log = "0.4"
 env_logger = "0.11"
-nix = { version = "0.30.1", features = ["process", "fs"] }
-shellexpand = "3.1"
-uuid = { version = "1.6", features = ["v4"] }
-tempfile = "3.8"
-rayon = "1.8"
+git2 = "0.20.3"
 indicatif = "0.18"
+log = "0.4"
+nix = { version = "0.30.1", features = ["fs", "process"] }
+pathdiff = "0.2"
+rayon = "1.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+shellexpand = "3.1"
+tempfile = "3.8"
+thiserror = "2.0.17"
+toml = "0.9"
+toml_edit = "0.24"
+uuid = { version = "1.6", features = ["v4"] }
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3.8"
 
-# Compiler lints - catch issues at compile time
-[lints.rust]
-# Deny unsafe code (unless explicitly needed)
-unsafe_code = "deny"
-# Warn about deprecated items
-deprecated = "warn"
-# Warn about unused imports
-unused_imports = "warn"
-# Warn about unused variables
-unused_variables = "warn"
-# Warn about dead code
-dead_code = "warn"
-# Warn about unused attributes
-unused_attributes = "warn"
-# Warn about unused macros
-unused_macros = "warn"
-# Warn about unused extern crates
-unused_extern_crates = "warn"
-# Warn about missing documentation
-missing_docs = "warn"
-# Warn about trivial casts
-trivial_casts = "warn"
-# Warn about trivial numeric casts
-trivial_numeric_casts = "warn"
-# Warn about unused results
-unused_results = "warn"
-# Warn about unused must use
-unused_must_use = "warn"
-# Warn about unused qualifications
-unused_qualifications = "warn"
-# Warn about missing debug implementations
-missing_debug_implementations = "warn"
-# Warn about missing copy implementations
-missing_copy_implementations = "warn"
-# Note: missing_doc_examples is not a valid clippy lint
-
 # Clippy lints - comprehensive code quality checks
 [lints.clippy]
+collapsible_match = "warn"
+# Complexity - keep code maintainable (WARN)
+complexity = { level = "warn", priority = 1 }
 # Core correctness - catch bugs early (DENY)
 correctness = { level = "deny", priority = 1 }
-suspicious = { level = "deny", priority = 1 }
-# Disallow panics in production code
-panic = "deny"
-# Disallow unwrap() - use proper error handling
-unwrap_used = "deny"
+# Warn about enum glob imports
+enum_glob_use = "warn"
 # Warn on expect() - prefer proper error handling
 expect_used = "warn"
-
-# Performance - important for CLI responsiveness (WARN)
-perf = { level = "warn", priority = 1 }
-# Warn about unnecessary allocations
-unnecessary_owned_empty_strings = "warn"
+# Allow some flexibility for file/path operations
+indexing_slicing = "warn"
 # Warn about inefficient string operations
 inefficient_to_string = "warn"
 # Warn about large enum variants
 large_enum_variant = "warn"
 # Warn about large structs passed by value
 large_types_passed_by_value = "warn"
-
-# Complexity - keep code maintainable (WARN)
-complexity = { level = "warn", priority = 1 }
-# Warn about too many arguments
-too_many_arguments = "warn"
-# Warn about too many lines in functions
-too_many_lines = "warn"
-# Warn about type complexity
-type_complexity = "warn"
-
-# Style - encourage good practices (WARN)
-style = { level = "warn", priority = 1 }
-# Warn about enum glob imports
-enum_glob_use = "warn"
+match_bool = "warn"
+match_ref_pats = "warn"
+match_same_arms = "warn"
+match_single_binding = "warn"
+# Warn about too short identifiers
+min_ident_chars = "warn"
 # Warn about missing documentation
 missing_docs_in_private_items = "warn"
 # Warn about missing error documentation
 missing_errors_doc = "warn"
 # Warn about missing panic documentation
 missing_panics_doc = "warn"
-# Warn about too short identifiers
-min_ident_chars = "warn"
+needless_bool = "deny"
+needless_late_init = "warn"
+needless_match = "warn"
+# Disallow panics in production code
+panic = "deny"
+# Pedantic checks - comprehensive but may be noisy (WARN)
+pedantic = { level = "warn", priority = 1 }
+# Performance - important for CLI responsiveness (WARN)
+perf = { level = "warn", priority = 1 }
+redundant_guards = "warn"
+redundant_pattern = "warn"
+redundant_pattern_matching = "warn"
 # Warn about similar names
 similar_names = "warn"
-
 # Match patterns - allow some flexibility for file/path handling (WARN)
 single_match = "warn"
 single_match_else = "warn"
-needless_match = "warn"
-needless_late_init = "warn"
-redundant_pattern_matching = "warn"
-redundant_pattern = "warn"
-redundant_guards = "warn"
-collapsible_match = "warn"
-match_single_binding = "warn"
-match_same_arms = "warn"
-match_ref_pats = "warn"
-match_bool = "warn"
-needless_bool = "deny"
-# Allow some flexibility for file/path operations
-indexing_slicing = "warn"
-
-# Wildcard usage - warn but allow flexibility (WARN)
-wildcard_imports = "warn"
-wildcard_dependencies = "warn"
-wildcard_enum_match_arm = "warn"
-wildcard_in_or_patterns = "warn"
-
-# Unused code (WARN)
-useless_attribute = "warn"
-unused_self = "warn"
-unused_unit = "warn"
+# Style - encourage good practices (WARN)
+style = { level = "warn", priority = 1 }
+suspicious = { level = "deny", priority = 1 }
+# Warn about too many arguments
+too_many_arguments = "warn"
+# Warn about too many lines in functions
+too_many_lines = "warn"
+# Warn about type complexity
+type_complexity = "warn"
+# Warn about unnecessary allocations
+unnecessary_owned_empty_strings = "warn"
 unused_enumerate_index = "warn"
-unused_io_amount = "warn"
 unused_format_specs = "warn"
+unused_io_amount = "warn"
 unused_peekable = "warn"
 unused_rounding = "warn"
+unused_self = "warn"
+unused_unit = "warn"
+# Disallow unwrap() - use proper error handling
+unwrap_used = "deny"
+# Unused code (WARN)
+useless_attribute = "warn"
+wildcard_dependencies = "warn"
+wildcard_enum_match_arm = "warn"
+# Wildcard usage - warn but allow flexibility (WARN)
+wildcard_imports = "warn"
+wildcard_in_or_patterns = "warn"
 
-# Pedantic checks - comprehensive but may be noisy (WARN)
-pedantic = { level = "warn", priority = 1 }
+# Compiler lints - catch issues at compile time
+[lints.rust]
+# Warn about dead code
+dead_code = "warn"
+# Warn about deprecated items
+deprecated = "warn"
+# Warn about missing copy implementations
+missing_copy_implementations = "warn"
+# Warn about missing debug implementations
+missing_debug_implementations = "warn"
+# Warn about missing documentation
+missing_docs = "warn"
+# Warn about trivial casts
+trivial_casts = "warn"
+# Warn about trivial numeric casts
+trivial_numeric_casts = "warn"
+# Deny unsafe code (unless explicitly needed)
+unsafe_code = "deny"
+# Warn about unused attributes
+unused_attributes = "warn"
+# Warn about unused extern crates
+unused_extern_crates = "warn"
+# Warn about unused imports
+unused_imports = "warn"
+# Warn about unused macros
+unused_macros = "warn"
+# Warn about unused must use
+unused_must_use = "warn"
+# Warn about unused qualifications
+unused_qualifications = "warn"
+# Warn about unused results
+unused_results = "warn"
+# Warn about unused variables
+unused_variables = "warn"
+# Note: missing_doc_examples is not a valid clippy lint
