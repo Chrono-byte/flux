@@ -1,8 +1,8 @@
 {
     "$schema": "https://json-schema.org/draft-07/schema#",
-    "$id": "https://github.com/yourusername/dotfiles-manager/schemas/config.schema.json",
-    "title": "Flux Dotfiles Manager Configuration",
-    "description": "Schema for Flux dotfiles manager configuration file (config.toml)",
+    "$id": "https://github.com/chrono/dotfiles-manager/schemas/config.schema.json",
+    "title": "flux Dotfiles Manager Configuration",
+    "description": "Schema for flux dotfiles manager configuration file (config.toml)",
     "type": "object",
     "properties": {
         "general": {
@@ -331,63 +331,6 @@
                             }
                         ]
                     }
-                }
-            ]
-        },
-        "environment": {
-            "type": "object",
-            "description": "Environment configuration",
-            "x-taplo": {
-                "docs": {
-                    "main": "Environment configuration for setting environment variables and shell preferences.\n\nThis section allows you to declare environment variables and shell settings that should be applied to your system.\n\n**Example:**\n```toml\n[environment]\nvariables = { EDITOR = \"nvim\", SHELL = \"/bin/bash\" }\nshell = \"/bin/zsh\"\n```"
-                }
-            },
-            "properties": {
-                "variables": {
-                    "type": "object",
-                    "description": "Environment variables to set",
-                    "additionalProperties": {
-                        "type": "string"
-                    },
-                    "examples": [
-                        {
-                            "EDITOR": "nvim",
-                            "SHELL": "/bin/bash",
-                            "LANG": "en_US.UTF-8"
-                        }
-                    ]
-                },
-                "values": {
-                    "type": "object",
-                    "description": "Template variables for use in repo/dest paths and other strings. These are merged with built-in variables like `user`, `home`, `host`, `os`, and `profile`.",
-                    "additionalProperties": {
-                        "type": "string"
-                    },
-                    "examples": [
-                        {
-                            "work_root": "Projects/work",
-                            "personal_root": "Projects/personal"
-                        }
-                    ]
-                },
-                "shell": {
-                    "type": "string",
-                    "description": "Shell to use",
-                    "examples": [
-                        "/bin/bash",
-                        "/bin/zsh",
-                        "/usr/bin/fish"
-                    ]
-                }
-            },
-            "additionalProperties": false,
-            "examples": [
-                {
-                    "variables": {
-                        "EDITOR": "nvim",
-                        "SHELL": "/bin/bash"
-                    },
-                    "shell": "/bin/zsh"
                 }
             ]
         },
