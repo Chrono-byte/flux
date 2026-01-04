@@ -13,8 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::types::{ConditionSpec, FileEntry, SymlinkResolution};
+use crate::types::{Condition, ConditionGroup, ConditionSpec, FileEntry, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::system;
 
 /// General configuration settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +181,47 @@ impl Config {
                 error
             ))
         })?;
+
+        // Migrate legacy condition fields in file entries
+        for tool_config in current.tools.values_mut() {
+            for entry in &mut tool_config.files {
+                if let Some(ref mut conditions) = entry.conditions {
+                    conditions.migrate_legacy();
+                }
+            }
+        }
+
+        // Migrate hooks conditions
+        if let Some(ref mut hooks) = current.hooks {
+            if let Some(ref mut pre_apply) = hooks.pre_apply {
+                for hook in pre_apply {
+                    if let Some(ref mut conditions) = hook.conditions {
+                        conditions.migrate_legacy();
+                    }
+                }
+            }
+            if let Some(ref mut post_apply) = hooks.post_apply {
+                for hook in post_apply {
+                    if let Some(ref mut conditions) = hook.conditions {
+                        conditions.migrate_legacy();
+                    }
+                }
+            }
+            if let Some(ref mut pre_commit) = hooks.pre_commit {
+                for hook in pre_commit {
+                    if let Some(ref mut conditions) = hook.conditions {
+                        conditions.migrate_legacy();
+                    }
+                }
+            }
+            if let Some(ref mut post_commit) = hooks.post_commit {
+                for hook in post_commit {
+                    if let Some(ref mut conditions) = hook.conditions {
+                        conditions.migrate_legacy();
+                    }
+                }
+            }
+        }
 
         // First, load and merge any included configs (if present).
         let mut merged: Option<Self> = None;
@@ -539,7 +581,7 @@ impl Config {
             dest: dest_str,
             profile: profile.map(ToString::to_string),
             conditions: None,
-            secret: false,
+            secret: None,
             secret_backend: None,
             secret_key: None,
         };
@@ -623,14 +665,21 @@ impl Config {
                     })?
                     .join(&rendered_dest);
 
+                // Handle both new and legacy secret config by migrating if needed
+                let mut file_clone = file.clone();
+                file_clone.migrate_legacy_secret();
+                let secret = file_clone.secret.clone();
+                let is_secret = secret.is_some();
+
                 tracked_files.push(crate::types::TrackedFile {
                     tool: tool.clone(),
                     repo_path: repo_file_path,
                     dest_path,
                     profile: file.profile.clone(),
-                    is_secret: file.secret,
-                    secret_backend: file.secret_backend.clone(),
-                    secret_key: file.secret_key.clone(),
+                    is_secret,
+                    secret,
+                    secret_backend: None,
+                    secret_key: None,
                 });
             }
         }
@@ -655,7 +704,8 @@ impl Config {
         }
 
         // Hostname (best-effort)
-        if let Ok(hostname) = Self::detect_hostname() {
+        let hostname = system::get_hostname();
+        if hostname != "unknown" {
             let _ = values.insert("host".to_string(), hostname);
         }
 
@@ -703,104 +753,89 @@ impl Config {
     /// Determine if a set of conditions matches the current runtime environment.
     #[must_use]
     pub fn conditions_match(conditions: &ConditionSpec) -> bool {
-        // OS check
-        if !conditions.os.is_empty() {
-            let current_os = std::env::consts::OS.to_string();
-            let mut os_ok = false;
-            for os in &conditions.os {
-                if os.eq_ignore_ascii_case(&current_os) {
-                    os_ok = true;
-                    break;
-                }
-                // Support "darwin" alias for macOS
-                if current_os == "macos" && os.eq_ignore_ascii_case("darwin") {
-                    os_ok = true;
-                    break;
-                }
-            }
-            if !os_ok {
-                return false;
-            }
+        // If no groups defined, always match
+        if conditions.groups.is_empty() {
+            return true;
         }
 
-        // Hostname check
-        if !conditions.host.is_empty() {
-            let Ok(hostname) = Self::detect_hostname() else {
-                return false;
-            };
-            if !conditions
-                .host
-                .iter()
-                .any(|hostname_item| hostname_item.eq_ignore_ascii_case(&hostname))
-            {
-                return false;
-            }
-        }
+        log::debug!("Evaluating {} condition group(s)", conditions.groups.len());
 
-        // Environment variables check
-        for (key, expected) in &conditions.env {
-            match std::env::var(key) {
-                Ok(actual) if actual == *expected => {}
-                _ => return false,
-            }
-        }
+        // All groups must match (AND logic between groups)
+        for (group_idx, group) in conditions.groups.iter().enumerate() {
+            log::debug!(
+                "Evaluating group {} with {} condition(s)",
+                group_idx + 1,
+                group.conditions.len()
+            );
 
-        // Command existence check
-        for cmd in &conditions.cmd_exists {
-            if !Self::command_in_path(cmd) {
+            if !Self::evaluate_condition_group(group) {
+                log::debug!("Group {} did not match", group_idx + 1);
                 return false;
             }
+
+            log::debug!("Group {} matched", group_idx + 1);
         }
 
+        log::debug!("All condition groups matched");
         true
     }
 
-    /// Best-effort hostname detection using environment variables and common files.
-    fn detect_hostname() -> Result<String> {
-        // Prefer HOSTNAME environment variable if set.
-        if let Ok(host) = std::env::var("HOSTNAME") {
-            let trimmed = host.trim();
-            if !trimmed.is_empty() {
-                return Ok(trimmed.to_string());
+    /// Evaluate a single condition group (all conditions must match)
+    fn evaluate_condition_group(group: &ConditionGroup) -> bool {
+        // All conditions in the group must match (AND logic)
+        for condition in &group.conditions {
+            let result = Self::evaluate_condition(condition);
+            log::debug!(
+                "  Condition: {} -> {}",
+                condition.describe(),
+                if result { "✓" } else { "✗" }
+            );
+            if !result {
+                return false;
             }
         }
-
-        // Fallback: try reading /etc/hostname on Unix-like systems.
-        #[cfg(unix)]
-        {
-            if let Ok(contents) = fs::read_to_string("/etc/hostname") {
-                let trimmed = contents.trim();
-                if !trimmed.is_empty() {
-                    return Ok(trimmed.to_string());
-                }
-            }
-        }
-
-        Err(DotfilesError::Config(
-            "Failed to determine hostname; set HOSTNAME environment variable to override."
-                .to_string(),
-        ))
+        true
     }
 
-    /// Check if a command exists in PATH (simple PATH scan).
-    fn command_in_path(cmd: &str) -> bool {
-        if cmd.is_empty() {
-            return false;
-        }
-
-        if let Ok(path_var) = std::env::var("PATH") {
-            for dir in path_var.split(':') {
-                if dir.is_empty() {
-                    continue;
-                }
-                let candidate = Path::new(dir).join(cmd);
-                if candidate.is_file() {
+    /// Evaluate a single condition
+    fn evaluate_condition(condition: &Condition) -> bool {
+        match condition {
+            Condition::Os { value } => {
+                let current_os = system::get_os();
+                // Support case-insensitive matching
+                if value.to_string().eq_ignore_ascii_case(&current_os) {
                     return true;
                 }
+                // Support "darwin" alias for macOS
+                if current_os == "macos" && value.to_string().eq_ignore_ascii_case("darwin") {
+                    return true;
+                }
+                false
             }
+            Condition::Host { value } => {
+                let hostname = system::get_hostname();
+                value.eq_ignore_ascii_case(&hostname)
+            }
+            Condition::EnvVar { name, value } => {
+                system::get_env_var(name).is_some_and(|actual| &actual == value)
+            }
+            Condition::CommandExists { command } => system::command_exists(command),
+            Condition::FileExists { path } => system::path_exists(path),
+            Condition::EnvVarExists { name } => system::has_env_var(name),
+            Condition::Architecture { value } => {
+                let arch = system::get_architecture();
+                value.eq_ignore_ascii_case(&arch)
+            }
+            Condition::Shell { value } => {
+                let shell = system::get_shell();
+                value.eq_ignore_ascii_case(&shell)
+            }
+            Condition::User { username } => {
+                let current_user = system::get_username();
+                username.eq_ignore_ascii_case(&current_user)
+            }
+            Condition::Group { groupname } => system::user_in_group(groupname),
         }
-
-        false
     }
 
     /// Resolve an include path relative to a base directory, supporting `~` expansion.

@@ -1,3 +1,4 @@
+use crate::types::SecretBackend as SecretBackendEnum;
 use crate::utils::error::Result;
 use std::collections::HashMap;
 
@@ -13,9 +14,6 @@ pub struct SecretMaterial {
 
 /// Trait implemented by concrete secret backends.
 pub trait SecretBackend: Send + Sync + std::fmt::Debug {
-    /// Logical name of this backend (e.g., "env", "age").
-    fn name(&self) -> &'static str;
-
     /// Resolve a logical key to secret material.
     ///
     /// # Errors
@@ -24,9 +22,7 @@ pub trait SecretBackend: Send + Sync + std::fmt::Debug {
     fn resolve(&self, key: &str) -> Result<SecretMaterial>;
 
     /// Whether this backend can handle the given backend identifier.
-    fn supports_backend(&self, backend: &str) -> bool {
-        backend.eq_ignore_ascii_case(self.name())
-    }
+    fn supports_backend(&self, backend: SecretBackendEnum) -> bool;
 }
 
 /// A very small backend that sources secrets from environment variables.
@@ -37,10 +33,6 @@ pub trait SecretBackend: Send + Sync + std::fmt::Debug {
 pub struct EnvSecretBackend;
 
 impl SecretBackend for EnvSecretBackend {
-    fn name(&self) -> &'static str {
-        "env"
-    }
-
     fn resolve(&self, key: &str) -> Result<SecretMaterial> {
         let value = match std::env::var(key) {
             Ok(value) => value,
@@ -51,6 +43,10 @@ impl SecretBackend for EnvSecretBackend {
             }
         };
         Ok(SecretMaterial { value })
+    }
+
+    fn supports_backend(&self, backend: SecretBackendEnum) -> bool {
+        backend == SecretBackendEnum::Env
     }
 }
 
@@ -75,19 +71,19 @@ impl SecretsManager {
     /// # Errors
     ///
     /// Returns an error if no backend can resolve the secret, or if the resolution fails.
-    pub fn resolve(&self, backend: Option<&str>, key: &str) -> Result<SecretMaterial> {
+    pub fn resolve(&self, backend: Option<SecretBackendEnum>, key: &str) -> Result<SecretMaterial> {
         // Try specific backend first if provided.
-        if let Some(backend_name) = backend {
+        if let Some(backend_enum) = backend {
             for be in &self.backends {
-                if be.supports_backend(backend_name) {
+                if be.supports_backend(backend_enum) {
                     return be.resolve(key);
                 }
             }
         }
 
-        // Fallback: first backend that can resolve without explicit match.
+        // Fallback: first backend that can resolve (default to env).
         for be in &self.backends {
-            if be.supports_backend(be.name()) {
+            if be.supports_backend(SecretBackendEnum::Env) {
                 return be.resolve(key);
             }
         }
@@ -104,7 +100,7 @@ impl SecretsManager {
     /// Returns an error if any secret cannot be resolved.
     pub fn resolve_many(
         &self,
-        backend: Option<&str>,
+        backend: Option<SecretBackendEnum>,
         keys: &[String],
     ) -> Result<HashMap<String, SecretMaterial>> {
         let mut out = HashMap::new();

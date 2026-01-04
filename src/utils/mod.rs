@@ -12,6 +12,8 @@ pub mod path_utils;
 pub mod prompt;
 /// Security and permission utilities.
 pub mod security;
+/// System detection utilities.
+pub mod system;
 
 pub use dry_run::DryRun;
 pub use error::{DotfilesError, Result};

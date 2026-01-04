@@ -4,26 +4,49 @@ use colored::Colorize;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use std::path::Path;
 
-/// Type of conflict resolution.
-#[derive(Debug, Clone, Copy)]
-pub enum ConflictResolution {
-    /// Backup and replace the conflicting file.
-    BackupAndReplace,
-    /// Skip the conflicting file.
-    Skip,
-    /// View the diff of the conflicting file.
-    ViewDiff,
-    /// Cancel the operation.
-    Cancel,
+/// User choice for yes/no prompts
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YesNoChoice {
+    /// User selected yes
+    Yes,
+    /// User selected no
+    No,
 }
 
-/// Prompt the user for a conflict resolution.
+impl From<YesNoChoice> for bool {
+    fn from(choice: YesNoChoice) -> bool {
+        matches!(choice, YesNoChoice::Yes)
+    }
+}
+
+/// User choice for conflict resolution
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictChoice {
+    /// Keep local version
+    KeepLocal,
+    /// Use repo version
+    UseRepo,
+    /// View both versions first
+    ViewDiff,
+    /// Abort the operation
+    Abort,
+    /// Backup local and use repo
+    BackupAndUseRepo,
+}
+
+/// Prompt the user for a conflict resolution using the modern `ConflictChoice` enum.
 ///
 /// # Errors
 ///
 /// Returns an error if the user cannot be prompted.
-pub fn prompt_conflict(file_path: &Path) -> Result<ConflictResolution> {
-    let options = vec!["Backup and replace", "Skip", "View diff", "Cancel"];
+pub fn prompt_conflict_choice(file_path: &Path) -> Result<ConflictChoice> {
+    let options = vec![
+        "Keep local version",
+        "Use repo version",
+        "Backup local and use repo",
+        "View diff",
+        "Abort",
+    ];
 
     let selection = Select::with_theme(&ColorfulTheme::default())
         .with_prompt(format!(
@@ -36,20 +59,21 @@ pub fn prompt_conflict(file_path: &Path) -> Result<ConflictResolution> {
         .map_err(|error| DotfilesError::Io(std::io::Error::other(error)))?;
 
     match selection {
-        0 => Ok(ConflictResolution::BackupAndReplace),
-        1 => Ok(ConflictResolution::Skip),
-        2 => Ok(ConflictResolution::ViewDiff),
-        3 => Ok(ConflictResolution::Cancel),
+        0 => Ok(ConflictChoice::KeepLocal),
+        1 => Ok(ConflictChoice::UseRepo),
+        2 => Ok(ConflictChoice::BackupAndUseRepo),
+        3 => Ok(ConflictChoice::ViewDiff),
+        4 => Ok(ConflictChoice::Abort),
         _ => Err(DotfilesError::Cancelled),
     }
 }
 
-/// Prompt the user for a yes/no answer.
+/// Prompt the user for a yes/no answer using the modern `YesNoChoice` enum.
 ///
 /// # Errors
 ///
 /// Returns an error if the prompt interaction fails.
-pub fn prompt_yes_no(question: &str) -> Result<bool> {
+pub fn prompt_yes_no_choice(question: &str) -> Result<YesNoChoice> {
     let options = vec!["Yes", "No"];
 
     let selection = Select::with_theme(&ColorfulTheme::default())
@@ -59,7 +83,21 @@ pub fn prompt_yes_no(question: &str) -> Result<bool> {
         .interact()
         .map_err(|error| DotfilesError::Io(std::io::Error::other(error)))?;
 
-    Ok(selection == 0)
+    match selection {
+        0 => Ok(YesNoChoice::Yes),
+        1 => Ok(YesNoChoice::No),
+        _ => Err(DotfilesError::Cancelled),
+    }
+}
+
+/// Prompt the user for a yes/no answer (legacy API).
+///
+/// # Errors
+///
+/// Returns an error if the prompt interaction fails.
+pub fn prompt_yes_no(question: &str) -> Result<bool> {
+    let choice = prompt_yes_no_choice(question)?;
+    Ok(choice.into())
 }
 
 /// Prompt the user for a commit message.

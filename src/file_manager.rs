@@ -6,7 +6,7 @@ use crate::utils::path_utils::{
     files_differ, find_symlinked_parent, normalize_path, resolve_symlink_target,
     symlink_points_to_correct_target,
 };
-use crate::utils::prompt::{ConflictResolution, prompt_conflict};
+use crate::utils::prompt::{ConflictChoice, prompt_conflict_choice};
 use crate::utils::security;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -694,31 +694,31 @@ fn handle_file_conflict(
     fs_manager: &mut FileSystemManager,
     verbose: bool,
 ) -> Result<()> {
-    let conflict_resolution = if fs_manager.is_dry_run {
+    let conflict_choice = if fs_manager.is_dry_run {
         if verbose {
             println!("  [DRY RUN] Files differ, would prompt for conflict resolution");
             println!("  [DRY RUN] Assuming: Backup and Replace");
         }
-        ConflictResolution::BackupAndReplace
+        ConflictChoice::BackupAndUseRepo
     } else {
         // Backup was already created in sync_file
-        prompt_conflict(&file.dest_path)?
+        prompt_conflict_choice(&file.dest_path)?
     };
 
-    match conflict_resolution {
-        ConflictResolution::BackupAndReplace => {
+    match conflict_choice {
+        ConflictChoice::BackupAndUseRepo | ConflictChoice::UseRepo => {
             if verbose {
                 println!("  User chose: Backup and Replace");
             }
             create_symlink_managed(file, resolution, fs_manager, verbose)?;
         }
-        ConflictResolution::Skip => {
+        ConflictChoice::KeepLocal => {
             if verbose {
-                println!("  {} User chose: Skip", "⊘".yellow());
+                println!("  {} User chose: Keep Local", "⊘".yellow());
             }
             return Ok(());
         }
-        ConflictResolution::ViewDiff => {
+        ConflictChoice::ViewDiff => {
             if fs_manager.is_dry_run {
                 if verbose {
                     println!("  [DRY RUN] Would show diff and prompt again");
@@ -728,24 +728,24 @@ fn handle_file_conflict(
             } else {
                 show_diff(&file.repo_path, &file.dest_path)?;
                 // Ask again after showing diff
-                let post_diff_resolution = prompt_conflict(&file.dest_path)?;
-                match post_diff_resolution {
-                    ConflictResolution::BackupAndReplace => {
+                let post_diff_choice = prompt_conflict_choice(&file.dest_path)?;
+                match post_diff_choice {
+                    ConflictChoice::BackupAndUseRepo | ConflictChoice::UseRepo => {
                         create_symlink_managed(file, resolution, fs_manager, verbose)?;
                     }
-                    ConflictResolution::Skip => {
+                    ConflictChoice::KeepLocal => {
                         if verbose {
                             println!("{} Skipped {}", "⊘".yellow(), file.dest_path.display());
                         }
                     }
-                    ConflictResolution::Cancel => {
+                    ConflictChoice::Abort => {
                         return Err(DotfilesError::Cancelled);
                     }
-                    ConflictResolution::ViewDiff => {} // ViewDiff again is not an option here
+                    ConflictChoice::ViewDiff => {} // ViewDiff again is not an option here
                 }
             }
         }
-        ConflictResolution::Cancel => {
+        ConflictChoice::Abort => {
             return Err(DotfilesError::Cancelled);
         }
     }
@@ -777,7 +777,7 @@ fn create_symlink_managed(
     }
 
     // If this is a secret file with a secret_key, write secret content directly instead of symlinking
-    if file.is_secret && file.secret_key.is_some() {
+    if file.secret.is_some() {
         write_secret_file(file, fs_manager, verbose)?;
         return Ok(());
     }
@@ -844,7 +844,7 @@ fn handle_replace_strategy(
     }
 
     // If this is a secret file with a secret_key, resolve the secret instead of copying
-    if file.is_secret && file.secret_key.is_some() {
+    if file.secret.is_some() {
         write_secret_to_path(file, &temp_path, fs_manager, verbose)?;
     } else {
         fs_manager.copy(&file.repo_path, &temp_path)?;
@@ -855,7 +855,7 @@ fn handle_replace_strategy(
     set_secret_permissions_if_needed(file, &file.dest_path, fs_manager);
 
     if verbose && !fs_manager.is_dry_run {
-        if file.is_secret && file.secret_key.is_some() {
+        if file.secret.is_some() {
             println!(
                 "{} Wrote secret content to {}",
                 "✓".green(),
@@ -901,11 +901,10 @@ fn write_secret_to_path(
 ) -> Result<()> {
     use crate::services::secrets::SecretsManager;
     let secrets_mgr = SecretsManager::with_defaults();
-    let secret_key = file
-        .secret_key
-        .as_ref()
-        .ok_or_else(|| DotfilesError::Config("Secret file missing secret_key".to_string()))?;
-    let secret_mat = secrets_mgr.resolve(file.secret_backend.as_deref(), secret_key)?;
+    let secret_cfg = file.secret.as_ref().ok_or_else(|| {
+        DotfilesError::Config("Secret file missing secret configuration".to_string())
+    })?;
+    let secret_mat = secrets_mgr.resolve(Some(secret_cfg.backend), &secret_cfg.key)?;
 
     if !fs_manager.is_dry_run {
         if let Some(parent) = target_path.parent() {
@@ -927,7 +926,7 @@ fn set_secret_permissions_if_needed(
     path: &Path,
     fs_manager: &mut FileSystemManager,
 ) {
-    if file.is_secret
+    if file.secret.is_some()
         && !fs_manager.is_dry_run
         && let Err(error) = security::set_secure_permissions(path)
     {
@@ -1011,7 +1010,7 @@ fn create_symlink_atomic(
 
     // For secret files, tighten permissions on the repository copy which holds
     // the actual secret material.
-    if file.is_secret
+    if file.secret.is_some()
         && !fs_manager.is_dry_run
         && let Err(error) = security::set_secure_permissions(&file.repo_path)
     {

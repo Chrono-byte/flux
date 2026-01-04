@@ -547,7 +547,7 @@ mod file_entry_extended_tests {
             dest: ".config/app".to_string(),
             profile: None,
             conditions: None,
-            secret: false,
+            secret: None,
             secret_backend: None,
             secret_key: None,
         };
@@ -565,7 +565,7 @@ mod file_entry_extended_tests {
             dest: ".config/app".to_string(),
             profile: Some("work".to_string()),
             conditions: None,
-            secret: false,
+            secret: None,
             secret_backend: None,
             secret_key: None,
         };
@@ -581,7 +581,7 @@ mod file_entry_extended_tests {
             dest: ".config".to_string(),
             profile: Some("default".to_string()),
             conditions: None,
-            secret: false,
+            secret: None,
             secret_backend: None,
             secret_key: None,
         };

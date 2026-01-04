@@ -160,19 +160,20 @@ pub fn display_diffs(diff: &StateDiff) {
         std::collections::HashMap::new();
 
     // Collect all secret keys that need resolution
-    let secret_files: Vec<_> = diff
-        .files_to_sync
-        .iter()
-        .filter(|file| file.is_secret && file.secret_key.is_some())
-        .collect();
+    let secret_files: Vec<_> =
+        diff.files_to_sync.iter().filter(|file| file.secret.is_some()).collect();
 
     if !secret_files.is_empty() {
         // Batch resolve all secrets using resolve_many
-        let secret_keys: Vec<String> =
-            secret_files.iter().filter_map(|file| file.secret_key.clone()).collect();
+        let secret_keys: Vec<String> = secret_files
+            .iter()
+            .filter_map(|file| file.secret.as_ref().map(|secret| secret.key.clone()))
+            .collect();
 
         if let Ok(resolved_secrets) = secrets_mgr.resolve_many(
-            secret_files.first().and_then(|file| file.secret_backend.as_deref()),
+            secret_files
+                .first()
+                .and_then(|file| file.secret.as_ref().map(|secret| secret.backend)),
             &secret_keys,
         ) {
             for (key, material) in resolved_secrets {
@@ -186,28 +187,24 @@ pub fn display_diffs(diff: &StateDiff) {
         let current = fs::read_to_string(&file.dest_path).unwrap_or_default();
 
         // Target contents from repo or secret backend
-        let target = if file.is_secret && file.secret_key.is_some() {
+        let target = if let Some(secret_cfg) = &file.secret {
             // For secret files, use cached secret or resolve individually
-            if let Some(key) = &file.secret_key {
-                if let Some(cached) = secret_cache.get(key) {
-                    cached.clone()
-                } else {
-                    // Fallback to individual resolution if not in cache
-                    match secrets_mgr.resolve(file.secret_backend.as_deref(), key) {
-                        Ok(secret_mat) => secret_mat.value,
-                        Err(error) => {
-                            println!(
-                                "\n{} {} (skipping diff: cannot resolve secret: {})",
-                                "⊘".yellow(),
-                                file.repo_path.display(),
-                                error
-                            );
-                            continue;
-                        }
+            if let Some(cached) = secret_cache.get(&secret_cfg.key) {
+                cached.clone()
+            } else {
+                // Fallback to individual resolution if not in cache
+                match secrets_mgr.resolve(Some(secret_cfg.backend), &secret_cfg.key) {
+                    Ok(secret_mat) => secret_mat.value,
+                    Err(error) => {
+                        println!(
+                            "\n{} {} (skipping diff: cannot resolve secret: {})",
+                            "⊘".yellow(),
+                            file.repo_path.display(),
+                            error
+                        );
+                        continue;
                     }
                 }
-            } else {
-                String::new()
             }
         } else if let Ok(contents) = fs::read_to_string(&file.repo_path) {
             contents
@@ -221,7 +218,7 @@ pub fn display_diffs(diff: &StateDiff) {
         };
 
         // Mask secret content in diff output
-        let (current_display, target_display) = if file.is_secret {
+        let (current_display, target_display) = if file.secret.is_some() {
             (
                 "[SECRET CONTENT HIDDEN]".to_string(),
                 "[SECRET CONTENT HIDDEN]".to_string(),

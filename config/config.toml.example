@@ -116,3 +116,170 @@ files = [
 #     { repo = "custom.conf", dest = ".config/custom/custom.conf" }
 # ]
 
+# ============================================================
+# CONDITIONAL FILE LOADING
+# ============================================================
+# Files can be conditionally loaded based on system properties.
+# All conditions within a group must match (AND logic).
+# Multiple groups can be used for more complex logic.
+
+# Example: OS-specific files
+# [tools.shell]
+# files = [
+#     # Linux-specific shell config
+#     {
+#         repo = "bashrc.linux",
+#         dest = ".bashrc",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "os", value = "linux" }
+#             ]}
+#         ]}
+#     },
+#     # macOS-specific shell config (darwin is an alias for macos)
+#     {
+#         repo = "bashrc.macos",
+#         dest = ".bashrc",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "os", value = "darwin" }
+#             ]}
+#         ]}
+#     }
+# ]
+
+# Example: Host-specific files
+# [tools.work]
+# files = [
+#     # Only load on work laptop
+#     {
+#         repo = "work-settings.json",
+#         dest = ".config/work/settings.json",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "host", value = "work-laptop" }
+#             ]}
+#         ]}
+#     }
+# ]
+
+# Example: Environment variable conditions
+# [tools.x11]
+# files = [
+#     # Only load when running X11
+#     {
+#         repo = "xinitrc",
+#         dest = ".xinitrc",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "env_var_exists", name = "DISPLAY" }
+#             ]}
+#         ]}
+#     }
+# ]
+
+# Example: Command existence checks
+# [tools.docker]
+# files = [
+#     # Only load Docker config if Docker is installed
+#     {
+#         repo = "docker-config.json",
+#         dest = ".docker/config.json",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "command_exists", command = "docker" }
+#             ]}
+#         ]}
+#     }
+# ]
+
+# Example: Architecture-specific files
+# [tools.native]
+# files = [
+#     # ARM64 specific config
+#     {
+#         repo = "config.arm64",
+#         dest = ".config/app/config",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "architecture", value = "aarch64" }
+#             ]}
+#         ]}
+#     },
+#     # x86_64 specific config
+#     {
+#         repo = "config.x86",
+#         dest = ".config/app/config",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "architecture", value = "x86_64" }
+#             ]}
+#         ]}
+#     }
+# ]
+
+# Example: Multiple conditions (all must match)
+# [tools.dev]
+# files = [
+#     # Only on Linux work laptop with Docker installed
+#     {
+#         repo = "dev-environment.sh",
+#         dest = ".config/dev/environment.sh",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "os", value = "linux" },
+#                 { type = "host", value = "work-laptop" },
+#                 { type = "command_exists", command = "docker" }
+#             ]}
+#         ]}
+#     }
+# ]
+
+# All available condition types:
+# - os: Operating system (linux, macos/darwin, windows, etc.)
+# - host: Hostname
+# - env_var: Environment variable with specific value
+# - env_var_exists: Environment variable is set (any value)
+# - command_exists: Command is available in PATH
+# - file_exists: File or directory exists (supports ~ and $VAR expansion)
+# - architecture: CPU architecture (x86_64, aarch64, arm, etc.)
+# - shell: Current shell (bash, zsh, fish, etc.)
+# - user: Current username
+# - group: User is in specific group (Unix only)
+
+# ============================================================
+# HOOKS
+# ============================================================
+# Hooks allow you to run commands at specific lifecycle points.
+# Hooks can also have conditions to run only in specific environments.
+
+# [hooks]
+# # Run before applying configuration changes
+# pre_apply = [
+#     { command = "echo 'Starting configuration update...'" }
+# ]
+#
+# # Run after applying configuration changes
+# post_apply = [
+#     { command = "echo 'Configuration updated!'", timeout = 10 },
+#     # Only reload i3 if it's running
+#     {
+#         command = "i3-msg reload",
+#         conditions = { groups = [
+#             { conditions = [
+#                 { type = "command_exists", command = "i3-msg" }
+#             ]}
+#         ]}
+#     }
+# ]
+#
+# # Run before committing to git
+# pre_commit = [
+#     { command = "echo 'Preparing commit...'" }
+# ]
+#
+# # Run after committing to git
+# post_commit = [
+#     { command = "echo 'Changes committed!'" }
+# ]
+

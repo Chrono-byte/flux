@@ -20,8 +20,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use colored::{Colorize, control};
 use commands::{
     apply_config, check_status, compare_states, display_discrepancies, display_health_report,
-    display_preview, display_status, display_validation, find_discrepancies, import_scan,
-    import_stow, migrate_files, run_health_checks, validate_config,
+    display_preview, display_status, display_validation, find_discrepancies, migrate_files,
+    run_health_checks, validate_config,
 };
 use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
 use config::{Config, EnvironmentConfig};
@@ -31,7 +31,6 @@ use services::{
     add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
     push_to_remote, read_events, remove_remote, set_remote_url, show_git_status, stage_changes,
 };
-use std::path::PathBuf;
 use utils::prompt::prompt_commit_message;
 use utils::{DotfilesError, DryRun, Result, logging};
 
@@ -247,32 +246,6 @@ enum Commands {
     },
     /// Health check and diagnostics
     Doctor,
-    /// Import configurations from other dotfile managers
-    Import {
-        /// Command to execute
-        #[command(subcommand)]
-        command: ImportCommands,
-    },
-}
-
-/// Commands for importing configurations from other dotfile managers.
-#[derive(Subcommand)]
-enum ImportCommands {
-    /// Import from GNU Stow layout
-    Stow {
-        /// Path to Stow directory
-        #[arg(long)]
-        stow_dir: String,
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Scan home directory for common dotfiles
-    Scan {
-        /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
 }
 
 /// Commands for maintenance and repair operations.
@@ -1409,28 +1382,6 @@ fn handle_doctor_command() -> Result<()> {
 /// # Returns
 ///
 /// Returns the result of the import command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the import cannot be performed.
-fn handle_import_command(command: ImportCommands) -> Result<()> {
-    let config = Config::load()?;
-    let repo_path = config.get_repo_path();
-
-    match command {
-        ImportCommands::Stow { stow_dir, dry_run } => {
-            import_stow(&PathBuf::from(stow_dir), &repo_path, dry_run)?;
-        }
-        ImportCommands::Scan { dry_run } => {
-            let home = dirs::home_dir().ok_or_else(|| {
-                DotfilesError::Config("Could not find home directory".to_string())
-            })?;
-            import_scan(&home, &repo_path, dry_run)?;
-        }
-    }
-    Ok(())
-}
-
 /// Handle the completion command.
 ///
 /// # Parameters
@@ -1553,7 +1504,6 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
         Commands::Maintain { command } => return handle_maintain_command(command),
         Commands::Check { profile } => handle_check_command(profile.as_deref(), cli.quiet)?,
         Commands::Doctor => handle_doctor_command()?,
-        Commands::Import { command } => handle_import_command(command)?,
         Commands::Completion { shell } => handle_completion_command(&shell),
     }
 
