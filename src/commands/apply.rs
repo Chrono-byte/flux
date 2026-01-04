@@ -61,9 +61,20 @@ impl StateDiff {
 pub fn compare_states(config: &Config, profile: Option<&str>, force: bool) -> Result<StateDiff> {
     let mut diff = StateDiff::default();
 
+    // Get the path to the flux config file to avoid circular dependency
+    let flux_config_path = Config::get_xdg_config_path().ok();
+
     // Compare files
     let tracked_files = config.get_tracked_files(profile)?;
     for file in tracked_files {
+        // Skip syncing the flux config file itself to avoid circular dependency
+        // where applying the config would overwrite the config being used
+        if let Some(ref config_path) = flux_config_path
+            && file.dest_path == *config_path
+        {
+            continue;
+        }
+
         if needs_sync(&file, force)? {
             diff.files_to_sync.push(file);
         }

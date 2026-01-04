@@ -124,7 +124,23 @@ files = [
 files = [
     { repo = "settings.json", dest = ".config/Cursor/User/settings.json" }
 ]
+
+[tools.flux]
+files = [
+    { repo = "./config.toml", dest = ".config/flux/config.toml" }
+]
 ```
+
+### Repository Paths
+
+File paths in the `repo` field support the following patterns:
+
+- `filename` - File in the tool's directory (e.g., `config` becomes `~/.dotfiles/sway/config`)
+- `subdir/filename` - File in a subdirectory (e.g., `config.d/binding.conf` becomes `~/.dotfiles/sway/config.d/binding.conf`)
+- `./filename` - File at repository root, not in tool directory (e.g., `./config.toml` becomes `~/.dotfiles/config.toml`)
+- `toolname/filename` - Explicit tool prefix (e.g., `cursor/settings.json` becomes `~/.dotfiles/cursor/settings.json`)
+
+The `./` prefix is useful for configuration files that should live at the repository root, such as Flux's own configuration file.
 
 ### Symlink Resolution
 
