@@ -6,7 +6,14 @@ use gpui::{Render, Window, div, prelude::*};
 
 pub struct RemotesView;
 
+impl Default for RemotesView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RemotesView {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }

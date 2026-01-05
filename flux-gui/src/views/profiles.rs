@@ -6,7 +6,14 @@ use gpui::{Render, Window, div, prelude::*};
 
 pub struct ProfilesView;
 
+impl Default for ProfilesView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProfilesView {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }
@@ -66,7 +73,7 @@ impl Render for ProfilesView {
                                     gpui::FontWeight::MEDIUM
                                 })
                                 .child(if is_current {
-                                    format!("{} (current)", profile)
+                                    format!("{profile} (current)")
                                 } else {
                                     profile.clone()
                                 }),

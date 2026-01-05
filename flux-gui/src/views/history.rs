@@ -6,7 +6,14 @@ use gpui::{Render, Window, div, prelude::*};
 
 pub struct HistoryView;
 
+impl Default for HistoryView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HistoryView {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }

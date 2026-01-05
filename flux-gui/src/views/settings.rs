@@ -6,7 +6,14 @@ use gpui::{Render, Window, div, prelude::*};
 
 pub struct SettingsView;
 
+impl Default for SettingsView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SettingsView {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }

@@ -6,7 +6,14 @@ use gpui::{Render, Window, div, prelude::*};
 
 pub struct HomeView;
 
+impl Default for HomeView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HomeView {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }

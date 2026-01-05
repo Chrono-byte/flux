@@ -7,7 +7,14 @@ use gpui::{Render, Window, div, prelude::*};
 
 pub struct FilesView;
 
+impl Default for FilesView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FilesView {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }

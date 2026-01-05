@@ -6,7 +6,14 @@ use gpui::{Render, Window, div, prelude::*};
 
 pub struct StatusView;
 
+impl Default for StatusView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StatusView {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }

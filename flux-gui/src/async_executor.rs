@@ -21,21 +21,65 @@ pub struct AsyncTask {
 #[derive(Debug)]
 pub enum Operation {
     LoadConfig,
-    SaveConfig { config: Config },
-    CheckStatus { profile: Option<String> },
+    SaveConfig {
+        config: Config,
+    },
+    CheckStatus {
+        profile: Option<String>,
+    },
     ListProfiles,
-    CreateProfile { name: String },
-    SwitchProfile { name: String },
-    GetTrackedFiles { profile: Option<String> },
+    CreateProfile {
+        name: String,
+    },
+    SwitchProfile {
+        name: String,
+    },
+    GetTrackedFiles {
+        profile: Option<String>,
+    },
     GetGitBranch,
     ListRemotes,
-    AddRemote { name: String, url: String },
-    RemoveRemote { name: String },
-    SetRemoteUrl { name: String, url: String },
-    Push { remote: String, branch: String },
-    Pull { remote: String, branch: String },
-    ReadHistory { limit: Option<usize> },
+    AddRemote {
+        name: String,
+        url: String,
+    },
+    RemoveRemote {
+        name: String,
+    },
+    SetRemoteUrl {
+        name: String,
+        url: String,
+    },
+    Push {
+        remote: String,
+        branch: String,
+    },
+    Pull {
+        remote: String,
+        branch: String,
+    },
+    ReadHistory {
+        limit: Option<usize>,
+    },
     GetGitStatus,
+    AddFile {
+        tool: String,
+        source_path: PathBuf,
+        dest_path: PathBuf,
+        profile: Option<String>,
+    },
+    RemoveFile {
+        tool: String,
+        file_name: String,
+    },
+    ApplyConfig {
+        profile: Option<String>,
+        dry_run: bool,
+        force: bool,
+    },
+    ValidateConfigContent {
+        content: String,
+    },
 }
 
 #[derive(Debug)]
@@ -56,6 +100,10 @@ pub enum TaskResult {
     Pulled(FluxResult<()>),
     History(FluxResult<Vec<HistoryEvent>>),
     GitStatus(FluxResult<GitStatusInfo>),
+    FileAdded(FluxResult<()>),
+    FileRemoved(FluxResult<()>),
+    ConfigApplied(FluxResult<Vec<String>>),
+    ConfigValidated(FluxResult<Vec<String>>),
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +166,7 @@ pub struct FluxExecutor {
 }
 
 impl FluxExecutor {
+    #[must_use] 
     pub fn new() -> Self {
         let (tx, mut rx) = mpsc::channel::<AsyncTask>(32);
 
@@ -134,7 +183,7 @@ impl FluxExecutor {
         }
     }
 
-    async fn execute_task(operation: Operation) -> TaskResult {
+    pub async fn execute_task(operation: Operation) -> TaskResult {
         match operation {
             Operation::LoadConfig => {
                 let result = task::spawn_blocking(|| {
@@ -160,7 +209,7 @@ impl FluxExecutor {
             }
 
             Operation::CheckStatus { profile } => {
-                let profile = profile.map(|s| s.to_string());
+                let profile = profile;
                 let result = task::spawn_blocking(move || {
                     Config::load().and_then(|config| {
                         let profile_ref = profile.as_deref();
@@ -219,7 +268,7 @@ impl FluxExecutor {
             }
 
             Operation::GetTrackedFiles { profile } => {
-                let profile = profile.map(|s| s.to_string());
+                let profile = profile;
                 let result = task::spawn_blocking(move || {
                     Config::load().and_then(|config| {
                         let profile_ref = profile.as_deref();
@@ -388,6 +437,90 @@ impl FluxExecutor {
                 TaskResult::GitStatus(result.unwrap_or_else(|e| {
                     Err(flux::utils::error::DotfilesError::Config(e.to_string()))
                 }))
+            }
+
+            Operation::AddFile {
+                tool,
+                source_path,
+                dest_path,
+                profile,
+            } => {
+                let result = task::spawn_blocking(move || {
+                    let mut config = Config::load()?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    let mut fs_manager =
+                        flux::file_manager::FileSystemManager::new(&mut dry_run, false);
+                    flux::file_manager::add_file(
+                        &mut config,
+                        &tool,
+                        &source_path,
+                        &dest_path,
+                        profile.as_deref(),
+                        &mut fs_manager,
+                    )
+                })
+                .await;
+                TaskResult::FileAdded(result.unwrap_or_else(|e| {
+                    Err(flux::utils::error::DotfilesError::Config(e.to_string()))
+                }))
+            }
+
+            Operation::RemoveFile { tool, file_name } => {
+                let result = task::spawn_blocking(move || {
+                    let mut config = Config::load()?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    let mut fs_manager =
+                        flux::file_manager::FileSystemManager::new(&mut dry_run, false);
+                    flux::file_manager::remove_file(&mut config, &tool, &file_name, &mut fs_manager)
+                })
+                .await;
+                TaskResult::FileRemoved(result.unwrap_or_else(|e| {
+                    Err(flux::utils::error::DotfilesError::Config(e.to_string()))
+                }))
+            }
+
+            Operation::ApplyConfig {
+                profile,
+                dry_run,
+                force,
+            } => {
+                let result = task::spawn_blocking(move || {
+                    let config = Config::load()?;
+                    let options = flux::commands::apply::ApplyOptions {
+                        config: &config,
+                        profile: profile.as_deref(),
+                        dry_run,
+                        yes: true,
+                        description: None,
+                        force,
+                    };
+                    flux::commands::apply::apply_config(&options)?;
+                    let tracked_files = config.get_tracked_files(profile.as_deref())?;
+                    let applied_paths: Vec<String> = tracked_files
+                        .iter()
+                        .map(|f| f.dest_path.to_string_lossy().to_string())
+                        .collect();
+                    Ok(applied_paths)
+                })
+                .await;
+                TaskResult::ConfigApplied(result.unwrap_or_else(|e| {
+                    Err(flux::utils::error::DotfilesError::Config(e.to_string()))
+                }))
+            }
+
+            Operation::ValidateConfigContent { content } => {
+                let result =
+                    task::spawn_blocking(move || match toml::from_str::<Config>(&content) {
+                        Ok(config) => match flux::commands::validate::validate_config(&config) {
+                            Ok(_) => Ok(vec![]),
+                            Err(e) => Ok(vec![e.to_string()]),
+                        },
+                        Err(e) => Ok(vec![format!("TOML parse error: {}", e)]),
+                    })
+                    .await;
+                TaskResult::ConfigValidated(
+                    result.unwrap_or_else(|e| Ok(vec![format!("Validation error: {}", e)])),
+                )
             }
         }
     }
