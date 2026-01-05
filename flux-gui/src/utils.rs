@@ -45,6 +45,9 @@ pub fn get_gui_state_file() -> PathBuf {
 }
 
 /// Create any necessary directories
+///
+/// # Errors
+/// This function will return an error if it fails to create any of the necessary directories.
 pub fn ensure_directories() -> anyhow::Result<()> {
     let state_dir = get_gui_state_dir();
     std::fs::create_dir_all(&state_dir)?;
