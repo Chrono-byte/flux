@@ -18,7 +18,7 @@ pub struct AsyncTask {
     pub reply: mpsc::Sender<TaskResult>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Operation {
     LoadConfig,
     SaveConfig {
@@ -521,6 +521,266 @@ impl FluxExecutor {
                 TaskResult::ConfigValidated(
                     result.unwrap_or_else(|e| Ok(vec![format!("Validation error: {}", e)])),
                 )
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn execute_task_sync(operation: Operation) -> TaskResult {
+        match operation {
+            Operation::LoadConfig => {
+                let result = Config::load()
+                    .map_err(|e| flux::utils::error::DotfilesError::Config(e.to_string()));
+                TaskResult::Config(result)
+            }
+
+            Operation::SaveConfig { config } => {
+                let result = config.save(false);
+                TaskResult::ConfigSaved(result)
+            }
+
+            Operation::CheckStatus { profile } => {
+                let result = Config::load().and_then(|config| {
+                    let profile_ref = profile.as_deref();
+                    let reports = check_status(&config, profile_ref)?;
+                    let gui_reports: Vec<GuiStatusReport> = reports
+                        .into_iter()
+                        .map(|r| GuiStatusReport {
+                            tool: r.file.tool,
+                            repo_path: r.file.repo_path.to_string_lossy().to_string(),
+                            dest_path: r.file.dest_path.to_string_lossy().to_string(),
+                            profile: r.file.profile,
+                            status: r.status.into(),
+                            message: r.message,
+                        })
+                        .collect();
+                    Ok(gui_reports)
+                });
+                TaskResult::StatusReports(result)
+            }
+
+            Operation::ListProfiles => {
+                let result =
+                    Config::load().and_then(|config| flux::config::profile::list_profiles(&config));
+                TaskResult::Profiles(result)
+            }
+
+            Operation::CreateProfile { name } => {
+                let result = Config::load()
+                    .and_then(|config| flux::config::profile::create_profile(&config, &name));
+                TaskResult::ProfileCreated(result)
+            }
+
+            Operation::SwitchProfile { name } => {
+                let result = Config::load().and_then(|mut config| {
+                    flux::config::profile::switch_profile(&mut config, &name)
+                });
+                TaskResult::ProfileSwitched(result)
+            }
+
+            Operation::GetTrackedFiles { profile } => {
+                let result = Config::load().and_then(|config| {
+                    let profile_ref = profile.as_deref();
+                    let files = config.get_tracked_files(profile_ref)?;
+                    let file_infos: Vec<TrackedFileInfo> = files
+                        .into_iter()
+                        .map(|f| TrackedFileInfo {
+                            tool: f.tool,
+                            repo_path: f.repo_path,
+                            dest_path: f.dest_path,
+                            profile: f.profile,
+                        })
+                        .collect();
+                    Ok(file_infos)
+                });
+                TaskResult::TrackedFiles(result)
+            }
+
+            Operation::GetGitBranch => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    init_repo(&repo_path).and_then(|repo| get_current_branch(&repo))
+                });
+                TaskResult::GitBranch(result)
+            }
+
+            Operation::ListRemotes => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    let repo = init_repo(&repo_path)?;
+                    let remotes = repo.remotes()?;
+                    let branch = get_current_branch(&repo).unwrap_or_default();
+
+                    let remote_infos: Vec<GuiRemoteInfo> = remotes
+                        .iter()
+                        .filter_map(|name| {
+                            name.as_ref().and_then(|n| {
+                                repo.find_remote(n).ok().map(|r| GuiRemoteInfo {
+                                    name: n.to_string(),
+                                    url: r.url().unwrap_or("(unknown)").to_string(),
+                                    branch: branch.clone(),
+                                })
+                            })
+                        })
+                        .collect();
+
+                    Ok(remote_infos)
+                });
+                TaskResult::Remotes(result)
+            }
+
+            Operation::AddRemote { name, url } => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    let repo = init_repo(&repo_path)?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    git_add_remote(&repo, &name, &url, &mut dry_run, false)
+                });
+                TaskResult::RemoteAdded(result)
+            }
+
+            Operation::RemoveRemote { name } => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    let repo = init_repo(&repo_path)?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    git_remove_remote(&repo, &name, &mut dry_run, false)
+                });
+                TaskResult::RemoteRemoved(result)
+            }
+
+            Operation::SetRemoteUrl { name, url } => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    let repo = init_repo(&repo_path)?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    git_set_remote_url(&repo, &name, &url, &mut dry_run, false)
+                });
+                TaskResult::RemoteUrlSet(result)
+            }
+
+            Operation::Push { remote, branch } => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    let repo = init_repo(&repo_path)?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    push_to_remote(&repo, &remote, &branch, false, 30, &mut dry_run, false)
+                });
+                TaskResult::Pushed(result)
+            }
+
+            Operation::Pull { remote, branch } => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    let repo = init_repo(&repo_path)?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    pull_from_remote(&repo, &remote, &branch, 30, &mut dry_run, false)
+                });
+                TaskResult::Pulled(result)
+            }
+
+            Operation::ReadHistory { limit } => {
+                let result = read_events(limit);
+                TaskResult::History(result)
+            }
+
+            Operation::GetGitStatus => {
+                let result = Config::load().and_then(|config| {
+                    let repo_path = config.get_repo_path();
+                    let repo = init_repo(&repo_path)?;
+                    let branch = get_current_branch(&repo).unwrap_or_default();
+                    let remotes = repo.remotes()?;
+                    let has_remote = !remotes.is_empty();
+
+                    // Get ahead/behind info (simplified for now)
+                    let (ahead, behind) = (0, 0);
+
+                    Ok(GitStatusInfo {
+                        branch,
+                        ahead,
+                        behind,
+                        has_remote,
+                    })
+                });
+                TaskResult::GitStatus(result)
+            }
+
+            Operation::AddFile {
+                tool: _,
+                source_path: _,
+                dest_path: _,
+                profile: _,
+            } => {
+                // TODO: Implement file addition
+                TaskResult::FileAdded(Err(flux::utils::error::DotfilesError::Config(
+                    "Not implemented".to_string(),
+                )))
+            }
+
+            Operation::RemoveFile {
+                tool: _,
+                file_name: _,
+            } => {
+                // TODO: Implement file removal
+                TaskResult::FileRemoved(Err(flux::utils::error::DotfilesError::Config(
+                    "Not implemented".to_string(),
+                )))
+            }
+
+            Operation::ApplyConfig {
+                profile,
+                dry_run,
+                force,
+            } => {
+                let result = Config::load().and_then(|config| {
+                    let profile_ref = profile.as_deref();
+                    if dry_run {
+                        // For dry run, just return empty vec since we can't get paths without applying
+                        Ok(vec![])
+                    } else {
+                        let options = flux::commands::apply::ApplyOptions {
+                            config: &config,
+                            profile: profile_ref,
+                            dry_run,
+                            yes: true, // Auto-confirm for GUI
+                            description: None,
+                            force,
+                        };
+                        flux::commands::apply::apply_config(&options)?;
+                        // Return the paths that were applied
+                        let diff =
+                            flux::commands::apply::compare_states(&config, profile_ref, force)?;
+                        let paths: Vec<String> = diff
+                            .files_to_sync
+                            .iter()
+                            .map(|f| f.dest_path.to_string_lossy().to_string())
+                            .collect();
+                        Ok(paths)
+                    }
+                });
+                TaskResult::ConfigApplied(result)
+            }
+
+            Operation::ValidateConfigContent { content } => {
+                let result =
+                    match toml::from_str::<Config>(&content) {
+                        Ok(config) => match flux::commands::validate::validate_config(&config) {
+                            Ok(report) => {
+                                if report.is_valid {
+                                    Ok(vec![])
+                                } else {
+                                    Ok(report
+                                        .issues
+                                        .iter()
+                                        .map(|issue| format!("{issue:?}"))
+                                        .collect())
+                                }
+                            }
+                            Err(e) => Err(e),
+                        },
+                        Err(e) => Ok(vec![format!("TOML parse error: {}", e)]),
+                    };
+                TaskResult::ConfigValidated(result)
             }
         }
     }

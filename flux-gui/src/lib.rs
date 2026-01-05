@@ -7,12 +7,12 @@
 
 pub mod app;
 pub mod async_executor;
-pub mod components;
+// pub mod components;
 pub mod events;
 pub mod state;
 pub mod styles;
 pub mod utils;
-pub mod views;
+// pub mod views;
 
 pub use app::FluxApp;
 pub use state::AppView;

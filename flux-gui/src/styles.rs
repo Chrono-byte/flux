@@ -44,6 +44,4 @@ pub mod dimensions {
     pub const HEADER_HEIGHT: gpui::Pixels = px(50.0);
     /// Titlebar height
     pub const TITLEBAR_HEIGHT: gpui::Pixels = px(36.0);
-    /// Button height
-    pub const BUTTON_HEIGHT: gpui::Pixels = px(36.0);
 }

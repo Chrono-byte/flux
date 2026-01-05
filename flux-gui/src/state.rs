@@ -46,23 +46,6 @@ impl std::fmt::Display for FileStatus {
     }
 }
 
-/// A tracked file with its current sync status
-#[derive(Debug, Clone)]
-pub struct FileEntryWithStatus {
-    /// Tool name
-    pub tool: String,
-    /// Repository path
-    pub repo: String,
-    /// Destination path
-    pub dest: String,
-    /// Current profile (if any)
-    pub profile: Option<String>,
-    /// Sync status
-    pub status: FileStatus,
-    /// Last sync time
-    pub last_sync: Option<DateTime<Utc>>,
-}
-
 /// Information about a git remote
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {

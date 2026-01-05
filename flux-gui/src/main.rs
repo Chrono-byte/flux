@@ -2,12 +2,12 @@
 
 mod app;
 mod async_executor;
-mod components;
+// mod components;
 mod events;
 mod state;
 mod styles;
 mod utils;
-mod views;
+// mod views;
 
 use app::FluxApp;
 use dirs::home_dir;
@@ -31,7 +31,7 @@ fn main() {
     Application::new().run(move |cx| {
         let bounds = Bounds::centered(None, size(px(1400.0), px(900.0)), cx);
 
-        cx.open_window(
+        let window_result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
                 window_background: WindowBackgroundAppearance::Opaque,
@@ -44,8 +44,13 @@ fn main() {
                 ..Default::default()
             },
             |_window, cx| cx.new(|_cx| FluxApp::new(repo_path.clone(), _cx)),
-        )
-        .expect("Failed to open window");
+        );
+
+        if let Err(e) = window_result {
+            eprintln!("Failed to open window: {e}");
+            return;
+        }
+
         cx.activate(true);
     });
 }

@@ -151,3 +151,6 @@ unused_qualifications = "warn"
 unused_results = "warn"
 # Warn about unused variables
 unused_variables = "warn"
+
+[patch.crates-io]
+ashpd = { git = "https://github.com/bilelmoussaoui/ashpd", rev = "0.12.0" }
