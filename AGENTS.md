@@ -34,6 +34,10 @@ cargo test -- --nocapture      # Show println! output in tests
 cargo doc --open               # Generate and open docs
 ```
 
+## Important Notes
+
+Never perform a `git checkout`. This would lead only to a loss of all changes made to the repository.
+
 ## Code Style Guidelines
 
 ### Imports
