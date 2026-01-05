@@ -1,4 +1,4 @@
-//! Flux - A dotfiles manager with symlink-based sync
+//! flux - A dotfiles manager with symlink-based sync
 //!
 //! This is the binary entry point for the Flux dotfiles manager.
 //! The library functionality is provided in `lib.rs`.
@@ -1139,7 +1139,7 @@ fn handle_remote_command(command: RemoteCommands) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if the configuration cannot be loaded or if the push cannot be performed.
-fn handle_push_command(
+async fn handle_push_command(
     remote: Option<String>,
     branch: Option<String>,
     set_upstream: bool,
@@ -1173,7 +1173,8 @@ fn handle_push_command(
         resolved_timeout,
         &mut dry_run_tracker,
         dry_run,
-    )?;
+    )
+    .await?;
 
     if dry_run {
         dry_run_tracker.display_summary();
@@ -1197,7 +1198,7 @@ fn handle_push_command(
 /// # Errors
 ///
 /// Returns an error if the configuration cannot be loaded or if the pull cannot be performed.
-fn handle_pull_command(
+async fn handle_pull_command(
     remote: Option<String>,
     branch: Option<String>,
     dry_run: bool,
@@ -1229,7 +1230,8 @@ fn handle_pull_command(
         resolved_timeout,
         &mut dry_run_tracker,
         dry_run,
-    )?;
+    )
+    .await?;
 
     if dry_run {
         dry_run_tracker.display_summary();
@@ -1489,13 +1491,20 @@ fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
             set_upstream,
             dry_run,
             timeout,
-        } => handle_push_command(remote, branch, set_upstream, dry_run, timeout)?,
+        } => tokio::runtime::Runtime::new()?.block_on(handle_push_command(
+            remote,
+            branch,
+            set_upstream,
+            dry_run,
+            timeout,
+        ))?,
         Commands::Pull {
             remote,
             branch,
             dry_run,
             timeout,
-        } => handle_pull_command(remote, branch, dry_run, timeout)?,
+        } => tokio::runtime::Runtime::new()?
+            .block_on(handle_pull_command(remote, branch, dry_run, timeout))?,
         Commands::Status {
             profile,
             conflicts,
