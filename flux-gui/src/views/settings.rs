@@ -13,7 +13,7 @@ impl Default for SettingsView {
 }
 
 impl SettingsView {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self
     }

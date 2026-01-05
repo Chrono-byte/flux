@@ -14,7 +14,7 @@ impl Default for FilesView {
 }
 
 impl FilesView {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self
     }

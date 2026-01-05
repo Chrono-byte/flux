@@ -166,7 +166,7 @@ pub struct FluxExecutor {
 }
 
 impl FluxExecutor {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         let (tx, mut rx) = mpsc::channel::<AsyncTask>(32);
 

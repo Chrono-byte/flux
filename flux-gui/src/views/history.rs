@@ -13,7 +13,7 @@ impl Default for HistoryView {
 }
 
 impl HistoryView {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self
     }

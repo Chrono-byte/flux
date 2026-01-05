@@ -100,19 +100,25 @@ pub struct HistoryFilterState {
     pub profile_filter: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub enum ProfileActionState {
     #[default]
     None,
-    Creating { name: String, confirming: bool },
-    Deleting { name: String, confirming: bool },
-    Switching { name: String, confirming: bool },
+    Creating {
+        name: String,
+        confirming: bool,
+    },
+    Deleting {
+        name: String,
+        confirming: bool,
+    },
+    Switching {
+        name: String,
+        confirming: bool,
+    },
 }
 
-
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub enum RemoteActionState {
     #[default]
     None,
@@ -132,9 +138,7 @@ pub enum RemoteActionState {
     },
 }
 
-
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub enum FileActionState {
     #[default]
     None,
@@ -151,9 +155,8 @@ pub enum FileActionState {
     },
 }
 
-
 impl AppState {
-    #[must_use] 
+    #[must_use]
     pub fn new(repo_path: PathBuf) -> Self {
         Self {
             current_view: AppView::Home,
@@ -314,7 +317,10 @@ impl FluxApp {
                 );
             }
 
-            AppEvent::CommitAndSync { message: _, dry_run: _ } => {
+            AppEvent::CommitAndSync {
+                message: _,
+                dry_run: _,
+            } => {
                 // TODO: Implement commit and sync
                 self.show_notification("Commit and sync not yet implemented", true);
                 cx.notify();
