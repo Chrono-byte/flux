@@ -1,56 +1,17 @@
 [package]
-name = "flux-gui"
-version = "1.0.0"
-edition = "2024"
-publish = false
+name = "flux-gui-ui"
+version = "0.1.0"
+edition = "2021"
 
-[[bin]]
-name = "flux-gui"
-path = "src/main.rs"
-
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-# Error Handling
-anyhow = "1.0"
-# Time
-chrono = { version = "0.4", features = ["serde"] }
-dirs = "6.0"
-env_logger = "0.11"
-# Local
-flux = { path = ".." }
-futures = "0.3"
-# Core framework - GPUI from Zed
-# Building GPUI can take 5-10 minutes on first build
-# gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
-# Logging
-log = "0.4"
-# Misc
-notify = "6.0"
-parking_lot = "0.12"
-pathdiff = "0.2"
-# UI/Native
-rfd = "0.14"
-# Serialization & Config
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-shellexpand = "3.1"
-thiserror = "2.0"
-tokio = { version = "1", features = ["full", "sync"] }
-toml = "0.8"
-toml_edit = "0.24"
-uuid = { version = "1.6", features = ["serde", "v4"] }
+leptos = { version = "0.8", features = ["csr"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1.7"
 
-[dev-dependencies]
-tempfile = "3.8"
-
-[lints.clippy]
-complexity = { level = "warn", priority = 1 }
-correctness = { level = "deny", priority = 2 }
-missing_docs_in_private_items = "warn"
-panic = "deny"
-pedantic = { level = "warn", priority = 1 }
-perf = { level = "warn", priority = 1 }
-style = { level = "warn", priority = 1 }
-suspicious = { level = "deny", priority = 1 }
-unwrap_used = "deny"
-
-[lints.rust]
+[workspace]
+members = ["src-tauri"]
