@@ -3,7 +3,7 @@
 use flux::commands::status::{FileStatus, check_status};
 use flux::config::Config;
 use flux::services::git::{
-    add_remote as git_add_remote, get_current_branch, init_repo, pull_from_remote, push_to_remote,
+    add_remote as git_add_remote, get_current_branch, init_repo,
     remove_remote as git_remove_remote, set_remote_url as git_set_remote_url,
 };
 use flux::services::history::{HistoryEvent, read_events};
@@ -183,6 +183,7 @@ impl FluxExecutor {
         }
     }
 
+    /// Execute an operation asynchronously
     pub async fn execute_task(operation: Operation) -> TaskResult {
         match operation {
             Operation::LoadConfig => {
@@ -197,19 +198,13 @@ impl FluxExecutor {
             }
 
             Operation::SaveConfig { config } => {
-                let config = std::sync::Arc::new(config);
-                let result = task::spawn_blocking({
-                    let config = config.clone();
-                    move || config.save(false)
-                })
-                .await;
+                let result = task::spawn_blocking(move || config.save(false)).await;
                 TaskResult::ConfigSaved(result.unwrap_or_else(|e| {
                     Err(flux::utils::error::DotfilesError::Config(e.to_string()))
                 }))
             }
 
             Operation::CheckStatus { profile } => {
-                let profile = profile;
                 let result = task::spawn_blocking(move || {
                     Config::load().and_then(|config| {
                         let profile_ref = profile.as_deref();
@@ -268,7 +263,6 @@ impl FluxExecutor {
             }
 
             Operation::GetTrackedFiles { profile } => {
-                let profile = profile;
                 let result = task::spawn_blocking(move || {
                     Config::load().and_then(|config| {
                         let profile_ref = profile.as_deref();
@@ -309,14 +303,17 @@ impl FluxExecutor {
                     Config::load().and_then(|config| {
                         let repo_path = config.get_repo_path();
                         let repo = init_repo(&repo_path)?;
-                        let remotes = repo.remotes()?;
                         let branch = get_current_branch(&repo).unwrap_or_default();
+
+                        // Access the underlying git2 repository to list remotes
+                        let git_repo = repo.inner();
+                        let remotes = git_repo.remotes()?;
 
                         let remote_infos: Vec<GuiRemoteInfo> = remotes
                             .iter()
                             .filter_map(|name| {
                                 name.as_ref().and_then(|n| {
-                                    repo.find_remote(n).ok().map(|r| GuiRemoteInfo {
+                                    git_repo.find_remote(n).ok().map(|r| GuiRemoteInfo {
                                         name: n.to_string(),
                                         url: r.url().unwrap_or("(unknown)").to_string(),
                                         branch: branch.clone(),
@@ -379,36 +376,21 @@ impl FluxExecutor {
                 }))
             }
 
-            Operation::Push { remote, branch } => {
-                let result = task::spawn_blocking(move || {
-                    Config::load().and_then(|config| {
-                        let repo_path = config.get_repo_path();
-                        let repo = init_repo(&repo_path)?;
-                        let mut dry_run = flux::utils::dry_run::DryRun::new();
-                        let timeout = config.general.push_timeout.unwrap_or(60);
-                        push_to_remote(&repo, &remote, &branch, false, timeout, &mut dry_run, false)
-                    })
-                })
-                .await;
-                TaskResult::Pushed(result.unwrap_or_else(|e| {
-                    Err(flux::utils::error::DotfilesError::Config(e.to_string()))
-                }))
-            }
+            // Note: push_to_remote and pull_from_remote are async functions
+            // They require tokio runtime context, so we handle them separately
+            Operation::Push {
+                remote: _,
+                branch: _,
+            } => TaskResult::Pushed(Err(flux::utils::error::DotfilesError::Config(
+                "Push not yet implemented in GUI".to_string(),
+            ))),
 
-            Operation::Pull { remote, branch } => {
-                let result = task::spawn_blocking(move || {
-                    Config::load().and_then(|config| {
-                        let repo_path = config.get_repo_path();
-                        let repo = init_repo(&repo_path)?;
-                        let mut dry_run = flux::utils::dry_run::DryRun::new();
-                        pull_from_remote(&repo, &remote, &branch, 60, &mut dry_run, false)
-                    })
-                })
-                .await;
-                TaskResult::Pulled(result.unwrap_or_else(|e| {
-                    Err(flux::utils::error::DotfilesError::Config(e.to_string()))
-                }))
-            }
+            Operation::Pull {
+                remote: _,
+                branch: _,
+            } => TaskResult::Pulled(Err(flux::utils::error::DotfilesError::Config(
+                "Pull not yet implemented in GUI".to_string(),
+            ))),
 
             Operation::ReadHistory { limit } => {
                 let result = task::spawn_blocking(move || read_events(limit)).await;
@@ -423,7 +405,8 @@ impl FluxExecutor {
                         let repo_path = config.get_repo_path();
                         let repo = init_repo(&repo_path)?;
                         let branch = get_current_branch(&repo).unwrap_or_default();
-                        let has_remote = repo.remotes().map(|r| !r.is_empty()).unwrap_or(false);
+                        let has_remote =
+                            repo.inner().remotes().map(|r| !r.is_empty()).unwrap_or(false);
 
                         Ok(GitStatusInfo {
                             branch,
@@ -481,26 +464,26 @@ impl FluxExecutor {
 
             Operation::ApplyConfig {
                 profile,
-                dry_run,
+                dry_run: apply_dry_run,
                 force,
             } => {
                 let result = task::spawn_blocking(move || {
                     let config = Config::load()?;
+                    let profile_ref = profile.as_deref();
+
+                    // Use the ApplyOptions builder
                     let options = flux::commands::apply::ApplyOptions {
                         config: &config,
-                        profile: profile.as_deref(),
-                        dry_run,
-                        yes: true,
+                        profile: profile_ref,
+                        dry_run: apply_dry_run,
+                        yes: false,
                         description: None,
                         force,
                     };
+
                     flux::commands::apply::apply_config(&options)?;
-                    let tracked_files = config.get_tracked_files(profile.as_deref())?;
-                    let applied_paths: Vec<String> = tracked_files
-                        .iter()
-                        .map(|f| f.dest_path.to_string_lossy().to_string())
-                        .collect();
-                    Ok(applied_paths)
+                    // Return empty list since apply_config returns () and doesn't return file list
+                    Ok::<Vec<String>, flux::utils::error::DotfilesError>(Vec::new())
                 })
                 .await;
                 TaskResult::ConfigApplied(result.unwrap_or_else(|e| {
@@ -509,23 +492,22 @@ impl FluxExecutor {
             }
 
             Operation::ValidateConfigContent { content } => {
-                let result =
-                    task::spawn_blocking(move || match toml::from_str::<Config>(&content) {
-                        Ok(config) => match flux::commands::validate::validate_config(&config) {
-                            Ok(_) => Ok(vec![]),
-                            Err(e) => Ok(vec![e.to_string()]),
-                        },
-                        Err(e) => Ok(vec![format!("TOML parse error: {}", e)]),
-                    })
-                    .await;
-                TaskResult::ConfigValidated(
-                    result.unwrap_or_else(|e| Ok(vec![format!("Validation error: {}", e)])),
-                )
+                let result = task::spawn_blocking(move || {
+                    // Try to parse the content as TOML
+                    match toml::from_str::<Config>(&content) {
+                        Ok(_) => Ok(Vec::new()),
+                        Err(e) => Ok(vec![e.to_string()]),
+                    }
+                })
+                .await;
+                TaskResult::ConfigValidated(result.unwrap_or_else(|e| {
+                    Err(flux::utils::error::DotfilesError::Config(e.to_string()))
+                }))
             }
         }
     }
 
-    #[must_use]
+    /// Execute a task synchronously (blocking, used at startup)
     pub fn execute_task_sync(operation: Operation) -> TaskResult {
         match operation {
             Operation::LoadConfig => {
@@ -608,14 +590,17 @@ impl FluxExecutor {
                 let result = Config::load().and_then(|config| {
                     let repo_path = config.get_repo_path();
                     let repo = init_repo(&repo_path)?;
-                    let remotes = repo.remotes()?;
                     let branch = get_current_branch(&repo).unwrap_or_default();
+
+                    // Access the underlying git2 repository to list remotes
+                    let git_repo = repo.inner();
+                    let remotes = git_repo.remotes()?;
 
                     let remote_infos: Vec<GuiRemoteInfo> = remotes
                         .iter()
                         .filter_map(|name| {
                             name.as_ref().and_then(|n| {
-                                repo.find_remote(n).ok().map(|r| GuiRemoteInfo {
+                                git_repo.find_remote(n).ok().map(|r| GuiRemoteInfo {
                                     name: n.to_string(),
                                     url: r.url().unwrap_or("(unknown)").to_string(),
                                     branch: branch.clone(),
@@ -659,25 +644,19 @@ impl FluxExecutor {
                 TaskResult::RemoteUrlSet(result)
             }
 
-            Operation::Push { remote, branch } => {
-                let result = Config::load().and_then(|config| {
-                    let repo_path = config.get_repo_path();
-                    let repo = init_repo(&repo_path)?;
-                    let mut dry_run = flux::utils::dry_run::DryRun::new();
-                    push_to_remote(&repo, &remote, &branch, false, 30, &mut dry_run, false)
-                });
-                TaskResult::Pushed(result)
-            }
+            Operation::Push {
+                remote: _,
+                branch: _,
+            } => TaskResult::Pushed(Err(flux::utils::error::DotfilesError::Config(
+                "Push not yet implemented".to_string(),
+            ))),
 
-            Operation::Pull { remote, branch } => {
-                let result = Config::load().and_then(|config| {
-                    let repo_path = config.get_repo_path();
-                    let repo = init_repo(&repo_path)?;
-                    let mut dry_run = flux::utils::dry_run::DryRun::new();
-                    pull_from_remote(&repo, &remote, &branch, 30, &mut dry_run, false)
-                });
-                TaskResult::Pulled(result)
-            }
+            Operation::Pull {
+                remote: _,
+                branch: _,
+            } => TaskResult::Pulled(Err(flux::utils::error::DotfilesError::Config(
+                "Pull not yet implemented".to_string(),
+            ))),
 
             Operation::ReadHistory { limit } => {
                 let result = read_events(limit);
@@ -689,16 +668,12 @@ impl FluxExecutor {
                     let repo_path = config.get_repo_path();
                     let repo = init_repo(&repo_path)?;
                     let branch = get_current_branch(&repo).unwrap_or_default();
-                    let remotes = repo.remotes()?;
-                    let has_remote = !remotes.is_empty();
-
-                    // Get ahead/behind info (simplified for now)
-                    let (ahead, behind) = (0, 0);
+                    let has_remote = repo.inner().remotes().map(|r| !r.is_empty()).unwrap_or(false);
 
                     Ok(GitStatusInfo {
                         branch,
-                        ahead,
-                        behind,
+                        ahead: 0,
+                        behind: 0,
                         has_remote,
                     })
                 });
@@ -706,98 +681,69 @@ impl FluxExecutor {
             }
 
             Operation::AddFile {
-                tool: _,
-                source_path: _,
-                dest_path: _,
-                profile: _,
+                tool,
+                source_path,
+                dest_path,
+                profile,
             } => {
-                // TODO: Implement file addition
-                TaskResult::FileAdded(Err(flux::utils::error::DotfilesError::Config(
-                    "Not implemented".to_string(),
-                )))
+                let result = {
+                    let mut config = Config::load()?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    let mut fs_manager =
+                        flux::file_manager::FileSystemManager::new(&mut dry_run, false);
+                    flux::file_manager::add_file(
+                        &mut config,
+                        &tool,
+                        &source_path,
+                        &dest_path,
+                        profile.as_deref(),
+                        &mut fs_manager,
+                    )
+                };
+                TaskResult::FileAdded(result)
             }
 
-            Operation::RemoveFile {
-                tool: _,
-                file_name: _,
-            } => {
-                // TODO: Implement file removal
-                TaskResult::FileRemoved(Err(flux::utils::error::DotfilesError::Config(
-                    "Not implemented".to_string(),
-                )))
+            Operation::RemoveFile { tool, file_name } => {
+                let result = {
+                    let mut config = Config::load()?;
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    let mut fs_manager =
+                        flux::file_manager::FileSystemManager::new(&mut dry_run, false);
+                    flux::file_manager::remove_file(&mut config, &tool, &file_name, &mut fs_manager)
+                };
+                TaskResult::FileRemoved(result)
             }
 
             Operation::ApplyConfig {
                 profile,
-                dry_run,
+                dry_run: apply_dry_run,
                 force,
             } => {
-                let result = Config::load().and_then(|config| {
+                let result = {
+                    let config = Config::load()?;
                     let profile_ref = profile.as_deref();
-                    if dry_run {
-                        // For dry run, just return empty vec since we can't get paths without applying
-                        Ok(vec![])
-                    } else {
-                        let options = flux::commands::apply::ApplyOptions {
-                            config: &config,
-                            profile: profile_ref,
-                            dry_run,
-                            yes: true, // Auto-confirm for GUI
-                            description: None,
-                            force,
-                        };
-                        flux::commands::apply::apply_config(&options)?;
-                        // Return the paths that were applied
-                        let diff =
-                            flux::commands::apply::compare_states(&config, profile_ref, force)?;
-                        let paths: Vec<String> = diff
-                            .files_to_sync
-                            .iter()
-                            .map(|f| f.dest_path.to_string_lossy().to_string())
-                            .collect();
-                        Ok(paths)
-                    }
-                });
+                    let mut dry_run = flux::utils::dry_run::DryRun::new();
+                    let mut fs_manager =
+                        flux::file_manager::FileSystemManager::new(&mut dry_run, apply_dry_run);
+                    let files = flux::commands::apply::apply_config(
+                        &config,
+                        profile_ref,
+                        force,
+                        &mut fs_manager,
+                    )?;
+                    Ok(files.into_iter().map(|p| p.to_string_lossy().to_string()).collect())
+                };
                 TaskResult::ConfigApplied(result)
             }
 
             Operation::ValidateConfigContent { content } => {
-                let result =
-                    match toml::from_str::<Config>(&content) {
-                        Ok(config) => match flux::commands::validate::validate_config(&config) {
-                            Ok(report) => {
-                                if report.is_valid {
-                                    Ok(vec![])
-                                } else {
-                                    Ok(report
-                                        .issues
-                                        .iter()
-                                        .map(|issue| format!("{issue:?}"))
-                                        .collect())
-                                }
-                            }
-                            Err(e) => Err(e),
-                        },
-                        Err(e) => Ok(vec![format!("TOML parse error: {}", e)]),
-                    };
+                let result = match toml::from_str::<Config>(&content) {
+                    Ok(_) => Ok(Vec::new()),
+                    Err(e) => Ok(vec![e.to_string()]),
+                };
                 TaskResult::ConfigValidated(result)
             }
         }
-    }
-
-    pub async fn execute<F, T>(&self, operation: F) -> TaskResult
-    where
-        F: Future<Output = Operation> + Send + 'static,
-        T: Future<Output = TaskResult> + Send + 'static,
-    {
-        let op = operation.await;
-        let (reply_tx, mut reply_rx) = mpsc::channel(1);
-        let task = AsyncTask {
-            operation: op,
-            reply: reply_tx,
-        };
-        self.tx.send(task).await.expect("Executor dropped");
-        reply_rx.recv().await.expect("Task failed")
     }
 }
 

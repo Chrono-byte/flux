@@ -20,7 +20,7 @@ flux = { path = ".." }
 futures = "0.3"
 # Core framework - GPUI from Zed
 # Building GPUI can take 5-10 minutes on first build
-gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
+# gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
 # Logging
 log = "0.4"
 # Misc

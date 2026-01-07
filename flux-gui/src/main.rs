@@ -2,12 +2,11 @@
 
 mod app;
 mod async_executor;
-// mod components;
+mod components;
 mod events;
 mod state;
 mod styles;
 mod utils;
-// mod views;
 
 use app::FluxApp;
 use dirs::home_dir;
