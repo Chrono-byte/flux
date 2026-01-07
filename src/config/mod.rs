@@ -265,13 +265,8 @@ impl Config {
             self.validate()?;
         }
 
-        // Save to authoritative location: XDG config if it exists, otherwise repo config
-        let xdg_config = Self::get_xdg_config_path()?;
-        let config_path = if xdg_config.exists() {
-            xdg_config
-        } else {
-            Self::get_config_path()?
-        };
+        // Always save to repo config as the source of truth
+        let config_path = Self::get_repo_config_path()?;
 
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
@@ -459,30 +454,16 @@ impl Config {
     ///
     /// Returns an error if the config directory or home directory cannot be found.
     pub fn get_config_path() -> Result<PathBuf> {
-        // Repo config is the source of truth - prefer it if it exists
+        // Repo config is the source of truth - always use it if it exists
         let repo_config = Self::get_repo_config_path()?;
         if repo_config.exists() {
             return Ok(repo_config);
         }
 
-        // Fall back to XDG config
+        // Fall back to XDG config if repo config doesn't exist (new user scenario)
         let config_dir = dirs::config_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
         let xdg_config = config_dir.join("flux/config.toml");
-        if xdg_config.exists() {
-            return Ok(xdg_config);
-        }
-
-        // Return repo config path as default (even if it doesn't exist)
-        let home = dirs::home_dir()
-            .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
-        let repo_config = home.join(".dotfiles").join("config.toml");
-
-        if repo_config.exists() {
-            return Ok(repo_config);
-        }
-
-        // If neither exists, default to XDG location
         Ok(xdg_config)
     }
 
