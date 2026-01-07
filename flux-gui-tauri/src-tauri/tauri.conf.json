@@ -1,0 +1,51 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "productName": "flux",
+    "version": "1.0.0",
+    "identifier": "dev.flux.dotfiles",
+    "build": {
+        "beforeDevCommand": "trunk serve",
+        "devUrl": "http://localhost:1420",
+        "beforeBuildCommand": "trunk build",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "withGlobalTauri": true,
+        "windows": [
+            {
+                "title": "Flux - Dotfiles Manager",
+                "width": 1400,
+                "height": 900,
+                "minWidth": 800,
+                "minHeight": 600,
+                "resizable": true,
+                "decorations": true,
+                "transparent": false,
+                "center": true
+            }
+        ],
+        "security": {
+            "csp": null
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all",
+        "icon": [],
+        "linux": {
+            "appimage": {
+                "bundleMediaFramework": false
+            },
+            "deb": {
+                "depends": []
+            }
+        },
+        "macOS": {
+            "minimumSystemVersion": "10.13"
+        },
+        "windows": {
+            "wix": null,
+            "nsis": null
+        }
+    }
+}
