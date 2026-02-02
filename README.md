@@ -268,11 +268,3 @@ flux apply --dry-run
 ## Versioning
 
 Flux uses **Epoch Semantic Versioning**. See [VERSIONING.md](VERSIONING.md) for details.
-
-## License
-
-[Your License Here]
-
-## Contributing
-
-[Contributing Guidelines]
