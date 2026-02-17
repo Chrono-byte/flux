@@ -1,5 +1,4 @@
 /* Flux GUI - Dark Theme Styles */
-/* Ported from vanilla JS to Leptos */
 
 :root {
     --window-bg: hsl(0, 0%, 12%);
@@ -170,6 +169,10 @@ body {
     font-size: var(--font-size-sm);
 }
 
+.loading.hidden {
+    display: none;
+}
+
 .profile-badge {
     color: var(--text-secondary);
 }
@@ -191,8 +194,8 @@ body {
     background-color: var(--notification-error);
 }
 
-.hidden {
-    display: none !important;
+.notification.hidden {
+    display: none;
 }
 
 .views-container {
@@ -202,10 +205,6 @@ body {
 }
 
 .view {
-    display: none;
-}
-
-.view.active {
     display: block;
 }
 

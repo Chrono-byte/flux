@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "flux-gui",
+        "title": "Flux - Dotfiles Manager",
         "width": 800,
         "height": 600
       }
