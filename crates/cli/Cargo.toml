@@ -3,6 +3,10 @@ name = "flux-cli"
 version = "1.3.3"
 edition = "2024"
 
+[[bin]]
+name = "flux"
+path = "src/main.rs"
+
 [dependencies]
 flux = { path = "../lib" }
 anyhow = "1.0"

@@ -3,8 +3,9 @@ use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::error_utils;
 use colored::Colorize;
-use git2::{CredentialType, FetchOptions, RemoteCallbacks, Repository, Signature};
+use git2::{CredentialType, RemoteCallbacks, Repository, Signature};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 use tokio::time::timeout as tokio_timeout;
 
@@ -236,13 +237,23 @@ fn setup_credential_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
     let _ = callbacks.credentials(move |url, username_from_url, allowed_types| {
         let username = username_from_url.unwrap_or("git");
+        trace_git_auth(format_args!(
+            "credentials url={url} username_from_url={username_from_url:?} allowed_types={allowed_types:?}"
+        ));
 
         if allowed_types.contains(CredentialType::USERNAME) {
+            trace_git_auth(format_args!("return username credential for {username}"));
             return git2::Cred::username(username);
         }
 
         if allowed_types.contains(CredentialType::SSH_KEY) {
             if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                trace_git_auth(format_args!("using ssh agent for {username}"));
+                return Ok(cred);
+            }
+
+            if let Some(cred) = try_default_ssh_keys(username) {
+                trace_git_auth(format_args!("using default ssh key for {username}"));
                 return Ok(cred);
             }
         }
@@ -252,27 +263,61 @@ fn setup_credential_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
                 (std::env::var("GIT_USERNAME"), std::env::var("GIT_PASSWORD"))
                 && let Ok(cred) = git2::Cred::userpass_plaintext(&user, &pass)
             {
+                trace_git_auth(format_args!("using GIT_USERNAME/GIT_PASSWORD"));
                 return Ok(cred);
             }
 
             if let Some(config) = config.as_ref()
                 && let Ok(cred) = git2::Cred::credential_helper(config, url, username_from_url)
             {
+                trace_git_auth(format_args!("using git credential helper"));
                 return Ok(cred);
             }
         }
 
         if allowed_types.contains(CredentialType::DEFAULT) {
             if let Ok(cred) = git2::Cred::default() {
+                trace_git_auth(format_args!("using default credentials"));
                 return Ok(cred);
             }
         }
 
+        trace_git_auth(format_args!("no supported authentication method succeeded"));
         Err(git2::Error::from_str(&format!(
             "No supported authentication method succeeded for {url}"
         )))
     });
     callbacks
+}
+
+fn try_default_ssh_keys(username: &str) -> Option<git2::Cred> {
+    let mut private_keys = Vec::new();
+
+    if let Ok(path) = std::env::var("GIT_SSH_KEY")
+        && !path.is_empty()
+    {
+        private_keys.push(PathBuf::from(path));
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
+            let path = home.join(".ssh").join(name);
+            if path.exists() {
+                private_keys.push(path);
+            }
+        }
+    }
+
+    private_keys.into_iter().find_map(|private_key| {
+        trace_git_auth(format_args!("trying ssh key {}", private_key.display()));
+        git2::Cred::ssh_key(username, None, &private_key, None).ok()
+    })
+}
+
+fn trace_git_auth(args: std::fmt::Arguments<'_>) {
+    if std::env::var_os("FLUX_GIT_TRACE_AUTH").is_some() {
+        eprintln!("[flux git auth] {args}");
+    }
 }
 
 /// Execute a git2 operation with a timeout using async/await
@@ -771,23 +816,42 @@ async fn execute_fetch_operation(
 
     execute_with_timeout(
         move || -> Result<()> {
-            let repo_in_thread = Repository::open(&repo_path_clone)?;
-            let mut remote = repo_in_thread.find_remote(&remote_name_clone)?;
-            let mut fetch_options_in_thread = FetchOptions::new();
-            let callbacks_in_thread = setup_credential_callbacks(&repo_in_thread);
-            let _ = fetch_options_in_thread.remote_callbacks(callbacks_in_thread);
+            trace_git_auth(format_args!(
+                "execute_fetch_operation using system git for repo={} remote={} branch={}",
+                repo_path_clone.display(),
+                remote_name_clone,
+                branch_name_clone
+            ));
             let refspec_in_thread = format!(
                 "refs/heads/{branch_name_clone}:refs/remotes/{remote_name_clone}/{branch_name_clone}"
             );
-            remote.fetch(
-                &[&refspec_in_thread],
-                Some(&mut fetch_options_in_thread),
-                None,
-            )?;
-            Ok(())
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&repo_path_clone)
+                .arg("fetch")
+                .arg(&remote_name_clone)
+                .arg(&refspec_in_thread)
+                .output()
+                .map_err(|err| DotfilesError::Config(format!("Failed to invoke git fetch: {err}")))?;
+
+            if output.status.success() {
+                Ok(())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let message = if !stderr.is_empty() {
+                    stderr
+                } else if !stdout.is_empty() {
+                    stdout
+                } else {
+                    format!("git fetch exited with status {}", output.status)
+                };
+                Err(DotfilesError::Config(message))
+            }
         },
         timeout_seconds,
-    ).await
+    )
+    .await
 }
 
 /// Perform merge after fetch (fast-forward or regular merge).
@@ -1006,6 +1070,12 @@ pub async fn pull_from_remote(
     let head_oid_before = head_before.as_ref().map(git2::Commit::id);
 
     let start_time = std::time::Instant::now();
+    trace_git_auth(format_args!(
+        "pull_from_remote start repo={} remote={} branch={}",
+        git_repo.repo_path.display(),
+        remote_name,
+        branch_name
+    ));
     let fetch_result = execute_fetch_operation(
         &git_repo.repo_path,
         remote_name,
