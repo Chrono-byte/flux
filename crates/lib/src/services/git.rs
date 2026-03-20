@@ -228,16 +228,26 @@ fn get_user_signature(repo: &Repository) -> Result<Signature<'_>> {
         .map_err(|err| DotfilesError::Config(format!("Failed to create git signature: {err}")))
 }
 
-/// Set up credential callbacks for git2 operations
-/// Handles both SSH (via SSH agent) and HTTPS (via environment variables or system keyring) authentication
-fn setup_credential_callbacks() -> RemoteCallbacks<'static> {
+/// Set up credential callbacks for git2 operations.
+/// Handles SSH via username negotiation plus SSH agent, and HTTPS via
+/// explicit environment variables or the configured git credential helper.
+fn setup_credential_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
+    let config = repo.config().ok();
     let mut callbacks = RemoteCallbacks::new();
-    let _ = callbacks.credentials(|_url, username, allowed_types| {
-        let username = username.unwrap_or("git");
+    let _ = callbacks.credentials(move |url, username_from_url, allowed_types| {
+        let username = username_from_url.unwrap_or("git");
 
-        // For HTTPS authentication
+        if allowed_types.contains(CredentialType::USERNAME) {
+            return git2::Cred::username(username);
+        }
+
+        if allowed_types.contains(CredentialType::SSH_KEY) {
+            if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
+                return Ok(cred);
+            }
+        }
+
         if allowed_types.contains(CredentialType::USER_PASS_PLAINTEXT) {
-            // First try environment variables (explicit override)
             if let (Ok(user), Ok(pass)) =
                 (std::env::var("GIT_USERNAME"), std::env::var("GIT_PASSWORD"))
                 && let Ok(cred) = git2::Cred::userpass_plaintext(&user, &pass)
@@ -245,38 +255,22 @@ fn setup_credential_callbacks() -> RemoteCallbacks<'static> {
                 return Ok(cred);
             }
 
-            // Try default credential helper (uses system keyring/credential manager)
-            // This will use git's credential.helper config which may point to:
-            // - macOS: osxkeychain
-            // - Linux: libsecret, gnome-keyring, etc.
-            // - Windows: wincred
+            if let Some(config) = config.as_ref()
+                && let Ok(cred) = git2::Cred::credential_helper(config, url, username_from_url)
+            {
+                return Ok(cred);
+            }
+        }
+
+        if allowed_types.contains(CredentialType::DEFAULT) {
             if let Ok(cred) = git2::Cred::default() {
                 return Ok(cred);
             }
         }
 
-        // For SSH authentication
-        if allowed_types.contains(CredentialType::SSH_KEY) {
-            // First try SSH agent (most common for SSH)
-            if let Ok(cred) = git2::Cred::ssh_key_from_agent(username) {
-                return Ok(cred);
-            }
-
-            // Try default credential helper (may have SSH keys configured)
-            if let Ok(cred) = git2::Cred::default() {
-                return Ok(cred);
-            }
-        }
-
-        // For SSH, also try username-based credential (for custom SSH setups)
-        if allowed_types.contains(CredentialType::USERNAME)
-            && let Ok(cred) = git2::Cred::username(username)
-        {
-            return Ok(cred);
-        }
-
-        // Final fallback: default credential helper
-        git2::Cred::default()
+        Err(git2::Error::from_str(&format!(
+            "No supported authentication method succeeded for {url}"
+        )))
     });
     callbacks
 }
@@ -594,7 +588,7 @@ async fn execute_push_operation(
             let repo_in_thread = Repository::open(&repo_path_clone)?;
             let mut remote = repo_in_thread.find_remote(&remote_name_clone)?;
             let mut push_options_in_thread = git2::PushOptions::new();
-            let callbacks_in_thread = setup_credential_callbacks();
+            let callbacks_in_thread = setup_credential_callbacks(&repo_in_thread);
             let _ = push_options_in_thread.remote_callbacks(callbacks_in_thread);
             remote.push(&[&refspec_clone], Some(&mut push_options_in_thread))?;
             Ok(())
@@ -780,7 +774,7 @@ async fn execute_fetch_operation(
             let repo_in_thread = Repository::open(&repo_path_clone)?;
             let mut remote = repo_in_thread.find_remote(&remote_name_clone)?;
             let mut fetch_options_in_thread = FetchOptions::new();
-            let callbacks_in_thread = setup_credential_callbacks();
+            let callbacks_in_thread = setup_credential_callbacks(&repo_in_thread);
             let _ = fetch_options_in_thread.remote_callbacks(callbacks_in_thread);
             let refspec_in_thread = format!(
                 "refs/heads/{branch_name_clone}:refs/remotes/{remote_name_clone}/{branch_name_clone}"
