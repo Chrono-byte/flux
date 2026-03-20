@@ -1,0 +1,23 @@
+[package]
+name = "flux-gui-ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+console_error_panic_hook = "0.1.7"
+gloo-timers = "0.3"
+js-sys = "0.3"
+leptos = { version = "0.8", features = ["csr"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "Window",
+  "console",
+]

@@ -1,38 +1,28 @@
 //! flux - A dotfiles manager with symlink-based sync
 //!
 //! This is the binary entry point for the Flux dotfiles manager.
-//! The library functionality is provided in `lib.rs`.
-
-/// Command implementations for CLI subcommands.
-mod commands;
-/// Configuration management and profile handling.
-mod config;
-/// File operations and symlink management.
-mod file_manager;
-/// Service layer for git, hooks, and other operations.
-mod services;
-/// Type definitions and data structures.
-mod types;
-/// Utility functions for error handling, logging, and prompts.
-mod utils;
+//! The library functionality is provided in the `flux` crate.
 
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::{Colorize, control};
-use commands::{
-    apply_config, check_status, compare_states, display_discrepancies, display_health_report,
-    display_preview, display_status, display_validation, find_discrepancies, migrate_files,
-    run_health_checks, validate_config,
+use flux::{
+    commands::{
+        apply_config, check_status, compare_states, display_discrepancies, display_health_report,
+        display_preview, display_status, display_validation, find_discrepancies, migrate_files,
+        run_health_checks, validate_config,
+    },
+    config::profile::{create_profile, get_profile_files, list_profiles, switch_profile},
+    config::{Config, EnvironmentConfig},
+    file_manager::FileSystemManager,
+    file_manager::{add_file, remove_file, sync_files},
+    services::git,
+    services::{
+        add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
+        push_to_remote, read_events, remove_remote, set_remote_url, show_git_status, stage_changes,
+    },
+    utils::prompt::prompt_commit_message,
+    utils::{DotfilesError, DryRun, Result, logging},
 };
-use config::profile::{create_profile, get_profile_files, list_profiles, switch_profile};
-use config::{Config, EnvironmentConfig};
-use file_manager::{add_file, remove_file, sync_files};
-use services::git;
-use services::{
-    add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
-    push_to_remote, read_events, remove_remote, set_remote_url, show_git_status, stage_changes,
-};
-use utils::prompt::prompt_commit_message;
-use utils::{DotfilesError, DryRun, Result, logging};
 
 /// Command line interface for the Flux dotfiles manager.
 #[derive(Parser)]
@@ -560,7 +550,7 @@ fn handle_add_command(
 ) -> Result<()> {
     let mut config = Config::load()?;
     let mut dry_run_tracker = DryRun::default();
-    let mut fs_manager = file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
+    let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, dry_run);
 
     if from_repo {
         // File already exists in repo - register it without copying
@@ -665,7 +655,7 @@ fn handle_commit_command(
         && let Some(hooks_config) = &config.hooks
         && let Some(pre_hooks) = &hooks_config.pre_commit
     {
-        use crate::services::hooks::execute_hooks;
+        use flux::services::hooks::execute_hooks;
         println!("{} Running pre-commit hooks...", "→".cyan());
         let hook_results = execute_hooks(pre_hooks, &config, None, true)?;
         for result in hook_results {
@@ -708,7 +698,7 @@ fn handle_commit_command(
             if let Some(hooks_config) = &config.hooks
                 && let Some(post_hooks) = &hooks_config.post_commit
             {
-                use crate::services::hooks::execute_hooks;
+                use flux::services::hooks::execute_hooks;
                 println!("{} Running post-commit hooks...", "→".cyan());
                 let hook_results = execute_hooks(post_hooks, &config, None, false)?; // Don't fail-fast on post hooks
                 for result in hook_results {
@@ -751,7 +741,7 @@ fn handle_commit_command(
 fn handle_rm_command(tool: &str, file: &str, dry_run: bool) -> Result<()> {
     let mut config = Config::load()?;
     let mut dry_run_tracker = DryRun::default();
-    let mut fs_manager = file_manager::FileSystemManager::new(&mut dry_run_tracker, dry_run);
+    let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, dry_run);
     remove_file(&mut config, tool, file, &mut fs_manager)?;
 
     if dry_run {
@@ -813,10 +803,10 @@ fn handle_apply_command(
         let state_diff = compare_states(&config, profile, force)?;
         display_preview(&state_diff);
         if diff && !state_diff.files_to_sync.is_empty() {
-            commands::display_diffs(&state_diff);
+            flux::commands::display_diffs(&state_diff);
         }
     } else {
-        use crate::commands::ApplyOptions;
+        use flux::commands::ApplyOptions;
         // apply_config now handles history recording internally
         apply_config(&ApplyOptions {
             config: &config,
@@ -1260,11 +1250,11 @@ fn handle_status_command(profile: Option<&str>, conflicts: bool, json: bool) -> 
 
     if conflicts {
         // Show only conflicted files
-        use commands::status::check_conflicts;
+        use flux::commands::status::check_conflicts;
         let conflicted = check_conflicts(&config, profile)?;
 
         if json {
-            use commands::status::JsonStatusReport;
+            use flux::commands::status::JsonStatusReport;
             let json_reports: Vec<JsonStatusReport> = conflicted.iter().map(Into::into).collect();
             println!("{}", serde_json::to_string_pretty(&json_reports)?);
         } else if conflicted.is_empty() {
@@ -1282,7 +1272,7 @@ fn handle_status_command(profile: Option<&str>, conflicts: bool, json: bool) -> 
         }
     } else if json {
         // JSON output - skip git status, just show file status
-        use commands::status::JsonStatusReport;
+        use flux::commands::status::JsonStatusReport;
         let reports = check_status(&config, profile)?;
         let json_reports: Vec<JsonStatusReport> = reports.iter().map(Into::into).collect();
         println!("{}", serde_json::to_string_pretty(&json_reports)?);
