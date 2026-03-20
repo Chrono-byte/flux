@@ -275,11 +275,11 @@ fn setup_credential_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
             }
         }
 
-        if allowed_types.contains(CredentialType::DEFAULT) {
-            if let Ok(cred) = git2::Cred::default() {
-                trace_git_auth(format_args!("using default credentials"));
-                return Ok(cred);
-            }
+        if allowed_types.contains(CredentialType::DEFAULT)
+            && let Ok(cred) = git2::Cred::default()
+        {
+            trace_git_auth(format_args!("using default credentials"));
+            return Ok(cred);
         }
 
         trace_git_auth(format_args!("no supported authentication method succeeded"));

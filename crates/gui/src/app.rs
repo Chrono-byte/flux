@@ -252,16 +252,17 @@ fn HomeView() -> impl IntoView {
         view! {
             <div class="activity-container">
                 {if h.is_empty() {
-                    view! { <p class="text-secondary">"No recent activity"</p> }
+                    view! { <p class="text-secondary">"No recent activity"</p> }.into_any()
                 } else {
                     view! {
                         <div class="activity-list">
-                            {h.iter().take(5).map(|event| {
+                            {h.into_iter().take(5).map(|event| {
                                 let timestamp = parse_timestamp(&event.timestamp);
                                 view! { <div class="activity-item">{format!("{} - {}", timestamp, event.command)}</div> }
                             }).collect::<Vec<_>>()}
                         </div>
                     }
+                    .into_any()
                 }}
             </div>
         }
@@ -321,14 +322,14 @@ fn FilesView() -> impl IntoView {
     let file_list = move || {
         let f = files.get();
         if f.is_empty() {
-            view! { <div class="empty-state"><p class="text-secondary">"No tracked files"</p></div> }.into_view()
+            view! { <div class="empty-state"><p class="text-secondary">"No tracked files"</p></div> }.into_any()
         } else {
             view! { <div class="files-list">
-                {f.iter().map(|file| {
+                {f.into_iter().map(|file| {
                     let status_class = get_status_class(&file.status);
                     view! {
                         <div class="file-item">
-                            <div class=&format!("file-status-dot {}", status_class.as_str())></div>
+                            <div class=format!("file-status-dot {}", status_class.as_str())></div>
                             <div class="file-info">
                                 <div class="file-path">{file.dest_path.clone().unwrap_or_default()}</div>
                                 <div class="file-details">{file.tool.clone().unwrap_or_default()}</div>
@@ -336,7 +337,7 @@ fn FilesView() -> impl IntoView {
                         </div>
                     }
                 }).collect::<Vec<_>>()}
-            </div> }.into_view()
+            </div> }.into_any()
         }
     };
 
@@ -344,7 +345,7 @@ fn FilesView() -> impl IntoView {
         <div class="view">
             <div class="view-header">
                 <p class="text-secondary">{move || format!("{} tracked files", files.get().len())}</p>
-                <button class="btn btn-secondary" on:click=|_| spawn_local(async { load_status().await; let _ = (); })>"Refresh"</button>
+                <button class="btn btn-secondary" on:click=|_| spawn_local(async { let _ = load_status().await; })>"Refresh"</button>
             </div>
             <h3>"Tracked Files"</h3>
             {file_list}
@@ -396,16 +397,19 @@ fn ProfilesView() -> impl IntoView {
             <p class="text-secondary">"Manage your dotfiles profiles"</p>
             <h3>"Available Profiles"</h3>
             <div class="profiles-list">
-                {move || profiles.get().iter().map(|profile| {
-                    let is_active = profile == &current_profile.get();
+                {move || profiles.get().into_iter().map(|profile| {
+                    let is_active = profile == current_profile.get();
                     let name = profile.clone();
                     view! {
                         <div class="profile-item">
-                            <span class=&format!("profile-name {}", if is_active { "active" } else { "" })>{profile.as_str()}</span>
+                            <span class=format!("profile-name {}", if is_active { "active" } else { "" })>{profile}</span>
                             {if is_active {
-                                view! { <span class="profile-badge active">"Active"</span> }.into_view()
+                                view! { <span class="profile-badge active">"Active"</span> }.into_any()
                             } else {
-                                view! { <button class="profile-badge switch" on:click=move |_| spawn_local(async move { switch_profile(name.clone()).await })>"Switch"</button> }.into_view()
+                                view! { <button class="profile-badge switch" on:click=move |_| {
+                                    let profile_name = name.clone();
+                                    spawn_local(async move { switch_profile(profile_name).await });
+                                } >"Switch"</button> }.into_any()
                             }}
                         </div>
                     }
@@ -442,13 +446,13 @@ fn RemotesView() -> impl IntoView {
             </div>
             <h3>"Configured Remotes"</h3>
             <div class="remotes-list">
-                {move || remotes.get().iter().map(|remote| {
+                {move || remotes.get().into_iter().map(|remote| {
                     view! {
                         <div class="remote-item">
                             <div class="remote-icon">"git"</div>
                             <div class="remote-info">
-                                <div class="remote-name">{remote.name.as_str()}</div>
-                                <div class="remote-url">{remote.url.as_str()}</div>
+                                <div class="remote-name">{remote.name}</div>
+                                <div class="remote-url">{remote.url}</div>
                             </div>
                         </div>
                     }
@@ -476,7 +480,7 @@ fn HistoryView() -> impl IntoView {
                 <button class="btn btn-secondary" on:click=|_| spawn_local(async { let _ = load_history().await; })>"Refresh"</button>
             </div>
             <div class="history-list">
-                {move || history.get().iter().map(|event| {
+                {move || history.get().into_iter().map(|event| {
                     let (date_str, time_str) = parse_timestamp_full(&event.timestamp);
                     view! {
                         <div class="history-item">
@@ -485,9 +489,9 @@ fn HistoryView() -> impl IntoView {
                                 <span class="history-clock">{time_str}</span>
                             </div>
                             <div class="history-details">
-                                <div class="history-command">{event.command.as_str()}</div>
+                                <div class="history-command">{event.command}</div>
                                 <div class="history-tags">
-                                    <span class=&format!("history-tag {}", if event.dry_run { "dry-run" } else { "executed" })>
+                                    <span class=format!("history-tag {}", if event.dry_run { "dry-run" } else { "executed" })>
                                         {if event.dry_run { "Dry Run" } else { "Executed" }}
                                     </span>
                                 </div>
