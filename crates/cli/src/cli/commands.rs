@@ -4,12 +4,16 @@ use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
 use clap::CommandFactory;
 use colored::Colorize;
 
-use super::args::{Cli, ConfigCommands, MaintainCommands, ProfileCommands, RemoteCommands};
+use super::args::{
+    Cli, Commands, ConfigCommands, MaintainCommands, ProfileCommands, RemoteCommands,
+};
 use flux_lib::{
+    commands::apply::StateDiff,
+    commands::doctor::HealthReport,
+    commands::validate::ValidationReport,
     commands::{
-        apply_config, check_status, compare_states, display_discrepancies, display_health_report,
-        display_preview, display_status, display_validation, find_discrepancies, migrate_files,
-        run_health_checks, validate_config,
+        apply_config, check_status, compare_states, display_health_report, display_preview,
+        display_status, display_validation, migrate_files, run_health_checks, validate_config,
     },
     config::Config,
     config::profile::{create_profile, get_profile_files, list_profiles, switch_profile},
@@ -26,23 +30,6 @@ use flux_lib::{
 /// Handle the maintain command.
 pub(super) fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
     match command {
-        MaintainCommands::Check { profile } => {
-            let config = Config::load()?;
-            let discrepancies = find_discrepancies(&config, profile.as_deref())?;
-            display_discrepancies(&discrepancies);
-
-            if !discrepancies.is_empty() {
-                std::process::exit(1);
-            }
-        }
-        MaintainCommands::Validate => {
-            let config = Config::load()?;
-            let report = validate_config(&config)?;
-            display_validation(&report);
-            if !report.is_valid {
-                std::process::exit(1);
-            }
-        }
         MaintainCommands::Migrate {
             profile,
             dry_run,
@@ -933,63 +920,11 @@ pub(super) fn handle_status_command(
     Ok(())
 }
 
-/// Handle the check command.
+/// Handle the doctor command.
 ///
 /// # Parameters
 ///
-/// * `profile`: Optional profile name.
-/// * `quiet`: Whether to suppress non-error output.
-///
-/// # Returns
-///
-/// Returns the result of the check command (exits with appropriate code).
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if validation fails.
-pub(super) fn handle_check_command(profile: Option<&str>, quiet: bool) -> Result<()> {
-    // CI-safe validation: read-only, no writes, no prompts, no hooks, no secrets
-    let config = Config::load()?;
-    let report = validate_config(&config)?;
-
-    // Also check state diff (read-only)
-    let diff = compare_states(&config, profile, false)?;
-
-    if report.is_valid && diff.is_empty() {
-        // All good - exit 0
-        if !quiet {
-            println!(
-                "{} Configuration is valid and system is in sync",
-                "✓".green()
-            );
-        }
-        std::process::exit(0);
-    }
-
-    // Issues found - exit with appropriate code
-    if !report.is_valid {
-        display_validation(&report);
-    }
-    if !diff.is_empty() && !quiet {
-        println!(
-            "\n{} System is not in sync with configuration",
-            "⚠".yellow()
-        );
-        display_preview(&diff);
-    }
-
-    // Exit code: 1 for validation issues, 2 for sync issues, 3 for both
-    let exit_code = if !report.is_valid && !diff.is_empty() {
-        3
-    } else if !report.is_valid {
-        1
-    } else {
-        2
-    };
-    std::process::exit(exit_code);
-}
-
-/// Handle the doctor command.
+/// * `profile`: Optional profile name for state comparison.
 ///
 /// # Returns
 ///
@@ -997,16 +932,162 @@ pub(super) fn handle_check_command(profile: Option<&str>, quiet: bool) -> Result
 ///
 /// # Errors
 ///
-/// Returns an error if the configuration cannot be loaded or if health checks fail.
-pub(super) fn handle_doctor_command() -> Result<()> {
+/// Returns an error if the configuration cannot be loaded or if any checks fail.
+pub(super) fn handle_doctor_command(profile: Option<&str>) -> Result<()> {
     let config = Config::load()?;
-    let report = run_health_checks(&config)?;
-    display_health_report(&report);
 
-    if !report.is_healthy() {
-        std::process::exit(1);
+    // Validation + state diff (formerly `flux check`)
+    let report = validate_config(&config)?;
+    let diff = compare_states(&config, profile, false)?;
+
+    // Health checks
+    let health_report = run_health_checks(&config)?;
+
+    display_doctor_report(&report, &diff, &health_report);
+
+    let mut exit_code = 0;
+    if !report.is_valid {
+        exit_code |= 1;
+    }
+    if !diff.is_empty() {
+        exit_code |= 2;
+    }
+    if !health_report.is_healthy() {
+        exit_code |= 4;
+    }
+
+    if exit_code != 0 {
+        std::process::exit(exit_code);
     }
     Ok(())
+}
+
+/// Display the doctor report, including validation issues, state diff, and health checks.
+fn display_doctor_report(
+    report: &ValidationReport,
+    diff: &StateDiff,
+    health_report: &HealthReport,
+) {
+    println!("\n{} Doctor Report", "→".cyan().bold());
+    println!("{}", "=".repeat(60).cyan());
+
+    if report.is_valid && diff.is_empty() {
+        println!(
+            "{} Configuration is valid and system is in sync",
+            "✓".green()
+        );
+    } else {
+        if !report.is_valid {
+            display_validation(report);
+        }
+
+        if !diff.is_empty() {
+            println!(
+                "\n{} System is not in sync with configuration",
+                "⚠".yellow()
+            );
+            display_preview(diff);
+        }
+    }
+
+    display_health_report(health_report);
+}
+
+impl Commands {
+    /// Execute the command.
+    pub fn execute(self) -> Result<()> {
+        match self {
+            Commands::Init { repo_path } => handle_init_command(repo_path)?,
+            Commands::Add {
+                tool,
+                file,
+                dest,
+                profile,
+                dry_run,
+                from_repo,
+            } => handle_add_command(
+                &tool,
+                &file,
+                dest.as_deref(),
+                profile.as_deref(),
+                dry_run,
+                from_repo,
+            )?,
+            Commands::Commit {
+                profile,
+                message,
+                dry_run,
+                verbose,
+            } => handle_commit_command(profile.as_deref(), message.as_deref(), dry_run, verbose)?,
+            Commands::Rm {
+                tool,
+                file,
+                dry_run,
+            } => handle_rm_command(&tool, &file, dry_run)?,
+            Commands::LsFiles { profile } => handle_ls_files_command(profile.as_deref())?,
+            Commands::Apply {
+                profile,
+                dry_run,
+                diff,
+                yes,
+                description,
+                force,
+            } => handle_apply_command(
+                profile.as_deref(),
+                dry_run,
+                diff,
+                yes,
+                description.as_deref(),
+                force,
+            )?,
+            Commands::History {
+                limit,
+                profile,
+                kind,
+                since,
+                json,
+            } => handle_history_command(
+                limit,
+                profile.as_deref(),
+                kind.as_deref(),
+                since.as_deref(),
+                json,
+            )?,
+            Commands::Profile { command } => handle_profile_command(command)?,
+            Commands::Config { command } => handle_config_command(&command)?,
+            Commands::Remote { command } => handle_remote_command(command)?,
+            Commands::Push {
+                remote,
+                branch,
+                set_upstream,
+                dry_run,
+                timeout,
+            } => tokio::runtime::Runtime::new()?.block_on(handle_push_command(
+                remote,
+                branch,
+                set_upstream,
+                dry_run,
+                timeout,
+            ))?,
+            Commands::Pull {
+                remote,
+                branch,
+                dry_run,
+                timeout,
+            } => tokio::runtime::Runtime::new()?
+                .block_on(handle_pull_command(remote, branch, dry_run, timeout))?,
+            Commands::Status {
+                profile,
+                conflicts,
+                json,
+            } => handle_status_command(profile.as_deref(), conflicts, json)?,
+            Commands::Maintain { command } => return handle_maintain_command(command),
+            Commands::Doctor { profile } => handle_doctor_command(profile.as_deref())?,
+            Commands::Completion { shell } => handle_completion_command(&shell),
+        }
+
+        Ok(())
+    }
 }
 
 /// Handle the import command.

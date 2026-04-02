@@ -81,12 +81,9 @@ flux status
 - `flux push [--remote NAME] [--branch NAME] [--set-upstream]` - Push to remote
 - `flux pull [--remote NAME] [--branch NAME]` - Pull from remote
 
-### Maintenance
-
-- `flux maintain check [--profile NAME]` - Check for discrepancies
-- `flux maintain validate` - Validate configuration integrity
+- `flux doctor [--profile NAME]` - Run validation, state diff, and health checks; exits non-zero (1=validation, 2=diff, 4=health, bits can combine)
 - `flux maintain migrate [--profile NAME] [--no-backup]` - Migrate files with discrepancies (use `--no-backup` to skip copying files to repo, just remove and create symlinks)
-- `flux maintain gitignore` - Generate .gitignore file
+- `flux maintain gitignore` - Generate a .gitignore file for the repo
 
 ### Completions
 
@@ -236,7 +233,7 @@ flux apply --dry-run
 
 **Files being skipped**: Check if files are locked (browser/application running). Use `flux status` for details.
 
-**Symlinks not working**: Check `symlink_resolution` in config. Use `flux maintain validate` to check for issues.
+**Symlinks not working**: Check `symlink_resolution` in config. Use `flux doctor --profile <name>` to validate your configuration and system state.
 
 **Profile not working**: Verify with `flux profile list`. Check profile directory exists in repository.
 

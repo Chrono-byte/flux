@@ -206,27 +206,17 @@ pub enum Commands {
         /// Shell type (zsh, bash, fish, etc.)
         shell: String,
     },
-    /// CI-safe validation (read-only, no writes, no prompts, no hooks)
-    Check {
+    /// Health check and diagnostics (includes validation and state diff)
+    Doctor {
         /// Profile name (default: current profile)
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Health check and diagnostics
-    Doctor,
 }
 
 /// Commands for maintenance and repair operations.
 #[derive(Subcommand)]
 pub enum MaintainCommands {
-    /// Check for discrepancies in tracked files (missing, wrong target, content differs, etc.)
-    Check {
-        /// Profile name (default: current profile)
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Validate configuration integrity
-    Validate,
     /// Migrate files with discrepancies: copy current files to repo and create symlinks
     Migrate {
         /// Profile name (default: current profile)

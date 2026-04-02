@@ -7,11 +7,10 @@ use flux_lib::utils::Result;
 
 pub mod args;
 mod commands;
-mod handler;
 
 pub use args::Cli;
 
 /// Run the CLI with the given arguments and environment configuration.
-pub fn run(cli: Cli, env_config: EnvironmentConfig) -> Result<()> {
-    handler::run(cli, env_config)
+pub fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
+    cli.command.execute()
 }
