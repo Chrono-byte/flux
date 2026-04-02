@@ -4,6 +4,8 @@ pub mod dry_run;
 pub mod error;
 /// Error utility functions.
 pub mod error_utils;
+/// Home directory helpers (with override support for tests).
+pub mod home_override;
 /// Logging configuration and utilities.
 pub mod logging;
 /// Path manipulation utilities.

@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::types::{SymlinkResolution, TrackedFile};
 use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::home_override;
 use crate::utils::path_utils::{
     files_differ, find_symlinked_parent, normalize_path, resolve_symlink_target,
     symlink_points_to_correct_target,
@@ -33,7 +34,8 @@ pub fn add_file(
     fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
     // Create backup of destination file if it exists before making any changes
-    let home = dirs::home_dir().ok_or_else(crate::utils::error_utils::home_dir_not_found)?;
+    let home =
+        home_override::home_dir().ok_or_else(crate::utils::error_utils::home_dir_not_found)?;
 
     // Validate destination path is within home directory
     security::validate_dest_path(dest_path, &home)?;
@@ -264,7 +266,7 @@ pub fn remove_file(
         }
     };
 
-    let dest_path = dirs::home_dir()
+    let dest_path = home_override::home_dir()
         .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
         .join(&file_entry.dest);
 

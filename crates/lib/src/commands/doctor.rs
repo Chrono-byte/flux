@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::error::Result;
+use crate::utils::home_override;
 use crate::utils::path_utils::symlink_points_to_correct_target;
 use colored::Colorize;
 use std::fs;
@@ -302,7 +303,7 @@ fn check_unsafe_permissions(config: &Config, issues: &mut Vec<HealthIssue>) -> R
     use std::os::unix::fs::PermissionsExt;
 
     let tracked_files = config.get_tracked_files(None)?;
-    let home = dirs::home_dir().ok_or_else(|| {
+    let home = home_override::home_dir().ok_or_else(|| {
         crate::utils::error::DotfilesError::Config("Could not find home directory".to_string())
     })?;
 

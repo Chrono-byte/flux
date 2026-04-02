@@ -1,6 +1,7 @@
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::error_utils;
-use std::path::Path;
+use std::io::ErrorKind;
+use std::path::{Component, Path, PathBuf};
 
 /// Validate that a symlink target is within the repository (prevents path traversal attacks)
 ///
@@ -72,22 +73,30 @@ pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
         ))
     })?;
 
-    let full_dest = home.join(dest);
-    let canonical_dest = full_dest.canonicalize().map_err(|_| {
-        DotfilesError::Path(format!(
-            "What: Cannot resolve destination path\n  \
-             Destination: {}\n  \
-             Why: Path cannot be made absolute or does not exist\n  \
-             💡 Solution:\n    \
-             - Verify the parent directory exists: `ls -la {}`\n    \
-             - Check path does not contain invalid characters\n    \
-             - Ensure path is relative to home directory",
-            full_dest.display(),
-            full_dest
-                .parent()
-                .map_or_else(|| "N/A".to_string(), |parent| parent.display().to_string())
-        ))
-    })?;
+    let full_dest = if dest.is_absolute() {
+        dest.to_path_buf()
+    } else {
+        home.join(dest)
+    };
+    let canonical_dest = match full_dest.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == ErrorKind::NotFound => normalize_nonexistent_path(&full_dest),
+        Err(_) => {
+            return Err(DotfilesError::Path(format!(
+                "What: Cannot resolve destination path\n  \
+                 Destination: {}\n  \
+                 Why: Path cannot be made absolute or does not exist\n  \
+                 💡 Solution:\n    \
+                 - Verify the parent directory exists: `ls -la {}`\n    \
+                 - Check path does not contain invalid characters\n    \
+                 - Ensure path is relative to home directory",
+                full_dest.display(),
+                full_dest
+                    .parent()
+                    .map_or_else(|| "N/A".to_string(), |parent| parent.display().to_string())
+            )));
+        }
+    };
 
     // Check if destination is within home directory
     if !canonical_dest.starts_with(&canonical_home) {
@@ -95,6 +104,24 @@ pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn normalize_nonexistent_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(Path::new("/")),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            Component::Normal(segment) => normalized.push(segment),
+        }
+    }
+
+    normalized
 }
 
 /// Set secure permissions on a file (mode 0600 - read/write owner only)

@@ -23,6 +23,7 @@ use flux_lib::{
         add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
         push_to_remote, read_events, remove_remote, set_remote_url, show_git_status, stage_changes,
     },
+    utils::home_override,
     utils::prompt::prompt_commit_message,
     utils::{DotfilesError, DryRun, Result},
 };
@@ -228,7 +229,7 @@ pub(super) fn handle_add_command(
             std::path::Path::new(dest).to_path_buf()
         } else {
             // Use source path relative to home directory
-            let home = dirs::home_dir().ok_or_else(|| {
+            let home = home_override::home_dir().ok_or_else(|| {
                 DotfilesError::Config("Could not find home directory".to_string())
             })?;
             source_path

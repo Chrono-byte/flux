@@ -280,12 +280,7 @@ symlink_resolution = "{input_str}"
         let mut config = Config::default();
 
         // Primary: add single file
-        config.add_file_to_tool(
-            "sway",
-            "config",
-            std::path::Path::new(".config/sway/config"),
-            None,
-        );
+        config.add_file_to_tool("sway", "config", Path::new(".config/sway/config"), None);
 
         assert!(config.tools.contains_key("sway"));
         let Some(sway_tool) = config.tools.get("sway") else {
@@ -295,12 +290,7 @@ symlink_resolution = "{input_str}"
         assert_eq!(sway_tool.files.len(), 1);
 
         // Analogous: add to same tool creates multiple entries
-        config.add_file_to_tool(
-            "sway",
-            "config.d",
-            std::path::Path::new(".config/sway/config.d"),
-            None,
-        );
+        config.add_file_to_tool("sway", "config.d", Path::new(".config/sway/config.d"), None);
 
         let Some(sway_tool) = config.tools.get("sway") else {
             eprintln!("Tool 'sway' should exist");
@@ -312,7 +302,7 @@ symlink_resolution = "{input_str}"
         config.add_file_to_tool(
             "sway",
             "work",
-            std::path::Path::new(".config/sway/config"),
+            Path::new(".config/sway/config"),
             Some("work"),
         );
 
@@ -327,12 +317,7 @@ symlink_resolution = "{input_str}"
     fn test_add_folder_to_config() {
         let mut config = Config::default();
 
-        config.add_folder_to_tool(
-            "nvim",
-            "nvim",
-            std::path::Path::new(".config/nvim"),
-            None,
-        );
+        config.add_folder_to_tool("nvim", "nvim", Path::new(".config/nvim"), None);
 
         let Some(nvim_tool) = config.tools.get("nvim") else {
             eprintln!("Tool 'nvim' should exist");
@@ -347,12 +332,7 @@ symlink_resolution = "{input_str}"
         let mut config = Config::default();
         config.general.repo_path = "/tmp/dotfiles".to_string();
 
-        config.add_folder_to_tool(
-            "nvim",
-            "nvim",
-            Path::new(".config/nvim"),
-            None,
-        );
+        config.add_folder_to_tool("nvim", "nvim", Path::new(".config/nvim"), None);
 
         let tracked = match config.get_tracked_files(None) {
             Ok(files) => files,

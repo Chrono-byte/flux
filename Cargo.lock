@@ -396,6 +396,7 @@ dependencies = [
  "indicatif",
  "log",
  "nix",
+ "once_cell",
  "pathdiff",
  "rayon",
  "serde",

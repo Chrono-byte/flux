@@ -15,6 +15,7 @@ use std::sync::OnceLock;
 
 use crate::types::{Condition, ConditionGroup, ConditionSpec, FileEntry, SymlinkResolution};
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::home_override;
 use crate::utils::system;
 
 /// General configuration settings.
@@ -520,7 +521,7 @@ impl Config {
 
     /// Get the repo config path
     fn get_repo_config_path() -> Result<PathBuf> {
-        let home = dirs::home_dir()
+        let home = home_override::home_dir()
             .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
         Ok(home.join(".dotfiles").join("config.toml"))
     }
@@ -691,7 +692,7 @@ impl Config {
                     repo_path.join(tool).join(&rendered_repo)
                 };
 
-                let dest_path = dirs::home_dir()
+                let dest_path = home_override::home_dir()
                     .ok_or_else(|| {
                         DotfilesError::Config("Could not find home directory".to_string())
                     })?
@@ -716,7 +717,7 @@ impl Config {
         let mut values: HashMap<String, String> = HashMap::new();
 
         // Built-in values
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = home_override::home_dir() {
             let _ = values.insert("home".to_string(), home.display().to_string());
         }
 

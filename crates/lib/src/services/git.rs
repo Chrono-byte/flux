@@ -2,6 +2,7 @@ use crate::types::FileChange;
 use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::error_utils;
+use crate::utils::home_override;
 use colored::Colorize;
 use git2::{CredentialType, RemoteCallbacks, Repository, Signature};
 use std::path::{Path, PathBuf};
@@ -300,7 +301,7 @@ fn try_default_ssh_keys(username: &str) -> Option<git2::Cred> {
         private_keys.push(PathBuf::from(path));
     }
 
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home_override::home_dir() {
         for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
             let path = home.join(".ssh").join(name);
             if path.exists() {

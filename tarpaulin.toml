@@ -1,0 +1,7 @@
+[test_with_integration]
+name = "flux-default"
+manifest-path = "./Cargo.toml"
+run-types = ["Lib", "Tests"]
+skip-clean = true
+include-tests = true
+args = ["--test-threads=1"]

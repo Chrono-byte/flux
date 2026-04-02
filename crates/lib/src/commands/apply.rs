@@ -4,6 +4,7 @@ use crate::services::{FileOperation, Transaction, history, unified_diff};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
+use crate::utils::home_override;
 use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
 use crate::utils::prompt::prompt_yes_no;
 use colored::Colorize;
@@ -308,7 +309,7 @@ fn create_and_setup_transaction(
 
     // Add file operations
     let symlink_resolution = options.config.general.symlink_resolution;
-    let home = dirs::home_dir()
+    let home = home_override::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
 
     // Create a single timestamped backup directory for all files in this transaction
