@@ -1,6 +1,6 @@
 [package]
 name = "flux-cli"
-version = "1.4.2"
+version = "1.4.3"
 edition = "2024"
 
 [[bin]]
@@ -38,5 +38,6 @@ toml_edit = "0.25"
 uuid = { version = "1.6", features = ["v4"] }
 walkdir = "2"
 which = "8.0.0"
+atty = "0.2"
 
 [dev-dependencies]

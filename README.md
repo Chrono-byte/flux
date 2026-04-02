@@ -81,6 +81,8 @@ flux status
 - `flux push [--remote NAME] [--branch NAME] [--set-upstream]` - Push to remote
 - `flux pull [--remote NAME] [--branch NAME]` - Pull from remote
 
+- `flux diff [--profile NAME] [--force] [--name-only]` - Show git-style diffs between repository files and their destination paths. The command first lists files that need syncing and then displays unified diffs for each change; use `--name-only` to print just the paths, `--force` to treat every tracked file as out-of-sync (same as `flux apply --force`), and note that diffs are piped through `$PAGER` (default `less -R`) when stdout is a terminal.
+
 - `flux doctor [--profile NAME]` - Run validation, state diff, and health checks; exits non-zero (1=validation, 2=diff, 4=health, bits can combine)
 - `flux maintain migrate [--profile NAME] [--no-backup]` - Migrate files with discrepancies (use `--no-backup` to skip copying files to repo, just remove and create symlinks)
 - `flux maintain gitignore` - Generate a .gitignore file for the repo

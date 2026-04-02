@@ -1,8 +1,12 @@
 //! CLI command handling for the Flux dotfiles manager.
 
+use atty::{Stream, is};
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
 use clap::CommandFactory;
 use colored::Colorize;
+use std::env;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use super::args::{
     Cli, Commands, ConfigCommands, MaintainCommands, ProfileCommands, RemoteCommands,
@@ -12,8 +16,9 @@ use flux_lib::{
     commands::doctor::HealthReport,
     commands::validate::ValidationReport,
     commands::{
-        apply_config, check_status, compare_states, display_health_report, display_preview,
-        display_status, display_validation, migrate_files, run_health_checks, validate_config,
+        apply_config, check_status, compare_states, display_diffs, display_health_report,
+        display_preview, display_status, display_validation, format_diffs, migrate_files,
+        run_health_checks, validate_config,
     },
     config::Config,
     config::profile::{create_profile, get_profile_files, list_profiles, switch_profile},
@@ -463,7 +468,7 @@ pub(super) fn handle_apply_command(
         let state_diff = compare_states(&config, profile, force.as_bool())?;
         display_preview(&state_diff);
         if diff.as_bool() && !state_diff.files_to_sync.is_empty() {
-            flux_lib::commands::display_diffs(&state_diff);
+            display_diffs(&state_diff);
         }
     } else {
         use flux_lib::commands::ApplyOptions;
@@ -477,6 +482,79 @@ pub(super) fn handle_apply_command(
             force: force.as_bool(),
         })?;
     }
+    Ok(())
+}
+
+/// Handle the diff command.
+pub(super) fn handle_diff_command(
+    profile: Option<&str>,
+    force: bool,
+    name_only: bool,
+) -> Result<()> {
+    let config = Config::load()?;
+    let state_diff = compare_states(&config, profile, force)?;
+
+    if state_diff.is_empty() {
+        println!(
+            "{} System is already in sync with configuration",
+            "✓".green()
+        );
+        return Ok(());
+    }
+
+    display_preview(&state_diff);
+
+    if name_only {
+        print_changed_files(&config, &state_diff);
+        return Ok(());
+    }
+
+    let diff_output = format_diffs(&state_diff);
+    if diff_output.trim().is_empty() {
+        return Ok(());
+    }
+
+    if should_use_pager() {
+        open_diff_pager(&diff_output)?;
+    } else {
+        print!("{diff_output}");
+    }
+
+    Ok(())
+}
+
+fn print_changed_files(config: &Config, state_diff: &StateDiff) {
+    let repo_path = config.get_repo_path();
+    for file in &state_diff.files_to_sync {
+        if let Ok(rel_path) = file.repo_path.strip_prefix(&repo_path) {
+            println!("{}", rel_path.display());
+        } else {
+            println!("{}", file.repo_path.display());
+        }
+    }
+}
+
+fn should_use_pager() -> bool {
+    is(Stream::Stdout)
+}
+
+fn open_diff_pager(output: &str) -> Result<()> {
+    let pager_cmd = env::var("PAGER").unwrap_or_else(|_| "less -R".to_string());
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(pager_cmd)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|err| DotfilesError::Config(format!("Failed to open pager: {err}")))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(output.as_bytes())?;
+    }
+
+    let _ = child
+        .wait()
+        .map_err(|err| DotfilesError::Config(format!("Pager terminated unexpectedly: {err}")))?;
+
     Ok(())
 }
 
@@ -1118,6 +1196,11 @@ fn execute_internal(cmd: Commands) -> Result<()> {
             conflicts,
             json,
         } => handle_status_command(profile.as_deref(), conflicts, json)?,
+        Commands::Diff {
+            profile,
+            force,
+            name_only,
+        } => handle_diff_command(profile.as_deref(), force, name_only)?,
         Commands::Maintain { command } => handle_maintain_command(command)?,
         Commands::Doctor { profile } => handle_doctor_command(profile.as_deref())?,
         Commands::Completion { shell } => handle_completion_command(&shell),

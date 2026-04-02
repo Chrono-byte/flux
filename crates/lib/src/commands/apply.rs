@@ -8,6 +8,7 @@ use crate::utils::home_override;
 use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
 use crate::utils::prompt::prompt_yes_no;
 use colored::Colorize;
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -139,27 +140,36 @@ pub fn display_preview(diff: &StateDiff) {
     println!("\n  {} Total changes: {}", "→".cyan(), diff.total_changes());
 }
 
-/// Display unified diffs for files that would be changed.
+/// Format unified diffs for files that would be changed.
 ///
 /// This is only used in dry-run mode and never touches the filesystem.
-pub fn display_diffs(diff: &StateDiff) {
+pub fn format_diffs(diff: &StateDiff) -> String {
     if diff.files_to_sync.is_empty() {
-        return;
+        return String::new();
     }
 
-    println!("\n{}", "Unified diffs for planned changes:".bold().cyan());
-    println!("{}", "=".repeat(60).cyan());
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "\n{}",
+        "Unified diffs for planned changes:".bold().cyan()
+    );
+    let _ = writeln!(out, "{}", "=".repeat(60).cyan());
 
     for file in &diff.files_to_sync {
         let current = fs::read_to_string(&file.dest_path).unwrap_or_default();
 
-        let Ok(target) = fs::read_to_string(&file.repo_path) else {
-            println!(
-                "\n{} {} (skipping diff: cannot read repo file)",
-                "⊘".yellow(),
-                file.repo_path.display()
-            );
-            continue;
+        let target = match fs::read_to_string(&file.repo_path) {
+            Ok(content) => content,
+            Err(_) => {
+                let _ = writeln!(
+                    out,
+                    "\n{} {} (skipping diff: cannot read repo file)",
+                    "⊘".yellow(),
+                    file.repo_path.display()
+                );
+                continue;
+            }
         };
 
         let udiff = unified_diff(&file.dest_path, &current, &target);
@@ -167,10 +177,23 @@ pub fn display_diffs(diff: &StateDiff) {
             continue;
         }
 
-        println!("\n{} {}", "File:".bold(), file.dest_path.display());
-        println!("{}", "-".repeat(60).cyan());
-        println!("{udiff}");
+        let _ = writeln!(out, "\n{} {}", "File:".bold(), file.dest_path.display());
+        let _ = writeln!(out, "{}", "-".repeat(60).cyan());
+        let _ = writeln!(out, "{udiff}");
     }
+
+    out
+}
+
+/// Display unified diffs for files that would be changed.
+///
+/// This is only used in dry-run mode and never touches the filesystem.
+pub fn display_diffs(diff: &StateDiff) {
+    let output = format_diffs(diff);
+    if output.is_empty() {
+        return;
+    }
+    print!("{output}");
 }
 
 /// Apply configuration changes using atomic transactions

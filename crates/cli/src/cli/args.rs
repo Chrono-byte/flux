@@ -195,6 +195,18 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Show git-style diffs between repository files and their destinations
+    Diff {
+        /// Profile name (default: current profile)
+        #[arg(long)]
+        profile: Option<String>,
+        /// Force diff evaluation even if symlinks are already correct
+        #[arg(long)]
+        force: bool,
+        /// Print only file paths of tracked files with differences
+        #[arg(long)]
+        name_only: bool,
+    },
     /// Maintenance and repair operations
     Maintain {
         /// Command to execute

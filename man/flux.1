@@ -40,6 +40,20 @@ Show sync status of tracked files.
 .TP
 \fB--profile\fR \fINAME\fR
 Profile name (default: current profile)
+
+.SS diff
+Show git-style diffs between repository files and the destination paths.
+.TP
+\fB--profile\fR \fINAME\fR
+Profile name (default: current profile)
+.TP
+\fB--force\fR
+Treat every tracked file as needing sync (same backup target as \fBflux apply --force\fR).
+.TP
+\fB--name-only\fR
+Print just the paths of changed files instead of full diffs.
+.PP
+When stdout is a terminal, the diff output is piped through \fB$PAGER\fR (default \fBless -R\fR), matching the behavior of \fBgit diff\fR.
 .SS list
 List tracked files.
 .TP
@@ -216,5 +230,4 @@ Written for dotfiles management.
 .SH BUGS
 Report bugs to the project repository.
 .SH COPYRIGHT
-Copyright © 2024
-
+Copyright © 2026
