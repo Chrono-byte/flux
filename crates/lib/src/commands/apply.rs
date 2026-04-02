@@ -143,6 +143,7 @@ pub fn display_preview(diff: &StateDiff) {
 /// Format unified diffs for files that would be changed.
 ///
 /// This is only used in dry-run mode and never touches the filesystem.
+#[must_use]
 pub fn format_diffs(diff: &StateDiff) -> String {
     if diff.files_to_sync.is_empty() {
         return String::new();
@@ -159,17 +160,14 @@ pub fn format_diffs(diff: &StateDiff) -> String {
     for file in &diff.files_to_sync {
         let current = fs::read_to_string(&file.dest_path).unwrap_or_default();
 
-        let target = match fs::read_to_string(&file.repo_path) {
-            Ok(content) => content,
-            Err(_) => {
-                let _ = writeln!(
-                    out,
-                    "\n{} {} (skipping diff: cannot read repo file)",
-                    "⊘".yellow(),
-                    file.repo_path.display()
-                );
-                continue;
-            }
+        let Ok(target) = fs::read_to_string(&file.repo_path) else {
+            let _ = writeln!(
+                out,
+                "\n{} {} (skipping diff: cannot read repo file)",
+                "⊘".yellow(),
+                file.repo_path.display()
+            );
+            continue;
         };
 
         let udiff = unified_diff(&file.dest_path, &current, &target);

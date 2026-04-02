@@ -6,9 +6,9 @@
 mod cli;
 
 use clap::Parser;
-use cli::{Cli, run};
+use cli::Cli;
 use colored::{Colorize, control};
-use flux_lib::config::{Config, EnvironmentConfig};
+use flux_lib::config::Config;
 use flux_lib::utils::logging;
 use std::path::Path;
 
@@ -23,30 +23,9 @@ fn main() {
         Config::set_path_override(Path::new(config_path));
     }
 
-    let env_config = match EnvironmentConfig::load() {
-        Ok(config) => {
-            if !cli.quiet {
-                config.display_summary();
-            }
-            config
-        }
-        Err(err) => {
-            eprintln!(
-                "{} Failed to load environment configuration: {}",
-                "Error:".red().bold(),
-                err
-            );
-            eprintln!(
-                "{} Please check your environment variables",
-                "Help:".yellow().bold()
-            );
-            std::process::exit(1);
-        }
-    };
-
     logging::init_logging(cli.log_level.as_deref());
 
-    if let Err(err) = run(cli, env_config) {
+    if let Err(err) = { cli.command.execute() } {
         eprintln!("{} {}", "Error:".red().bold(), err);
         std::process::exit(1);
     }

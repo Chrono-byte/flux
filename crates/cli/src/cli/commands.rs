@@ -523,6 +523,7 @@ pub(super) fn handle_diff_command(
     Ok(())
 }
 
+/// Print the relative paths of changed files without a pager.
 fn print_changed_files(config: &Config, state_diff: &StateDiff) {
     let repo_path = config.get_repo_path();
     for file in &state_diff.files_to_sync {
@@ -534,10 +535,12 @@ fn print_changed_files(config: &Config, state_diff: &StateDiff) {
     }
 }
 
+/// Determine whether to use a pager for diff output.
 fn should_use_pager() -> bool {
     is(Stream::Stdout)
 }
 
+/// Open a pager for the given diff output.
 fn open_diff_pager(output: &str) -> Result<()> {
     let pager_cmd = env::var("PAGER").unwrap_or_else(|_| "less -R".to_string());
     let mut child = Command::new("sh")
