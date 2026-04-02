@@ -3,6 +3,9 @@ name = "flux-gui-ui"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 console_error_panic_hook = "0.1.7"

@@ -118,7 +118,7 @@ impl Default for AppState {
                 total: 0,
             }),
             git_status: RwSignal::new(GitStatus {
-                branch: "".to_string(),
+                branch: String::new(),
                 ahead: 0,
                 behind: 0,
                 has_remote: false,
@@ -530,7 +530,7 @@ fn SettingsView() -> impl IntoView {
                         <input type="checkbox" checked=dry_run_mode on:change=move |e| {
                             let checked = event_target_checked(&e);
                             dry_run_mode.set(checked);
-                            spawn_local(async move { let _ = set_dry_run_mode(checked).await; });
+                            spawn_local(async move { let () = set_dry_run_mode(checked).await; });
                         } />
                         <span class="toggle-slider"></span>
                     </label>
@@ -569,7 +569,7 @@ fn parse_timestamp_full(ts: &str) -> (String, String) {
             date.format("%H:%M").to_string(),
         )
     } else {
-        (ts.to_string(), "".to_string())
+        (ts.to_string(), String::new())
     }
 }
 
@@ -663,7 +663,7 @@ async fn load_remotes() -> Result<(), JsValue> {
     let result = invoke("list_remotes", JsValue::NULL).await;
     match serde_wasm_bindgen::from_value::<Vec<Remote>>(result) {
         Ok(remotes) => state.remotes.set(remotes),
-        Err(e) => log(&format!("Failed to load remotes: {:?}", e)),
+        Err(e) => log(&format!("Failed to load remotes: {e:?}")),
     }
     state.is_loading.set(false);
     Ok(())
@@ -676,7 +676,7 @@ async fn load_git_status() -> Result<(), JsValue> {
     let result = invoke("get_git_status", JsValue::NULL).await;
     match serde_wasm_bindgen::from_value::<GitStatus>(result) {
         Ok(status) => state.git_status.set(status),
-        Err(e) => log(&format!("Failed to load git status: {:?}", e)),
+        Err(e) => log(&format!("Failed to load git status: {e:?}")),
     }
     Ok(())
 }
@@ -689,7 +689,7 @@ async fn load_history() -> Result<(), JsValue> {
     let result = invoke("read_history", JsValue::NULL).await;
     match serde_wasm_bindgen::from_value::<Vec<HistoryEvent>>(result) {
         Ok(history) => state.history.set(history),
-        Err(e) => log(&format!("Failed to load history: {:?}", e)),
+        Err(e) => log(&format!("Failed to load history: {e:?}")),
     }
     state.is_loading.set(false);
     Ok(())
@@ -711,7 +711,7 @@ async fn sync_all() {
     .unwrap();
     let result = invoke("apply_config", args).await;
     match serde_wasm_bindgen::from_value::<()>(result) {
-        Ok(_) => {
+        Ok(()) => {
             show_notification(
                 if state.dry_run_mode.get() {
                     "Dry run completed"
@@ -723,7 +723,7 @@ async fn sync_all() {
             let _ = load_status().await;
         }
         Err(e) => {
-            log(&format!("Failed to sync: {:?}", e));
+            log(&format!("Failed to sync: {e:?}"));
             show_notification("Sync failed", true);
         }
     }
@@ -738,13 +738,13 @@ async fn switch_profile(name: String) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "name": name })).unwrap();
     let result = invoke("switch_profile", args).await;
     match serde_wasm_bindgen::from_value::<()>(result) {
-        Ok(_) => {
+        Ok(()) => {
             state.current_profile.set(name.clone());
-            show_notification(&format!("Switched to {}", name), false);
+            show_notification(&format!("Switched to {name}"), false);
             let _ = load_status().await;
         }
         Err(e) => {
-            log(&format!("Failed: {:?}", e));
+            log(&format!("Failed: {e:?}"));
             show_notification("Failed", true);
         }
     }
@@ -767,9 +767,9 @@ async fn push_to_remote() {
             .unwrap();
     let result = invoke("push_to_remote", args).await;
     match serde_wasm_bindgen::from_value::<()>(result) {
-        Ok(_) => show_notification("Pushed", false),
+        Ok(()) => show_notification("Pushed", false),
         Err(e) => {
-            log(&format!("Failed: {:?}", e));
+            log(&format!("Failed: {e:?}"));
             show_notification("Push failed", true);
         }
     }
@@ -792,12 +792,12 @@ async fn pull_from_remote() {
             .unwrap();
     let result = invoke("pull_from_remote", args).await;
     match serde_wasm_bindgen::from_value::<()>(result) {
-        Ok(_) => {
+        Ok(()) => {
             show_notification("Pulled", false);
             let _ = load_status().await;
         }
         Err(e) => {
-            log(&format!("Failed: {:?}", e));
+            log(&format!("Failed: {e:?}"));
             show_notification("Pull failed", true);
         }
     }
@@ -811,11 +811,11 @@ async fn set_dry_run_mode(enabled: bool) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "enabled": enabled })).unwrap();
     let result = invoke("set_dry_run_mode", args).await;
     match serde_wasm_bindgen::from_value::<()>(result) {
-        Ok(_) => {
+        Ok(()) => {
             state.dry_run_mode.set(enabled);
         }
         Err(e) => {
-            log(&format!("Failed: {:?}", e));
+            log(&format!("Failed: {e:?}"));
         }
     }
 }
@@ -834,15 +834,15 @@ async fn validate_config() {
             .unwrap();
             let result = invoke("validate_config", args).await;
             match serde_wasm_bindgen::from_value::<()>(result) {
-                Ok(_) => show_notification("Valid", false),
+                Ok(()) => show_notification("Valid", false),
                 Err(e) => {
-                    log(&format!("Invalid: {:?}", e));
+                    log(&format!("Invalid: {e:?}"));
                     show_notification("Invalid config", true);
                 }
             }
         }
         Err(e) => {
-            log(&format!("Failed: {:?}", e));
+            log(&format!("Failed: {e:?}"));
         }
     }
     state.is_loading.set(false);

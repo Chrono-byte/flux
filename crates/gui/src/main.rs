@@ -1,6 +1,6 @@
 mod app;
 
-use app::*;
+use app::App;
 use leptos::prelude::*;
 
 fn main() {
@@ -9,5 +9,5 @@ fn main() {
         view! {
             <App/>
         }
-    })
+    });
 }
