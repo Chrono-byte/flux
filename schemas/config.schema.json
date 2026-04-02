@@ -291,6 +291,146 @@
                         }
                     }
                 },
+                "folders": {
+                    "type": "array",
+                    "description": "List of folders to track for this tool",
+                    "x-taplo": {
+                        "initKeys": [
+                            "repo",
+                            "dest"
+                        ],
+                        "docs": {
+                            "main": "Track an entire directory from the repo into your home directory."
+                        }
+                    },
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "repo": {
+                                "type": "string",
+                                "description": "Path to folder in repository (relative to tool directory in repo)",
+                                "x-taplo": {
+                                    "docs": {
+                                        "main": "Path to a directory inside the tool's repo folder (e.g., `nvim`)."
+                                    }
+                                }
+                            },
+                            "dest": {
+                                "type": "string",
+                                "description": "Destination directory in home (relative to home, e.g., '.config/nvim'). Supports simple templates.",
+                                "x-taplo": {
+                                    "docs": {
+                                        "main": "Destination directory path in the home directory. Use template variables like `{{profile}}` and `{{host}}`."
+                                    }
+                                }
+                            },
+                            "profile": {
+                                "type": "string",
+                                "description": "Optional profile name. If specified, this folder is only active for this profile.",
+                                "pattern": "^[a-zA-Z0-9_-]+$",
+                                "x-taplo": {
+                                    "docs": {
+                                        "main": "Optional profile name for folder entries. Matches when `current_profile` equals this value."
+                                    }
+                                }
+                            },
+                            "conditions": {
+                                "type": "object",
+                                "description": "Optional conditions that control when this entry is active (OS, host, env vars, available commands). All specified conditions must match.",
+                                "properties": {
+                                    "os": {
+                                        "type": "array",
+                                        "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "examples": [
+                                            [
+                                                "linux"
+                                            ],
+                                            [
+                                                "linux",
+                                                "darwin"
+                                            ]
+                                        ]
+                                    },
+                                    "host": {
+                                        "type": "array",
+                                        "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "examples": [
+                                            [
+                                                "work-laptop"
+                                            ],
+                                            [
+                                                "chrono-desktop",
+                                                "work-laptop"
+                                            ]
+                                        ]
+                                    },
+                                    "env": {
+                                        "type": "object",
+                                        "description": "Required environment variable values. Each key/value pair must match the current environment.",
+                                        "additionalProperties": {
+                                            "type": "string"
+                                        },
+                                        "examples": [
+                                            {
+                                                "XDG_SESSION_TYPE": "wayland"
+                                            },
+                                            {
+                                                "FLUX_ENV": "work"
+                                            }
+                                        ]
+                                    },
+                                    "cmd_exists": {
+                                        "type": "array",
+                                        "description": "Commands that must exist in PATH for this entry to apply.",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "examples": [
+                                            [
+                                                "nvim"
+                                            ],
+                                            [
+                                                "nvim",
+                                                "kitty"
+                                            ]
+                                        ]
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "secret": {
+                                "type": "boolean",
+                                "description": "Mark this entry as secret. Secret entries are treated with stricter permissions and should not have their contents displayed in logs/diffs.",
+                                "default": false
+                            },
+                            "secret_backend": {
+                                "type": "string",
+                                "description": "Optional secret backend identifier (e.g., \"env\", \"age\", \"sops\").",
+                                "examples": [
+                                    "env",
+                                    "age",
+                                    "sops",
+                                    "gpg"
+                                ]
+                            },
+                            "secret_key": {
+                                "type": "string",
+                                "description": "Logical secret key or handle used by the configured backend (for example, an environment variable name when using the \"env\" backend)."
+                            }
+                        },
+                        "required": [
+                            "repo",
+                            "dest"
+                        ],
+                        "additionalProperties": false
+                    }
+                },
                 "required": [
                     "files"
                 ],

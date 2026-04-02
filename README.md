@@ -6,7 +6,6 @@ A symlink-based dotfiles manager written in Rust. Manage your configuration file
 
 - **Symlink-based sync**: Files stored in repository, symlinked to home directory
 - **Profile support**: Multiple profiles with per-file overrides
-- **Browser integration**: Auto-detect and backup Firefox and Zen browser settings
 - **Git integration**: Automatic commits, remote management, and push support (SSH/HTTPS)
 - **File locking detection**: Skips locked files with warnings
 - **Dry-run mode**: Preview changes before applying
@@ -155,22 +154,6 @@ Add this to your shell config (e.g., `~/.zshrc`) so Flux always reads from your 
 - `follow` - Follow existing symlinks, replace target
 - `replace` - Replace symlinks with actual files (copy)
 
-## Browser Support
-
-Auto-detects and backs up Firefox and Zen browser profiles:
-
-- `prefs.js` - Preferences
-- `user.js` - User overrides
-- `places.sqlite` - Bookmarks and history
-- `extensions/` - Installed extensions
-- `storage/` - Extension storage
-
-```bash
-# Add browser profiles manually using flux add
-flux add firefox ~/.mozilla/firefox/profile/prefs.js --dest .mozilla/firefox/profile/prefs.js
-flux commit
-```
-
 ## Profiles Commands
 
 Profiles allow different configurations for different machines or use cases. Profile-specific files override base files for the same destination.
@@ -228,14 +211,6 @@ flux push
 flux init
 flux add sway ~/.config/sway/config
 flux commit
-```
-
-### Browser Settings
-
-```bash
-# Add browser profiles manually
-flux add firefox ~/.mozilla/firefox/profile/prefs.js --dest .mozilla/firefox/profile/prefs.js
-flux commit  # Skips if browser is running
 ```
 
 ### How to use Profiles

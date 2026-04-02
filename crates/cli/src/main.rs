@@ -66,7 +66,7 @@ enum Commands {
     },
     /// Add a file to tracking
     Add {
-        /// Tool name (e.g., sway, waybar, cursor, firefox, zen)
+        /// Tool name (e.g., sway, waybar, cursor)
         tool: String,
         /// Source file path
         file: String,
@@ -576,7 +576,11 @@ fn handle_add_command(
             .to_string_lossy()
             .to_string();
 
-        config.add_file_to_tool(tool, &repo_relative, &dest_path, profile);
+        if repo_file.is_dir() {
+            config.add_folder_to_tool(tool, &repo_relative, &dest_path, profile);
+        } else {
+            config.add_file_to_tool(tool, &repo_relative, &dest_path, profile);
+        }
 
         if dry_run {
             println!(

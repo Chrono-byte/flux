@@ -321,6 +321,25 @@ symlink_resolution = "{input_str}"
         };
         assert_eq!(sway_tool.files.len(), 3);
     }
+
+    #[test]
+    fn test_add_folder_to_config() {
+        let mut config = Config::default();
+
+        config.add_folder_to_tool(
+            "nvim",
+            "nvim",
+            std::path::Path::new(".config/nvim"),
+            None,
+        );
+
+        let Some(nvim_tool) = config.tools.get("nvim") else {
+            eprintln!("Tool 'nvim' should exist");
+            return;
+        };
+        assert_eq!(nvim_tool.folders.len(), 1);
+        assert!(nvim_tool.files.is_empty());
+    }
 }
 
 // ============================================================================

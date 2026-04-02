@@ -64,10 +64,22 @@ impl Default for GeneralConfig {
 }
 
 /// Configuration for a single tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolConfig {
     /// Files tracked for this tool
+    #[serde(default)]
     pub files: Vec<FileEntry>,
+    /// Folder entries tracked for this tool
+    #[serde(default)]
+    pub folders: Vec<FileEntry>,
+}
+
+/// Iterate over each entry (files followed by folders).
+impl ToolConfig {
+    /// Iterate over each entry (files followed by folders).
+    fn entries(&self) -> impl Iterator<Item = &FileEntry> {
+        self.files.iter().chain(self.folders.iter())
+    }
 }
 
 /// Configuration for the Flux dotfiles manager.
@@ -314,55 +326,82 @@ impl Config {
         Ok(())
     }
 
-    /// Format tools section to use per-tool format `[tools.X] files = [...]`
-    /// instead of array-of-tables `[[tools.X.files]]`.
+    /// Format tools section to use per-tool format `[tools.X]` tables.
     fn format_tools_section(doc: &mut toml_edit::DocumentMut, tools: &HashMap<String, ToolConfig>) {
         use toml_edit::{Array, Item, Table, Value};
 
-        // Remove existing tools section if present
         let _ = doc.remove("tools");
 
-        // Create new tools table
         let mut tools_table = Table::new();
         tools_table.set_implicit(true);
 
         for (tool_name, tool_config) in tools {
-            // Create table for this tool
             let mut current_tool_table = Table::new();
             current_tool_table.set_implicit(true);
 
-            // Create array of file entries
-            let mut files_array = Array::new();
-            files_array.set_trailing_comma(true);
-            files_array.set_trailing("\n");
+            if !tool_config.files.is_empty() {
+                let mut files_array = Array::new();
+                files_array.set_trailing_comma(true);
+                files_array.set_trailing("\n");
 
-            for file_entry in &tool_config.files {
-                let mut file_table = toml_edit::InlineTable::new();
+                for file_entry in &tool_config.files {
+                    let mut file_table = toml_edit::InlineTable::new();
 
-                // Add repo field
-                let _ = file_table.insert(
-                    "repo",
-                    Value::String(toml_edit::Formatted::new(file_entry.repo.clone())),
-                );
-
-                // Add dest field
-                let _ = file_table.insert(
-                    "dest",
-                    Value::String(toml_edit::Formatted::new(file_entry.dest.clone())),
-                );
-
-                // Add profile field if present
-                if let Some(profile) = &file_entry.profile {
                     let _ = file_table.insert(
-                        "profile",
-                        Value::String(toml_edit::Formatted::new(profile.clone())),
+                        "repo",
+                        Value::String(toml_edit::Formatted::new(file_entry.repo.clone())),
                     );
+
+                    let _ = file_table.insert(
+                        "dest",
+                        Value::String(toml_edit::Formatted::new(file_entry.dest.clone())),
+                    );
+
+                    if let Some(profile) = &file_entry.profile {
+                        let _ = file_table.insert(
+                            "profile",
+                            Value::String(toml_edit::Formatted::new(profile.clone())),
+                        );
+                    }
+
+                    files_array.push_formatted(Value::InlineTable(file_table));
                 }
 
-                files_array.push_formatted(Value::InlineTable(file_table));
+                let _ = current_tool_table.insert("files", Item::Value(Value::Array(files_array)));
             }
 
-            let _ = current_tool_table.insert("files", Item::Value(Value::Array(files_array)));
+            if !tool_config.folders.is_empty() {
+                let mut folders_array = Array::new();
+                folders_array.set_trailing_comma(true);
+                folders_array.set_trailing("\n");
+
+                for folder_entry in &tool_config.folders {
+                    let mut folder_table = toml_edit::InlineTable::new();
+
+                    let _ = folder_table.insert(
+                        "repo",
+                        Value::String(toml_edit::Formatted::new(folder_entry.repo.clone())),
+                    );
+
+                    let _ = folder_table.insert(
+                        "dest",
+                        Value::String(toml_edit::Formatted::new(folder_entry.dest.clone())),
+                    );
+
+                    if let Some(profile) = &folder_entry.profile {
+                        let _ = folder_table.insert(
+                            "profile",
+                            Value::String(toml_edit::Formatted::new(profile.clone())),
+                        );
+                    }
+
+                    folders_array.push_formatted(Value::InlineTable(folder_table));
+                }
+
+                let _ =
+                    current_tool_table.insert("folders", Item::Value(Value::Array(folders_array)));
+            }
+
             let _ = tools_table.insert(tool_name, Item::Table(current_tool_table));
         }
 
@@ -379,9 +418,9 @@ impl Config {
             .filter_map(|(key, _)| {
                 // Check for keys like "tools.cursor.files" (array-of-tables format)
                 if key.starts_with("tools.")
-                    && Path::new(key)
-                        .extension()
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("files"))
+                    && Path::new(key).extension().is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("files") || ext.eq_ignore_ascii_case("folders")
+                    })
                 {
                     Some(key.to_string())
                 } else {
@@ -545,6 +584,18 @@ impl Config {
         Ok(())
     }
 
+    fn build_tool_entry(repo_file: &str, dest_path: &Path, profile: Option<&str>) -> FileEntry {
+        FileEntry {
+            repo: repo_file.to_string(),
+            dest: dest_path.to_string_lossy().to_string(),
+            profile: profile.map(ToString::to_string),
+            conditions: None,
+            secret: None,
+            secret_backend: None,
+            secret_key: None,
+        }
+    }
+
     /// Add a file to a tool's configuration.
     ///
     /// Add a file entry to a tool configuration.
@@ -555,23 +606,20 @@ impl Config {
         dest_path: &Path,
         profile: Option<&str>,
     ) {
-        let dest_str = dest_path.to_string_lossy().to_string();
+        let entry = Self::build_tool_entry(repo_file, dest_path, profile);
+        self.tools.entry(tool.to_string()).or_default().files.push(entry);
+    }
 
-        let entry = FileEntry {
-            repo: repo_file.to_string(),
-            dest: dest_str,
-            profile: profile.map(ToString::to_string),
-            conditions: None,
-            secret: None,
-            secret_backend: None,
-            secret_key: None,
-        };
-
-        self.tools
-            .entry(tool.to_string())
-            .or_insert(ToolConfig { files: Vec::new() })
-            .files
-            .push(entry);
+    /// Add a folder entry to the configuration for a tool.
+    pub fn add_folder_to_tool(
+        &mut self,
+        tool: &str,
+        repo_file: &str,
+        dest_path: &Path,
+        profile: Option<&str>,
+    ) {
+        let entry = Self::build_tool_entry(repo_file, dest_path, profile);
+        self.tools.entry(tool.to_string()).or_default().folders.push(entry);
     }
 
     /// Get all tracked files for the given profile.
@@ -596,7 +644,7 @@ impl Config {
         let mut tracked_files = Vec::new();
 
         for (tool, tool_config) in &self.tools {
-            for file in &tool_config.files {
+            for file in tool_config.entries() {
                 // Include if no profile specified, or if profile matches current_profile or is None
                 let profile_matches =
                     file.profile.is_none() || file.profile.as_deref() == Some(current_profile);
@@ -846,11 +894,9 @@ impl Config {
 
         // Tools: merge tool tables, appending file entries.
         for (tool, tool_cfg) in overlay.tools {
-            base.tools
-                .entry(tool)
-                .or_insert(ToolConfig { files: Vec::new() })
-                .files
-                .extend(tool_cfg.files);
+            let entry = base.tools.entry(tool).or_default();
+            entry.files.extend(tool_cfg.files);
+            entry.folders.extend(tool_cfg.folders);
         }
 
         base

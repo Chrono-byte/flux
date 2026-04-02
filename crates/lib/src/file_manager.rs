@@ -49,11 +49,12 @@ pub fn add_file(
             source_path.display()
         ))
     })?);
+    let is_directory = source_path.is_dir();
 
     // Copy source file or directory to repository
     fs_manager.create_dir_all(&tool_dir)?;
 
-    if source_path.is_dir() {
+    if is_directory {
         fs_manager.copy_dir_all(source_path, &repo_file)?;
     } else {
         fs_manager.copy(source_path, &repo_file)?;
@@ -71,7 +72,11 @@ pub fn add_file(
         })?
         .to_string_lossy()
         .to_string();
-    config.add_file_to_tool(tool, &repo_relative, dest_path, profile);
+    if is_directory {
+        config.add_folder_to_tool(tool, &repo_relative, dest_path, profile);
+    } else {
+        config.add_file_to_tool(tool, &repo_relative, dest_path, profile);
+    }
 
     // Only save config if not in dry run mode
     if fs_manager.is_dry_run {
@@ -242,17 +247,22 @@ pub fn remove_file(
     file: &str,
     fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
-    // Find the file in config
-    let tool_config = config
-        .tools
-        .get(tool)
-        .ok_or_else(|| DotfilesError::InvalidTool(tool.to_string()))?;
+    let (file_entry, is_folder) = {
+        let tool_config = config
+            .tools
+            .get(tool)
+            .ok_or_else(|| DotfilesError::InvalidTool(tool.to_string()))?;
 
-    let file_entry = tool_config
-        .files
-        .iter()
-        .find(|entry| entry.repo == file)
-        .ok_or_else(|| DotfilesError::Path(format!("File {file} not found in tool {tool}")))?;
+        if let Some(entry) = tool_config.files.iter().find(|entry| entry.repo == file) {
+            (entry.clone(), false)
+        } else if let Some(entry) = tool_config.folders.iter().find(|entry| entry.repo == file) {
+            (entry.clone(), true)
+        } else {
+            return Err(DotfilesError::Path(format!(
+                "File {file} not found in tool {tool}"
+            )));
+        }
+    };
 
     let dest_path = dirs::home_dir()
         .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
@@ -275,8 +285,13 @@ pub fn remove_file(
 
     // Remove file entry from configuration (in-memory, will be saved later)
     if let Some(tool_config) = config.tools.get_mut(tool) {
-        tool_config.files.retain(|entry| entry.repo != file);
-        if tool_config.files.is_empty() {
+        if is_folder {
+            tool_config.folders.retain(|entry| entry.repo != file);
+        } else {
+            tool_config.files.retain(|entry| entry.repo != file);
+        }
+
+        if tool_config.files.is_empty() && tool_config.folders.is_empty() {
             let _ = config.tools.remove(tool);
         }
     }
@@ -399,17 +414,27 @@ impl<'a> FileSystemManager<'a> {
     /// Returns an error if the file cannot be removed.
     pub fn remove_file(&mut self, path: &Path) -> Result<()> {
         if self.is_dry_run {
-            println!("  [DRY RUN] Would remove file: {}", path.display());
+            let verb = if path.is_dir() && !path.is_symlink() {
+                "directory"
+            } else {
+                "file"
+            };
+            println!("  [DRY RUN] Would remove {verb}: {}", path.display());
             self.dry_run.log_operation(Operation::RemoveFile {
                 path: path.to_path_buf(),
             });
             Ok(())
         } else {
-            // Check if path exists as file or is a symlink (may be broken)
-            if path.exists() || path.is_symlink() {
+            if !path.exists() && !path.is_symlink() {
+                return Ok(());
+            }
+
+            if path.is_symlink() {
                 fs::remove_file(path).map_err(Into::into)
+            } else if path.is_dir() {
+                fs::remove_dir_all(path).map_err(Into::into)
             } else {
-                Ok(()) // Already gone
+                fs::remove_file(path).map_err(Into::into)
             }
         }
     }

@@ -74,27 +74,8 @@ files = [
     { repo = "config.rasi", dest = ".config/rofi/config.rasi" }
 ]
 
-[tools.firefox]
-# Firefox browser settings
-# Use 'flux add-browser firefox' to auto-detect and add
-# Example manual entry:
-# files = [
-#     { repo = "prefs.js", dest = ".mozilla/firefox/xxxxx.default/prefs.js" },
-#     { repo = "extensions", dest = ".mozilla/firefox/xxxxx.default/extensions" }
-# ]
-
-[tools.zen]
-# Zen browser settings
-# Use 'flux add-browser zen' to auto-detect and add
-# Example manual entry:
-# files = [
-#     { repo = "prefs.js", dest = ".zenbrowser/profiles/default/prefs.js" },
-#     { repo = "extensions", dest = ".zenbrowser/profiles/default/extensions" }
-# ]
-
 [tools.alacritty]
 # Alacritty terminal emulator configuration
-# Use 'flux add-browser alacritty' to auto-detect and add
 # Example manual entry:
 # files = [
 #     { repo = "alacritty.toml", dest = ".config/alacritty/alacritty.toml" },
@@ -104,7 +85,6 @@ files = [
 
 [tools.starship]
 # Starship prompt configuration
-# Use 'flux add-browser starship' to auto-detect and add
 # Example manual entry:
 # files = [
 #     { repo = "starship.toml", dest = ".config/starship.toml" }

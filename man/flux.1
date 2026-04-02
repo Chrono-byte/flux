@@ -17,7 +17,7 @@ Repository path (default: ~/.dotfiles)
 Add a file to tracking.
 .TP
 \fB<tool>\fR
-Tool name (e.g., sway, waybar, cursor, firefox, zen)
+Tool name (e.g., sway, waybar, cursor)
 .TP
 \fB<file>\fR
 Source file path
@@ -27,11 +27,6 @@ Destination path in home directory
 .TP
 \fB--profile\fR \fINAME\fR
 Profile name (optional)
-.SS add-browser
-Auto-detect and add browser profiles (Firefox and Zen).
-.TP
-\fB[browser]\fR
-Browser name (firefox, zen, or all) - default: all
 .SS sync
 Sync tracked files (create symlinks).
 .TP
@@ -170,13 +165,6 @@ Check status:
 .RS
 .nf
 flux status
-.fi
-.RE
-
-Add browser profiles:
-.RS
-.nf
-flux add-browser
 .fi
 .RE
 
