@@ -4,8 +4,8 @@
 //! Integration tests are in other files in the tests/ directory.
 
 mod config_tests {
-    use flux::config::Config;
-    use flux::types::SymlinkResolution;
+    use flux_lib::config::Config;
+    use flux_lib::types::SymlinkResolution;
 
     #[test]
     fn test_default_config_is_valid() {
@@ -40,7 +40,7 @@ mod path_tests {
 }
 
 mod security_tests {
-    use flux::utils::security;
+    use flux_lib::utils::security;
     use tempfile::tempdir;
 
     #[test]
@@ -64,7 +64,7 @@ mod security_tests {
 }
 
 mod error_tests {
-    use flux::utils::error::DotfilesError;
+    use flux_lib::utils::error::DotfilesError;
 
     #[test]
     fn test_error_with_context() {
@@ -121,8 +121,9 @@ mod backup_tests {
 // ============================================================================
 
 mod config_validation_tests {
-    use flux::config::Config;
-    use flux::types::SymlinkResolution;
+    use flux_lib::config::Config;
+    use flux_lib::types::SymlinkResolution;
+    use std::path::{Path, PathBuf};
 
     /// Test primary config validation functionality
     #[test]
@@ -180,7 +181,7 @@ mod config_validation_tests {
     /// Test symlink resolution TOML deserialization
     #[test]
     fn test_symlink_resolution_toml_deserialization() {
-        use flux::types::SymlinkResolution;
+        use flux_lib::types::SymlinkResolution;
 
         // Test that serde can deserialize valid lowercase strings from TOML
         let test_cases = vec![
@@ -340,6 +341,34 @@ symlink_resolution = "{input_str}"
         assert_eq!(nvim_tool.folders.len(), 1);
         assert!(nvim_tool.files.is_empty());
     }
+
+    #[test]
+    fn test_folder_repo_path_uses_tool_directory_itself() {
+        let mut config = Config::default();
+        config.general.repo_path = "/tmp/dotfiles".to_string();
+
+        config.add_folder_to_tool(
+            "nvim",
+            "nvim",
+            Path::new(".config/nvim"),
+            None,
+        );
+
+        let tracked = match config.get_tracked_files(None) {
+            Ok(files) => files,
+            Err(error) => {
+                eprintln!("Failed to get tracked files: {error}");
+                return;
+            }
+        };
+
+        assert_eq!(tracked.len(), 1, "Expected one tracked folder entry");
+        assert_eq!(
+            tracked[0].repo_path,
+            PathBuf::from("/tmp/dotfiles/nvim"),
+            "Repo path should not duplicate the tool name"
+        );
+    }
 }
 
 // ============================================================================
@@ -347,7 +376,7 @@ symlink_resolution = "{input_str}"
 // ============================================================================
 
 mod symlink_resolution_extended_tests {
-    use flux::types::SymlinkResolution;
+    use flux_lib::types::SymlinkResolution;
     use std::str::FromStr;
 
     /// Test all symlink resolution modes can be created
@@ -409,8 +438,8 @@ mod symlink_resolution_extended_tests {
 // ============================================================================
 
 mod error_handling_extended_tests {
-    use flux::utils::error::DotfilesError;
-    use flux::utils::error::Result;
+    use flux_lib::utils::error::DotfilesError;
+    use flux_lib::utils::error::Result;
 
     /// Test error creation and context addition
     #[test]
@@ -488,7 +517,7 @@ mod error_handling_extended_tests {
 // ============================================================================
 
 mod dry_run_extended_tests {
-    use flux::utils::dry_run::{DryRun, Operation};
+    use flux_lib::utils::dry_run::{DryRun, Operation};
     use std::path::PathBuf;
 
     /// Test dry-run operation logging
@@ -556,7 +585,7 @@ mod dry_run_extended_tests {
 // ============================================================================
 
 mod file_entry_extended_tests {
-    use flux::types::FileEntry;
+    use flux_lib::types::FileEntry;
 
     /// Test file entry creation without profile
     #[test]

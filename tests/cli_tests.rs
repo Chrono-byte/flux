@@ -1,6 +1,6 @@
 //! Tests for CLI configuration module
 
-use flux::config::cli::{EnvironmentConfig, LogFormat, LogLevel};
+use flux_lib::config::cli::{EnvironmentConfig, LogFormat, LogLevel};
 
 #[test]
 fn test_log_level_parsing() -> Result<(), Box<dyn std::error::Error>> {

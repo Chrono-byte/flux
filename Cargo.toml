@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/cli", "crates/gui", "crates/gui/src-tauri", "crates/lib"]
+members = ["crates/cli", "crates/lib"]
 
 [workspace.lints.clippy]
 collapsible_match = "warn"

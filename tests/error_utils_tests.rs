@@ -1,6 +1,6 @@
 //! Tests for error utility functions
 
-use flux::utils::error_utils::home_dir_not_found;
+use flux_lib::utils::error_utils::home_dir_not_found;
 
 #[test]
 fn test_home_dir_not_found_message() {

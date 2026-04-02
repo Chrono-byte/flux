@@ -44,6 +44,7 @@ pub struct GeneralConfig {
     pub include: Option<Vec<String>>,
 }
 
+/// Returns the default symlink resolution strategy.
 const fn default_symlink_resolution() -> SymlinkResolution {
     SymlinkResolution::Auto
 }
@@ -584,6 +585,7 @@ impl Config {
         Ok(())
     }
 
+    /// Builds a [`FileEntry`] for a tool configuration.
     fn build_tool_entry(repo_file: &str, dest_path: &Path, profile: Option<&str>) -> FileEntry {
         FileEntry {
             repo: repo_file.to_string(),
@@ -680,6 +682,9 @@ impl Config {
                 let repo_file_path = if let Some(stripped) = rendered_repo.strip_prefix("./") {
                     // repo starts with ./ - treat as repo root relative (e.g., "./config.toml")
                     repo_path.join(stripped)
+                } else if rendered_repo == *tool {
+                    // repo equals tool name (e.g., "nvim"); track the tool directory directly
+                    repo_path.join(tool)
                 } else if rendered_repo.starts_with(&format!("{tool}/")) {
                     // repo already includes tool name (e.g., "cursor/settings.json")
                     // Use it as-is, don't strip the tool prefix

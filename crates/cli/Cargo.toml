@@ -7,8 +7,11 @@ edition = "2024"
 name = "flux"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
-flux = { path = "../lib" }
+flux-lib = { path = "../lib" }
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }

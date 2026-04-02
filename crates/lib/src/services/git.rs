@@ -290,6 +290,7 @@ fn setup_credential_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
     callbacks
 }
 
+/// Tries to load default SSH keys for the given username.
 fn try_default_ssh_keys(username: &str) -> Option<git2::Cred> {
     let mut private_keys = Vec::new();
 
@@ -314,6 +315,7 @@ fn try_default_ssh_keys(username: &str) -> Option<git2::Cred> {
     })
 }
 
+/// Traces git authentication attempts if the `FLUX_GIT_TRACE_AUTH` environment variable is set.
 fn trace_git_auth(args: std::fmt::Arguments<'_>) {
     if std::env::var_os("FLUX_GIT_TRACE_AUTH").is_some() {
         eprintln!("[flux git auth] {args}");

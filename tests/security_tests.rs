@@ -1,6 +1,6 @@
 //! Tests for security utilities
 
-use flux::utils::security;
+use flux_lib::utils::security;
 use std::path::PathBuf;
 
 #[test]
