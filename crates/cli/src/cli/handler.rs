@@ -11,6 +11,20 @@ use super::commands::{
 use flux_lib::config::EnvironmentConfig;
 use flux_lib::utils::Result;
 
+/// Main command router.
+///
+/// # Parameters
+///
+/// * `cli`: The parsed CLI arguments.
+/// * `_env_config`: The environment configuration (validated at startup).
+///
+/// # Returns
+///
+/// Returns the result of the command execution.
+///
+/// # Errors
+///
+/// Returns an error if any command fails.
 pub(super) fn run(cli: Cli, _env_config: EnvironmentConfig) -> Result<()> {
     match cli.command {
         Commands::Init { repo_path } => handle_init_command(repo_path)?,
