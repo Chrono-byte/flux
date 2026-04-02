@@ -409,6 +409,39 @@ pub(super) fn handle_ls_files_command(profile: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+/// Represents a toggleable boolean value
+pub enum Toggle {
+    /// Represents a disabled state
+    Disabled,
+    /// Represents an enabled state
+    Enabled,
+}
+
+impl Toggle {
+    #[must_use]
+    /// Converts the toggle value to a boolean.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the toggle is `Enabled`, `false` if it is `Disabled`.
+    pub const fn as_bool(self) -> bool {
+        matches!(self, Toggle::Enabled)
+    }
+
+    #[must_use]
+    /// Create a `Toggle` from a `bool`.
+    ///
+    /// `true` -> `Toggle::Enabled`, `false` -> `Toggle::Disabled`.
+    pub const fn from_bool(bool: bool) -> Self {
+        if bool {
+            Toggle::Enabled
+        } else {
+            Toggle::Disabled
+        }
+    }
+}
+
 /// Handle the apply command.
 ///
 /// # Errors
@@ -416,20 +449,20 @@ pub(super) fn handle_ls_files_command(profile: Option<&str>) -> Result<()> {
 /// Returns an error if the configuration cannot be applied or if the configuration cannot be loaded.
 pub(super) fn handle_apply_command(
     profile: Option<&str>,
-    dry_run: bool,
-    diff: bool,
-    yes: bool,
+    dry_run: Toggle,
+    diff: Toggle,
+    yes: Toggle,
     description: Option<&str>,
-    force: bool,
+    force: Toggle,
 ) -> Result<()> {
     let config = Config::load()?;
 
     // Normal apply command
-    if dry_run {
+    if dry_run.as_bool() {
         // In dry-run mode, only show preview without applying changes
-        let state_diff = compare_states(&config, profile, force)?;
+        let state_diff = compare_states(&config, profile, force.as_bool())?;
         display_preview(&state_diff);
-        if diff && !state_diff.files_to_sync.is_empty() {
+        if diff.as_bool() && !state_diff.files_to_sync.is_empty() {
             flux_lib::commands::display_diffs(&state_diff);
         }
     } else {
@@ -438,10 +471,10 @@ pub(super) fn handle_apply_command(
         apply_config(&ApplyOptions {
             config: &config,
             profile,
-            dry_run,
-            yes,
+            dry_run: dry_run.as_bool(),
+            yes: yes.as_bool(),
             description,
-            force,
+            force: force.as_bool(),
         })?;
     }
     Ok(())
@@ -993,100 +1026,110 @@ fn display_doctor_report(
     display_health_report(health_report);
 }
 
+/// Execute the command internally.
+/// Internal command dispatcher: forward a `Commands` variant to its respective handler.
+///
+/// This helper centralizes the match for `Commands` but is intentionally private
+/// (not part of the public API) so it does not require top-level documentation
+/// for every lint. It also uses `Toggle::from_bool` to keep the match arms concise.
+fn execute_internal(cmd: Commands) -> Result<()> {
+    match cmd {
+        Commands::Init { repo_path } => handle_init_command(repo_path)?,
+        Commands::Add {
+            tool,
+            file,
+            dest,
+            profile,
+            dry_run,
+            from_repo,
+        } => handle_add_command(
+            &tool,
+            &file,
+            dest.as_deref(),
+            profile.as_deref(),
+            dry_run,
+            from_repo,
+        )?,
+        Commands::Commit {
+            profile,
+            message,
+            dry_run,
+            verbose,
+        } => handle_commit_command(profile.as_deref(), message.as_deref(), dry_run, verbose)?,
+        Commands::Rm {
+            tool,
+            file,
+            dry_run,
+        } => handle_rm_command(&tool, &file, dry_run)?,
+        Commands::LsFiles { profile } => handle_ls_files_command(profile.as_deref())?,
+        Commands::Apply {
+            profile,
+            dry_run,
+            diff,
+            yes,
+            description,
+            force,
+        } => handle_apply_command(
+            profile.as_deref(),
+            Toggle::from_bool(dry_run),
+            Toggle::from_bool(diff),
+            Toggle::from_bool(yes),
+            description.as_deref(),
+            Toggle::from_bool(force),
+        )?,
+        Commands::History {
+            limit,
+            profile,
+            kind,
+            since,
+            json,
+        } => handle_history_command(
+            limit,
+            profile.as_deref(),
+            kind.as_deref(),
+            since.as_deref(),
+            json,
+        )?,
+        Commands::Profile { command } => handle_profile_command(command)?,
+        Commands::Config { command } => handle_config_command(&command)?,
+        Commands::Remote { command } => handle_remote_command(command)?,
+        Commands::Push {
+            remote,
+            branch,
+            set_upstream,
+            dry_run,
+            timeout,
+        } => tokio::runtime::Runtime::new()?.block_on(handle_push_command(
+            remote,
+            branch,
+            set_upstream,
+            dry_run,
+            timeout,
+        ))?,
+        Commands::Pull {
+            remote,
+            branch,
+            dry_run,
+            timeout,
+        } => tokio::runtime::Runtime::new()?
+            .block_on(handle_pull_command(remote, branch, dry_run, timeout))?,
+        Commands::Status {
+            profile,
+            conflicts,
+            json,
+        } => handle_status_command(profile.as_deref(), conflicts, json)?,
+        Commands::Maintain { command } => handle_maintain_command(command)?,
+        Commands::Doctor { profile } => handle_doctor_command(profile.as_deref())?,
+        Commands::Completion { shell } => handle_completion_command(&shell),
+    }
+
+    Ok(())
+}
+
 impl Commands {
     /// Execute the command.
     pub fn execute(self) -> Result<()> {
-        match self {
-            Commands::Init { repo_path } => handle_init_command(repo_path)?,
-            Commands::Add {
-                tool,
-                file,
-                dest,
-                profile,
-                dry_run,
-                from_repo,
-            } => handle_add_command(
-                &tool,
-                &file,
-                dest.as_deref(),
-                profile.as_deref(),
-                dry_run,
-                from_repo,
-            )?,
-            Commands::Commit {
-                profile,
-                message,
-                dry_run,
-                verbose,
-            } => handle_commit_command(profile.as_deref(), message.as_deref(), dry_run, verbose)?,
-            Commands::Rm {
-                tool,
-                file,
-                dry_run,
-            } => handle_rm_command(&tool, &file, dry_run)?,
-            Commands::LsFiles { profile } => handle_ls_files_command(profile.as_deref())?,
-            Commands::Apply {
-                profile,
-                dry_run,
-                diff,
-                yes,
-                description,
-                force,
-            } => handle_apply_command(
-                profile.as_deref(),
-                dry_run,
-                diff,
-                yes,
-                description.as_deref(),
-                force,
-            )?,
-            Commands::History {
-                limit,
-                profile,
-                kind,
-                since,
-                json,
-            } => handle_history_command(
-                limit,
-                profile.as_deref(),
-                kind.as_deref(),
-                since.as_deref(),
-                json,
-            )?,
-            Commands::Profile { command } => handle_profile_command(command)?,
-            Commands::Config { command } => handle_config_command(&command)?,
-            Commands::Remote { command } => handle_remote_command(command)?,
-            Commands::Push {
-                remote,
-                branch,
-                set_upstream,
-                dry_run,
-                timeout,
-            } => tokio::runtime::Runtime::new()?.block_on(handle_push_command(
-                remote,
-                branch,
-                set_upstream,
-                dry_run,
-                timeout,
-            ))?,
-            Commands::Pull {
-                remote,
-                branch,
-                dry_run,
-                timeout,
-            } => tokio::runtime::Runtime::new()?
-                .block_on(handle_pull_command(remote, branch, dry_run, timeout))?,
-            Commands::Status {
-                profile,
-                conflicts,
-                json,
-            } => handle_status_command(profile.as_deref(), conflicts, json)?,
-            Commands::Maintain { command } => return handle_maintain_command(command),
-            Commands::Doctor { profile } => handle_doctor_command(profile.as_deref())?,
-            Commands::Completion { shell } => handle_completion_command(&shell),
-        }
-
-        Ok(())
+        execute_internal(self)
     }
 }
 
