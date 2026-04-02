@@ -293,41 +293,6 @@ fn is_supported_remote_url(url: &str) -> bool {
     PREFIXES.iter().any(|prefix| url.starts_with(prefix))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_supported_remote_url;
-
-    #[test]
-    fn supported_remote_url_prefixes() {
-        let valid_examples = [
-            "http://example.com/repo.git",
-            "https://example.com/repo.git",
-            "git@example.com:user/repo.git",
-            "ssh://example.com/user/repo.git",
-            "file:///tmp/repo",
-        ];
-
-        for example in valid_examples {
-            assert!(
-                is_supported_remote_url(example),
-                "expected {example} to be supported"
-            );
-        }
-    }
-
-    #[test]
-    fn unsupported_remote_urls() {
-        let invalid_examples = ["", "ftp://example.com/repo.git", "example.com/repo"];
-
-        for example in invalid_examples {
-            assert!(
-                !is_supported_remote_url(example),
-                "expected {example} to be unsupported"
-            );
-        }
-    }
-}
-
 /// Check the unsafe permissions of the tracked files.
 ///
 /// # Errors
@@ -475,4 +440,39 @@ pub fn display_health_report(report: &HealthReport) {
         report.issues.len().to_string().red(),
         by_category.len()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_supported_remote_url;
+
+    #[test]
+    fn supported_remote_url_prefixes() {
+        let valid_examples = [
+            "http://example.com/repo.git",
+            "https://example.com/repo.git",
+            "git@example.com:user/repo.git",
+            "ssh://example.com/user/repo.git",
+            "file:///tmp/repo",
+        ];
+
+        for example in valid_examples {
+            assert!(
+                is_supported_remote_url(example),
+                "expected {example} to be supported"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_remote_urls() {
+        let invalid_examples = ["", "ftp://example.com/repo.git", "example.com/repo"];
+
+        for example in invalid_examples {
+            assert!(
+                !is_supported_remote_url(example),
+                "expected {example} to be unsupported"
+            );
+        }
+    }
 }

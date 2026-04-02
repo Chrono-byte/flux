@@ -152,7 +152,7 @@ pub fn display_diffs(diff: &StateDiff) {
     for file in &diff.files_to_sync {
         let current = fs::read_to_string(&file.dest_path).unwrap_or_default();
 
-        let Some(target) = fs::read_to_string(&file.repo_path) else {
+        let Ok(target) = fs::read_to_string(&file.repo_path) else {
             println!(
                 "\n{} {} (skipping diff: cannot read repo file)",
                 "⊘".yellow(),
