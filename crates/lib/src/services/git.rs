@@ -1072,7 +1072,7 @@ pub async fn pull_from_remote(
     let head_before = git_repo.inner().head().ok().and_then(|head| head.peel_to_commit().ok());
     let head_oid_before = head_before.as_ref().map(git2::Commit::id);
 
-    let start_time = std::time::Instant::now();
+    let _start_time = std::time::Instant::now();
     trace_git_auth(format_args!(
         "pull_from_remote start repo={} remote={} branch={}",
         git_repo.repo_path.display(),
@@ -1086,7 +1086,6 @@ pub async fn pull_from_remote(
         timeout_seconds,
     )
     .await;
-    let _elapsed = start_time.elapsed();
 
     match fetch_result {
         Ok(()) => {

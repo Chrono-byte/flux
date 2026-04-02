@@ -7,7 +7,6 @@ use flux_lib::{
     utils::home_override,
     utils::path_utils::{normalize_path, resolve_symlink_target},
 };
-use once_cell::sync::Lazy;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -16,11 +15,11 @@ use std::{
 use tempfile::{Builder as TempDirBuilder, TempDir, tempdir};
 
 struct Workspace {
-    _repo_temp: TempDir,
+    repo_temp: TempDir,
     repo_path: PathBuf,
-    _home_temp: TempDir,
+    home_temp: TempDir,
     home_path: PathBuf,
-    _lock_guard: MutexGuard<'static, ()>,
+    lock_guard: MutexGuard<'static, ()>,
 }
 
 impl Drop for Workspace {
@@ -56,11 +55,11 @@ fn setup_workspace() -> Result<Workspace, Box<dyn std::error::Error>> {
     home_override::set_override(home_path.clone());
 
     Ok(Workspace {
-        _repo_temp: repo_temp,
+        repo_temp,
         repo_path,
-        _home_temp: home_temp,
+        home_temp,
         home_path,
-        _lock_guard: guard,
+        lock_guard: guard,
     })
 }
 
@@ -110,7 +109,7 @@ mod file_operations_integration_tests {
         let repo_file = workspace.repo_path().join(Path::new(&repo_entry));
 
         assert!(repo_file.exists(), "Repo should contain copied file");
-        assert!(dest_path.parent().is_some_and(|p| p.exists()));
+        assert!(dest_path.parent().is_some_and(Path::exists));
 
         let tool_config = config.tools.get("flux").expect("tool should be recorded in config");
         assert_eq!(tool_config.files.len(), 1);
