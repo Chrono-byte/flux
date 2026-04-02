@@ -287,6 +287,7 @@ fn check_git_remotes(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<(
     Ok(())
 }
 
+/// Returns `true` if the remote URL has one of the supported prefixes.
 fn is_supported_remote_url(url: &str) -> bool {
     const PREFIXES: &[&str] = &["http://", "https://", "git@", "ssh://", "file://"];
     PREFIXES.iter().any(|prefix| url.starts_with(prefix))

@@ -176,6 +176,7 @@ fn check_orphaned_entries(
     Ok(())
 }
 
+/// Normalize a repo path relative to its tool directory.
 fn normalize_repo_path(tool: &str, repo: &str) -> String {
     let repo = repo.strip_prefix("./").unwrap_or(repo);
     let repo = repo.trim_end_matches('/');
