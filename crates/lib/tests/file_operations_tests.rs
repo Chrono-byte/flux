@@ -10,16 +10,12 @@ use flux_lib::{
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard},
 };
-use tempfile::{Builder as TempDirBuilder, TempDir, tempdir};
+use tempfile::{Builder as TempDirBuilder, tempdir};
 
 struct Workspace {
-    repo_temp: TempDir,
     repo_path: PathBuf,
-    home_temp: TempDir,
     home_path: PathBuf,
-    lock_guard: MutexGuard<'static, ()>,
 }
 
 impl Drop for Workspace {
@@ -38,13 +34,7 @@ impl Workspace {
     }
 }
 
-/// Create an isolated workspace with the repo rooted in a generic tempdir and the
-/// home directory created inside the real HOME (so `dirs::home_dir()` still points
-/// inside it for security checks).
-static WORKSPACE_LOCK: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
-
 fn setup_workspace() -> Result<Workspace, Box<dyn std::error::Error>> {
-    let guard = WORKSPACE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let repo_temp = tempdir()?;
     let repo_path = repo_temp.path().join("repo");
     fs::create_dir_all(&repo_path)?;
@@ -55,11 +45,8 @@ fn setup_workspace() -> Result<Workspace, Box<dyn std::error::Error>> {
     home_override::set_override(home_path.clone());
 
     Ok(Workspace {
-        repo_temp,
         repo_path,
-        home_temp,
         home_path,
-        lock_guard: guard,
     })
 }
 
@@ -92,7 +79,15 @@ fn add_sample_file(
         None,
         &mut fs_manager,
     )?;
-    let repo_entry = config.tools["flux"].files[0].repo.clone();
+    let repo_entry = config
+        .tools
+        .get("flux")
+        .ok_or("Tool not found in config")?
+        .files
+        .first()
+        .ok_or("No files found in flux tool config")?
+        .repo
+        .clone();
     Ok((dest_path, repo_entry))
 }
 
@@ -111,14 +106,18 @@ mod file_operations_integration_tests {
         assert!(repo_file.exists(), "Repo should contain copied file");
         assert!(dest_path.parent().is_some_and(Path::exists));
 
-        let tool_config = config.tools.get("flux").expect("tool should be recorded in config");
+        let tool_config = config.tools.get("flux").ok_or("tool should be recorded in config")?;
+
         assert_eq!(tool_config.files.len(), 1);
         assert_eq!(
-            tool_config.files[0].dest,
+            tool_config.files.first().map(|file| file.dest.clone()).unwrap_or_default(),
             dest_path.to_string_lossy(),
             "Destination path should be recorded"
         );
-        assert_eq!(tool_config.files[0].repo, repo_entry);
+        assert_eq!(
+            tool_config.files.first().map(|file| file.repo.clone()).unwrap_or_default(),
+            repo_entry
+        );
         Ok(())
     }
 
@@ -206,7 +205,7 @@ mod symlink_resolution_tests {
         let link_path = link_parent.join("relative_link");
 
         let relative_target =
-            diff_paths(&target, &link_parent).expect("relative path should be computable");
+            diff_paths(&target, &link_parent).ok_or("relative path should be computable")?;
 
         let mut dry_run_tracker = DryRun::default();
         let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, false);

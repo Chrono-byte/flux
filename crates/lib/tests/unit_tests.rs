@@ -343,8 +343,14 @@ symlink_resolution = "{input_str}"
         };
 
         assert_eq!(tracked.len(), 1, "Expected one tracked folder entry");
+
+        let Some(first_entry) = tracked.first() else {
+            eprintln!("Expected at least one tracked entry");
+            return;
+        };
+
         assert_eq!(
-            tracked[0].repo_path,
+            first_entry.repo_path,
             PathBuf::from("/tmp/dotfiles/nvim"),
             "Repo path should not duplicate the tool name"
         );

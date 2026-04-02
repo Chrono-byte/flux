@@ -414,7 +414,6 @@ pub(super) fn handle_ls_files_command(profile: Option<&str>) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if the configuration cannot be applied or if the configuration cannot be loaded.
-#[allow(clippy::fn_params_excessive_bools)]
 pub(super) fn handle_apply_command(
     profile: Option<&str>,
     dry_run: bool,

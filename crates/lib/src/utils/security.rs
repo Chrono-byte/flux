@@ -106,6 +106,7 @@ pub fn validate_dest_path(dest: &Path, home: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Normalize a path that may not exist, converting it to an absolute path.
 fn normalize_nonexistent_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
 

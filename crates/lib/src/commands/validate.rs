@@ -286,26 +286,27 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn folder_entries_cover_tool_root() {
-        let repo_dir = tempdir().expect("Failed to create temp repo");
+    fn folder_entries_cover_tool_root() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let repo_dir = tempdir()?;
         let tool_dir = repo_dir.path().join("nvim");
-        fs::create_dir_all(&tool_dir).expect("Failed to create tool dir");
+        fs::create_dir_all(&tool_dir)?;
 
-        fs::write(tool_dir.join("LICENSE"), "license").expect("Failed to write file");
-        fs::write(tool_dir.join("init.lua"), "init").expect("Failed to write file");
+        fs::write(tool_dir.join("LICENSE"), "license")?;
+        fs::write(tool_dir.join("init.lua"), "init")?;
 
         let mut config = Config::default();
         config.general.repo_path = repo_dir.path().to_string_lossy().to_string();
         config.add_folder_to_tool("nvim", "nvim", Path::new(".config/nvim"), None);
 
         let mut issues = Vec::new();
-        check_orphaned_entries(repo_dir.path(), &config, &mut issues)
-            .expect("Failed to check orphaned entries");
+        check_orphaned_entries(repo_dir.path(), &config, &mut issues)?;
 
         assert!(
             issues.is_empty(),
             "Folder entry should cover entire tool directory"
         );
+
+        Ok(())
     }
 
     #[test]
@@ -321,13 +322,14 @@ mod tests {
     }
 
     #[test]
-    fn orphan_detection_reports_untracked_file() {
-        let repo_dir = tempdir().expect("Failed to create temp repo");
+    fn orphan_detection_reports_untracked_file()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let repo_dir = tempdir()?;
         let tool_dir = repo_dir.path().join("nvim");
-        fs::create_dir_all(&tool_dir).expect("Failed to create tool dir");
+        fs::create_dir_all(&tool_dir)?;
 
-        fs::write(tool_dir.join("tracked.txt"), "ok").expect("write tracked");
-        fs::write(tool_dir.join("orphan.txt"), "oops").expect("write orphan");
+        fs::write(tool_dir.join("tracked.txt"), "ok")?;
+        fs::write(tool_dir.join("orphan.txt"), "oops")?;
 
         let mut config = Config::default();
         config.general.repo_path = repo_dir.path().to_string_lossy().to_string();
@@ -339,35 +341,37 @@ mod tests {
         );
 
         let mut issues = Vec::new();
-        check_orphaned_entries(repo_dir.path(), &config, &mut issues)
-            .expect("Failed to check orphaned entries");
+        check_orphaned_entries(repo_dir.path(), &config, &mut issues)?;
 
         assert!(
             issues.iter().any(|issue| matches!(issue, ValidationIssue::OrphanedEntry(tool, file) if tool == "nvim" && file == "orphan.txt")),
             "Expected orphan entries for files not configured"
         );
+
+        Ok(())
     }
 
     #[test]
-    fn folder_entry_only_covers_subpath() {
-        let repo_dir = tempdir().expect("Failed to create temp repo");
+    fn folder_entry_only_covers_subpath() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let repo_dir = tempdir()?;
         let tool_dir = repo_dir.path().join("nvim/lua");
-        fs::create_dir_all(&tool_dir).expect("Failed to create tool dir");
+        fs::create_dir_all(&tool_dir)?;
 
-        fs::write(tool_dir.join("plugin.lua"), "ok").expect("write plugin");
-        fs::write(repo_dir.path().join("nvim/README.md"), "readme").expect("write readme");
+        fs::write(tool_dir.join("plugin.lua"), "ok")?;
+        fs::write(repo_dir.path().join("nvim/README.md"), "readme")?;
 
         let mut config = Config::default();
         config.general.repo_path = repo_dir.path().to_string_lossy().to_string();
         config.add_folder_to_tool("nvim", "nvim/lua", Path::new(".config/nvim/lua"), None);
 
         let mut issues = Vec::new();
-        check_orphaned_entries(repo_dir.path(), &config, &mut issues)
-            .expect("Failed to check orphaned entries");
+        check_orphaned_entries(repo_dir.path(), &config, &mut issues)?;
 
         assert!(
             issues.iter().any(|issue| matches!(issue, ValidationIssue::OrphanedEntry(tool, file) if tool == "nvim" && file == "README.md")),
             "README.md should still be reported even when lua/ folder is tracked"
         );
+
+        Ok(())
     }
 }
