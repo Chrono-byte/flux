@@ -592,9 +592,6 @@ impl Config {
             dest: dest_path.to_string_lossy().to_string(),
             profile: profile.map(ToString::to_string),
             conditions: None,
-            secret: None,
-            secret_backend: None,
-            secret_key: None,
         }
     }
 
@@ -700,21 +697,11 @@ impl Config {
                     })?
                     .join(&rendered_dest);
 
-                // Handle both new and legacy secret config by migrating if needed
-                let mut file_clone = file.clone();
-                file_clone.migrate_legacy_secret();
-                let secret = file_clone.secret.clone();
-                let is_secret = secret.is_some();
-
                 tracked_files.push(crate::types::TrackedFile {
                     tool: tool.clone(),
                     repo_path: repo_file_path,
                     dest_path,
                     profile: file.profile.clone(),
-                    is_secret,
-                    secret,
-                    secret_backend: None,
-                    secret_key: None,
                 });
             }
         }

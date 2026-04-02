@@ -18,9 +18,6 @@ pub struct HookResult {
     pub stdout: String,
     /// Captured stderr
     pub stderr: String,
-    /// Duration of execution (used for logging and metrics)
-    #[allow(dead_code)] // Public API field for future metrics/logging
-    pub duration: Duration,
 }
 
 /// Execute a single hook command.
@@ -46,7 +43,6 @@ pub fn execute_hook(
             exit_code: None,
             stdout: String::new(),
             stderr: "Hook skipped: conditions not met".to_string(),
-            duration: start.elapsed(),
         });
     }
 
@@ -99,7 +95,6 @@ pub fn execute_hook(
         exit_code,
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        duration, // Used for logging (duration_secs above) and potential future metrics
     })
 }
 

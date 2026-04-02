@@ -801,12 +801,6 @@ fn create_symlink_managed(
         return Ok(());
     }
 
-    // If this is a secret file with a secret_key, write secret content directly instead of symlinking
-    if file.secret.is_some() {
-        write_secret_file(file, fs_manager, verbose)?;
-        return Ok(());
-    }
-
     // Handle regular symlink creation (non-Replace strategies)
     let link_target = compute_symlink_target(file, resolution, verbose)?;
     create_symlink_atomic(file, &link_target, fs_manager, verbose)?;
@@ -868,99 +862,18 @@ fn handle_replace_strategy(
         println!("    Copying file instead of symlinking (Replace strategy)...");
     }
 
-    // If this is a secret file with a secret_key, resolve the secret instead of copying
-    if file.secret.is_some() {
-        write_secret_to_path(file, &temp_path, fs_manager, verbose)?;
-    } else {
-        fs_manager.copy(&file.repo_path, &temp_path)?;
-    }
-
+    fs_manager.copy(&file.repo_path, &temp_path)?;
     fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
-
-    set_secret_permissions_if_needed(file, &file.dest_path, fs_manager);
-
-    if verbose && !fs_manager.is_dry_run {
-        if file.secret.is_some() {
-            println!(
-                "{} Wrote secret content to {}",
-                "✓".green(),
-                file.dest_path.display()
-            );
-        } else {
-            println!(
-                "{} Copied {} -> {}",
-                "✓".green(),
-                file.repo_path.display(),
-                file.dest_path.display()
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Writes secret file content directly to the destination path.
-fn write_secret_file(
-    file: &TrackedFile,
-    fs_manager: &mut FileSystemManager,
-    verbose: bool,
-) -> Result<()> {
-    write_secret_to_path(file, &file.dest_path, fs_manager, verbose)?;
-    set_secret_permissions_if_needed(file, &file.dest_path, fs_manager);
 
     if verbose && !fs_manager.is_dry_run {
         println!(
-            "{} Wrote secret content to {}",
+            "{} Copied {} -> {}",
             "✓".green(),
+            file.repo_path.display(),
             file.dest_path.display()
         );
     }
     Ok(())
-}
-
-/// Writes secret content to a given path.
-fn write_secret_to_path(
-    file: &TrackedFile,
-    target_path: &Path,
-    fs_manager: &mut FileSystemManager,
-    verbose: bool,
-) -> Result<()> {
-    use crate::services::secrets::SecretsManager;
-    let secrets_mgr = SecretsManager::with_defaults();
-    let secret_cfg = file.secret.as_ref().ok_or_else(|| {
-        DotfilesError::Config("Secret file missing secret configuration".to_string())
-    })?;
-    let secret_mat = secrets_mgr.resolve(Some(secret_cfg.backend), &secret_cfg.key)?;
-
-    if !fs_manager.is_dry_run {
-        if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(target_path, secret_mat.value.as_bytes())?;
-    } else if verbose {
-        println!(
-            "    [DRY RUN] Would write secret content to {}",
-            target_path.display()
-        );
-    }
-    Ok(())
-}
-
-/// Sets secure permissions on secret files if needed.
-fn set_secret_permissions_if_needed(
-    file: &TrackedFile,
-    path: &Path,
-    fs_manager: &mut FileSystemManager,
-) {
-    if file.secret.is_some()
-        && !fs_manager.is_dry_run
-        && let Err(error) = security::set_secure_permissions(path)
-    {
-        warn!(
-            "Could not set secure permissions on secret file {}: {}",
-            path.display(),
-            error
-        );
-    }
 }
 
 /// Computes the symlink target path based on the resolution strategy.
@@ -1032,19 +945,6 @@ fn create_symlink_atomic(
         );
     }
     fs_manager.rename(&temp_link_path, &file.dest_path)?;
-
-    // For secret files, tighten permissions on the repository copy which holds
-    // the actual secret material.
-    if file.secret.is_some()
-        && !fs_manager.is_dry_run
-        && let Err(error) = security::set_secure_permissions(&file.repo_path)
-    {
-        warn!(
-            "Could not set secure permissions on secret repo file {}: {}",
-            file.repo_path.display(),
-            error
-        );
-    }
 
     if verbose && !fs_manager.is_dry_run {
         println!(

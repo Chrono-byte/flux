@@ -58,7 +58,7 @@ pub enum DotfilesError {
 
 impl DotfilesError {
     /// Provide additional context for the error
-    #[allow(dead_code)] // This is used in tests
+    #[cfg(test)] // This is used in tests
     #[must_use]
     pub fn with_context(self, context: &str) -> Self {
         match self {

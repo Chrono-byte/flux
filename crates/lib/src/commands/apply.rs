@@ -141,12 +141,7 @@ pub fn display_preview(diff: &StateDiff) {
 /// Display unified diffs for files that would be changed.
 ///
 /// This is only used in dry-run mode and never touches the filesystem.
-///
-/// Display unified diffs for planned changes.
 pub fn display_diffs(diff: &StateDiff) {
-    use crate::services::secrets::SecretsManager;
-    use std::fs;
-
     if diff.files_to_sync.is_empty() {
         return;
     }
@@ -154,82 +149,22 @@ pub fn display_diffs(diff: &StateDiff) {
     println!("\n{}", "Unified diffs for planned changes:".bold().cyan());
     println!("{}", "=".repeat(60).cyan());
 
-    // Pre-resolve all secrets for secret files to batch the operation
-    let secrets_mgr = SecretsManager::with_defaults();
-    let mut secret_cache: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
-
-    // Collect all secret keys that need resolution
-    let secret_files: Vec<_> =
-        diff.files_to_sync.iter().filter(|file| file.secret.is_some()).collect();
-
-    if !secret_files.is_empty() {
-        // Batch resolve all secrets using resolve_many
-        let secret_keys: Vec<String> = secret_files
-            .iter()
-            .filter_map(|file| file.secret.as_ref().map(|secret| secret.key.clone()))
-            .collect();
-
-        if let Ok(resolved_secrets) = secrets_mgr.resolve_many(
-            secret_files
-                .first()
-                .and_then(|file| file.secret.as_ref().map(|secret| secret.backend)),
-            &secret_keys,
-        ) {
-            for (key, material) in resolved_secrets {
-                let _ = secret_cache.insert(key, material.value);
-            }
-        }
-    }
-
     for file in &diff.files_to_sync {
-        // Current contents (may not exist yet)
         let current = fs::read_to_string(&file.dest_path).unwrap_or_default();
 
-        // Target contents from repo or secret backend
-        let target = if let Some(secret_cfg) = &file.secret {
-            // For secret files, use cached secret or resolve individually
-            if let Some(cached) = secret_cache.get(&secret_cfg.key) {
-                cached.clone()
-            } else {
-                // Fallback to individual resolution if not in cache
-                match secrets_mgr.resolve(Some(secret_cfg.backend), &secret_cfg.key) {
-                    Ok(secret_mat) => secret_mat.value,
-                    Err(error) => {
-                        println!(
-                            "\n{} {} (skipping diff: cannot resolve secret: {})",
-                            "⊘".yellow(),
-                            file.repo_path.display(),
-                            error
-                        );
-                        continue;
-                    }
-                }
+        let target = match fs::read_to_string(&file.repo_path) {
+            Ok(contents) => contents,
+            Err(_) => {
+                println!(
+                    "\n{} {} (skipping diff: cannot read repo file)",
+                    "⊘".yellow(),
+                    file.repo_path.display()
+                );
+                continue;
             }
-        } else if let Ok(contents) = fs::read_to_string(&file.repo_path) {
-            contents
-        } else {
-            println!(
-                "\n{} {} (skipping diff: cannot read repo file)",
-                "⊘".yellow(),
-                file.repo_path.display()
-            );
-            continue;
         };
 
-        // Mask secret content in diff output
-        let (current_display, target_display) = if file.secret.is_some() {
-            (
-                "[SECRET CONTENT HIDDEN]".to_string(),
-                "[SECRET CONTENT HIDDEN]".to_string(),
-            )
-        } else {
-            (current.clone(), target.clone())
-        };
-
-        // Compute a simple unified diff. If there are no textual changes
-        // (e.g., binary files or identical), skip printing.
-        let udiff = unified_diff(&file.dest_path, &current_display, &target_display);
+        let udiff = unified_diff(&file.dest_path, &current, &target);
         if udiff.trim().is_empty() {
             continue;
         }

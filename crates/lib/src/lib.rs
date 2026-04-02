@@ -1,7 +1,6 @@
 //! Flux - A dotfiles manager with symlink-based sync
 //!
 //! This library provides the core functionality for managing dotfiles.
-//! The binary entry point is in `main.rs`.
 
 /// Command implementations for CLI subcommands.
 pub mod commands;

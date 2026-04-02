@@ -4,7 +4,7 @@ use crate::utils::error::Result;
 use crate::utils::path_utils::symlink_points_to_correct_target;
 use colored::Colorize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A validation issue found in the configuration.
 #[derive(Debug, Clone)]
@@ -138,20 +138,35 @@ fn check_orphaned_entries(
         // Normalize repo paths: remove tool name prefix if present
         let mut tracked_files = std::collections::HashSet::new();
         for file_entry in &tool_config.files {
-            let normalized_repo = if file_entry.repo.starts_with(&format!("{tool}/")) {
-                // Remove tool name prefix (e.g., "cursor/settings.json" -> "settings.json")
-                file_entry
-                    .repo
-                    .strip_prefix(&format!("{tool}/"))
-                    .map_or_else(|| file_entry.repo.clone(), ToString::to_string)
-            } else {
-                file_entry.repo.clone()
-            };
+            let normalized_repo = normalize_repo_path(tool, &file_entry.repo);
             let _ = tracked_files.insert(normalized_repo);
+        }
+
+        // Collect folder coverage data
+        let mut folder_paths = Vec::new();
+        let mut root_folder_covered = false;
+        for folder_entry in &tool_config.folders {
+            let normalized_folder = normalize_repo_path(tool, &folder_entry.repo);
+            if normalized_folder.is_empty() {
+                root_folder_covered = true;
+                break;
+            }
+            folder_paths.push(PathBuf::from(normalized_folder));
+        }
+
+        if root_folder_covered {
+            // Entire tool directory is covered by a folder entry, so skip orphan checks.
+            continue;
         }
 
         // Find orphaned files
         for repo_file in repo_files {
+            let repo_path = Path::new(&repo_file);
+
+            if folder_paths.iter().any(|folder_path| repo_path.starts_with(folder_path)) {
+                continue;
+            }
+
             if !tracked_files.contains(&repo_file) {
                 issues.push(ValidationIssue::OrphanedEntry(tool.clone(), repo_file));
             }
@@ -159,6 +174,21 @@ fn check_orphaned_entries(
     }
 
     Ok(())
+}
+
+fn normalize_repo_path(tool: &str, repo: &str) -> String {
+    let repo = repo.strip_prefix("./").unwrap_or(repo);
+    let repo = repo.trim_end_matches('/');
+
+    if repo.is_empty() || repo == "." || repo == tool {
+        return String::new();
+    }
+
+    if let Some(stripped) = repo.strip_prefix(&format!("{tool}/")) {
+        return stripped.to_string();
+    }
+
+    repo.to_string()
 }
 
 /// Collect files from a directory.
@@ -245,4 +275,98 @@ pub fn display_validation(report: &ValidationReport) {
         "Summary:".bold(),
         report.issues.len().to_string().red()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    #[test]
+    fn folder_entries_cover_tool_root() {
+        let repo_dir = tempdir().expect("Failed to create temp repo");
+        let tool_dir = repo_dir.path().join("nvim");
+        fs::create_dir_all(&tool_dir).expect("Failed to create tool dir");
+
+        fs::write(tool_dir.join("LICENSE"), "license").expect("Failed to write file");
+        fs::write(tool_dir.join("init.lua"), "init").expect("Failed to write file");
+
+        let mut config = Config::default();
+        config.general.repo_path = repo_dir.path().to_string_lossy().to_string();
+        config.add_folder_to_tool("nvim", "nvim", Path::new(".config/nvim"), None);
+
+        let mut issues = Vec::new();
+        check_orphaned_entries(repo_dir.path(), &config, &mut issues)
+            .expect("Failed to check orphaned entries");
+
+        assert!(
+            issues.is_empty(),
+            "Folder entry should cover entire tool directory"
+        );
+    }
+
+    #[test]
+    fn normalize_repo_path_handles_special_values() {
+        assert_eq!(normalize_repo_path("nvim", "nvim"), "");
+        assert_eq!(normalize_repo_path("nvim", "./nvim"), "");
+        assert_eq!(normalize_repo_path("nvim", "nvim/"), "");
+        assert_eq!(normalize_repo_path("nvim", "./"), "");
+        assert_eq!(normalize_repo_path("nvim", "."), "");
+        assert_eq!(normalize_repo_path("nvim", "nvim/lua"), "lua");
+        assert_eq!(normalize_repo_path("nvim", "nvim/lua/"), "lua");
+        assert_eq!(normalize_repo_path("nvim", "./lua"), "lua");
+    }
+
+    #[test]
+    fn orphan_detection_reports_untracked_file() {
+        let repo_dir = tempdir().expect("Failed to create temp repo");
+        let tool_dir = repo_dir.path().join("nvim");
+        fs::create_dir_all(&tool_dir).expect("Failed to create tool dir");
+
+        fs::write(tool_dir.join("tracked.txt"), "ok").expect("write tracked");
+        fs::write(tool_dir.join("orphan.txt"), "oops").expect("write orphan");
+
+        let mut config = Config::default();
+        config.general.repo_path = repo_dir.path().to_string_lossy().to_string();
+        config.add_file_to_tool(
+            "nvim",
+            "tracked.txt",
+            Path::new(".config/nvim/tracked.txt"),
+            None,
+        );
+
+        let mut issues = Vec::new();
+        check_orphaned_entries(repo_dir.path(), &config, &mut issues)
+            .expect("Failed to check orphaned entries");
+
+        assert!(
+            issues.iter().any(|issue| matches!(issue, ValidationIssue::OrphanedEntry(tool, file) if tool == "nvim" && file == "orphan.txt")),
+            "Expected orphan entries for files not configured"
+        );
+    }
+
+    #[test]
+    fn folder_entry_only_covers_subpath() {
+        let repo_dir = tempdir().expect("Failed to create temp repo");
+        let tool_dir = repo_dir.path().join("nvim/lua");
+        fs::create_dir_all(&tool_dir).expect("Failed to create tool dir");
+
+        fs::write(tool_dir.join("plugin.lua"), "ok").expect("write plugin");
+        fs::write(repo_dir.path().join("nvim/README.md"), "readme").expect("write readme");
+
+        let mut config = Config::default();
+        config.general.repo_path = repo_dir.path().to_string_lossy().to_string();
+        config.add_folder_to_tool("nvim", "nvim/lua", Path::new(".config/nvim/lua"), None);
+
+        let mut issues = Vec::new();
+        check_orphaned_entries(repo_dir.path(), &config, &mut issues)
+            .expect("Failed to check orphaned entries");
+
+        assert!(
+            issues.iter().any(|issue| matches!(issue, ValidationIssue::OrphanedEntry(tool, file) if tool == "nvim" && file == "README.md")),
+            "README.md should still be reported even when lua/ folder is tracked"
+        );
+    }
 }

@@ -266,28 +266,65 @@ fn check_git_remotes(config: &Config, issues: &mut Vec<HealthIssue>) -> Result<(
             && let Some(url) = remote.url()
         {
             // Basic validation: check if URL looks valid
-            if url.is_empty() {
+            let reason = if url.is_empty() {
+                Some("Remote URL is empty")
+            } else if !is_supported_remote_url(url) {
+                Some("Remote URL format looks invalid")
+            } else {
+                None
+            };
+
+            if let Some(reason) = reason {
                 issues.push(HealthIssue::BadGitRemote {
                     remote: name.to_string(),
                     url: url.to_string(),
-                    reason: "Remote URL is empty".to_string(),
-                });
-            } else if !url.starts_with("http://")
-                && !url.starts_with("https://")
-                && !url.starts_with("git@")
-                && !url.starts_with("file://")
-            {
-                // Not a comprehensive check, but catches obviously malformed URLs
-                issues.push(HealthIssue::BadGitRemote {
-                    remote: name.to_string(),
-                    url: url.to_string(),
-                    reason: "Remote URL format looks invalid".to_string(),
+                    reason: reason.to_string(),
                 });
             }
         }
     }
 
     Ok(())
+}
+
+fn is_supported_remote_url(url: &str) -> bool {
+    const PREFIXES: &[&str] = &["http://", "https://", "git@", "ssh://", "file://"];
+    PREFIXES.iter().any(|prefix| url.starts_with(prefix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_supported_remote_url;
+
+    #[test]
+    fn supported_remote_url_prefixes() {
+        let valid_examples = [
+            "http://example.com/repo.git",
+            "https://example.com/repo.git",
+            "git@example.com:user/repo.git",
+            "ssh://example.com/user/repo.git",
+            "file:///tmp/repo",
+        ];
+
+        for example in valid_examples {
+            assert!(
+                is_supported_remote_url(example),
+                "expected {example} to be supported"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_remote_urls() {
+        let invalid_examples = ["", "ftp://example.com/repo.git", "example.com/repo"];
+
+        for example in invalid_examples {
+            assert!(
+                !is_supported_remote_url(example),
+                "expected {example} to be unsupported"
+            );
+        }
+    }
 }
 
 /// Check the unsafe permissions of the tracked files.

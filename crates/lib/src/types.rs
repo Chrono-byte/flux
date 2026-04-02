@@ -3,40 +3,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-/// Secret storage backend
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SecretBackend {
-    /// Environment variable backend
-    Env,
-    /// Age encryption backend
-    Age,
-    /// GPG encryption backend
-    Gpg,
-}
-
-impl FromStr for SecretBackend {
-    type Err = String;
-
-    fn from_str(input: &str) -> Result<Self, String> {
-        match input.to_lowercase().as_str() {
-            "env" => Ok(Self::Env),
-            "age" => Ok(Self::Age),
-            "gpg" => Ok(Self::Gpg),
-            _ => Err(format!("Unknown secret backend: {input}")),
-        }
-    }
-}
-
-/// Secret configuration for a file entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SecretConfig {
-    /// The backend to use for this secret
-    pub backend: SecretBackend,
-    /// The key or handle used by the backend
-    pub key: String,
-}
-
 /// A tracked file entry in the configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -50,36 +16,6 @@ pub struct FileEntry {
     /// Optional conditions controlling when this entry is active
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<ConditionSpec>,
-
-    /// Optional secret configuration. If present, this entry is secret.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub secret: Option<SecretConfig>,
-
-    // Legacy fields - kept for deserialization compatibility only (not part of public API)
-    #[serde(skip_serializing, default)]
-    #[doc(hidden)]
-    pub secret_backend: Option<String>,
-    #[serde(skip_serializing, default)]
-    #[doc(hidden)]
-    pub secret_key: Option<String>,
-}
-
-impl FileEntry {
-    /// Migrate legacy secret fields to modern `SecretConfig`
-    pub fn migrate_legacy_secret(&mut self) {
-        if self.secret.is_none()
-            && let (Some(backend_str), Some(key)) = (&self.secret_backend, &self.secret_key)
-            && let Ok(backend) = backend_str.parse::<SecretBackend>()
-        {
-            self.secret = Some(SecretConfig {
-                backend,
-                key: key.clone(),
-            });
-        }
-        // Clear legacy fields
-        self.secret_backend = None;
-        self.secret_key = None;
-    }
 }
 
 /// Represents a change detected in a file.
@@ -356,15 +292,4 @@ pub struct TrackedFile {
     pub dest_path: PathBuf,
     /// Optional profile name for this file
     pub profile: Option<String>,
-    /// Whether this file is marked as secret in configuration
-    #[allow(dead_code)]
-    pub is_secret: bool,
-    /// Optional secret configuration
-    pub secret: Option<SecretConfig>,
-    /// Optional secret backend identifier (e.g., "env", "age")
-    #[allow(dead_code)]
-    pub secret_backend: Option<String>,
-    /// Optional secret key used by the backend
-    #[allow(dead_code)]
-    pub secret_key: Option<String>,
 }

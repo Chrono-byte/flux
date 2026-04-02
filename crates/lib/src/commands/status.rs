@@ -242,64 +242,6 @@ pub fn check_conflicts(config: &Config, profile: Option<&str>) -> Result<Vec<Sta
     Ok(conflicted)
 }
 
-/// Format file size as a human-readable string.
-#[allow(dead_code)]
-fn format_file_size(size: u64) -> String {
-    if size < 1024 {
-        format!("{size}B")
-    } else if size < 1024 * 1024 {
-        // Convert to KB: divide by 1024, then convert to f64 for decimal formatting
-        // Use integer division first to reduce precision loss
-        let kb = size / 1024;
-        let remainder = size % 1024;
-        // Convert via u32 to avoid precision loss warnings
-        if let (Ok(kb_u32), Ok(remainder_u32)) = (u32::try_from(kb), u32::try_from(remainder)) {
-            let kb_f64 = f64::from(kb_u32) + f64::from(remainder_u32) / 1024.0;
-            format!("{kb_f64:.1}KB")
-        } else {
-            // For extremely large files (> 4TB), show as whole KB
-            format!("{kb}KB")
-        }
-    } else {
-        // Convert to MB: divide by 1024*1024, then convert to f64 for decimal formatting
-        let mb = size / (1024 * 1024);
-        let remainder = size % (1024 * 1024);
-        // Convert via u32 to avoid precision loss warnings
-        if let (Ok(mb_u32), Ok(remainder_u32)) = (u32::try_from(mb), u32::try_from(remainder)) {
-            let mb_f64 = f64::from(mb_u32) + f64::from(remainder_u32) / (1024.0 * 1024.0);
-            format!("{mb_f64:.1}MB")
-        } else {
-            // For extremely large files (> 4PB), show as whole MB
-            format!("{mb}MB")
-        }
-    }
-}
-
-/// Format modification time as a human-readable string.
-#[allow(dead_code)]
-fn format_modified_time(modified_time: SystemTime) -> String {
-    modified_time
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()
-        .map(|duration| {
-            let secs = duration.as_secs();
-            let now = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .ok()
-                .map_or(secs, |n| n.as_secs()); // Fallback: treat "now" as the file time if error.
-            let age = now.saturating_sub(secs);
-
-            if age < 3600 {
-                format!("{}m ago", age / 60)
-            } else if age < 86400 {
-                format!("{}h ago", age / 3600)
-            } else {
-                format!("{}d ago", age / 86400)
-            }
-        })
-        .unwrap_or_default()
-}
-
 /// Display the status of the tracked files with git-like formatting.
 ///
 /// # Parameters

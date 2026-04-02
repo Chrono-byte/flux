@@ -263,25 +263,6 @@
                                     },
                                     "additionalProperties": false
                                 },
-                                "secret": {
-                                    "type": "boolean",
-                                    "description": "Mark this entry as secret. Secret entries are treated with stricter permissions and should not have their contents displayed in logs/diffs.",
-                                    "default": false
-                                },
-                                "secret_backend": {
-                                    "type": "string",
-                                    "description": "Optional secret backend identifier (e.g., \"env\", \"age\", \"sops\").",
-                                    "examples": [
-                                        "env",
-                                        "age",
-                                        "sops",
-                                        "gpg"
-                                    ]
-                                },
-                                "secret_key": {
-                                    "type": "string",
-                                    "description": "Logical secret key or handle used by the configured backend (for example, an environment variable name when using the \"env\" backend)."
-                                }
                             },
                             "required": [
                                 "repo",
@@ -404,25 +385,6 @@
                                 },
                                 "additionalProperties": false
                             },
-                            "secret": {
-                                "type": "boolean",
-                                "description": "Mark this entry as secret. Secret entries are treated with stricter permissions and should not have their contents displayed in logs/diffs.",
-                                "default": false
-                            },
-                            "secret_backend": {
-                                "type": "string",
-                                "description": "Optional secret backend identifier (e.g., \"env\", \"age\", \"sops\").",
-                                "examples": [
-                                    "env",
-                                    "age",
-                                    "sops",
-                                    "gpg"
-                                ]
-                            },
-                            "secret_key": {
-                                "type": "string",
-                                "description": "Logical secret key or handle used by the configured backend (for example, an environment variable name when using the \"env\" backend)."
-                            }
                         },
                         "required": [
                             "repo",
