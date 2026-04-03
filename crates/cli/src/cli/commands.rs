@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::args::{Cli, Commands, MaintainCommands, ProfileCommands, RemoteCommands};
-use flux_lib::utils::path_utils::resolve_symlink_target;
 use flux_lib::{
   commands::apply::StateDiff,
   commands::doctor::HealthReport,
+  commands::untracked::{display_discrepancies, find_discrepancies},
   commands::validate::ValidationReport,
   commands::{
     apply_config, check_status, compare_states, display_diffs, display_health_report,
@@ -28,7 +28,9 @@ use flux_lib::{
     add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
     push_to_remote, read_events, remove_remote, set_remote_url, show_git_status, stage_changes,
   },
+  types::FileEntry,
   utils::home_override,
+  utils::path_utils::{normalize_path, resolve_symlink_target},
   utils::prompt::prompt_commit_message,
   utils::{DotfilesError, DryRun, Result},
 };
@@ -454,11 +456,12 @@ fn detect_repo_symlink_target(
   })?;
 
   let resolved_target = resolve_symlink_target(source_path, &link_target);
-  if !resolved_target.starts_with(repo_path) {
+  let normalized_target = normalize_path(&resolved_target);
+  if !normalized_target.starts_with(normalize_path(repo_path)) {
     return Ok(None);
   }
 
-  Ok(Some(resolved_target))
+  Ok(Some(normalized_target))
 }
 
 /// Register a repo file directly in the configuration without copying.
@@ -481,6 +484,19 @@ fn register_repo_file(
 
   let repo_relative = repo_relative.to_string_lossy().to_string();
 
+  if already_tracked_entry(config, tool, &repo_relative, dest_path, profile) {
+    if dry_run {
+      println!("  [DRY RUN] Entry already tracked: {}", dest_path.display());
+    } else {
+      println!(
+        "  {} Already tracked: {}",
+        "⊘".yellow(),
+        dest_path.display()
+      );
+    }
+    return Ok(());
+  }
+
   if repo_file.is_dir() {
     config.add_folder_to_tool(tool, &repo_relative, dest_path, profile);
   } else {
@@ -498,6 +514,39 @@ fn register_repo_file(
   }
 
   Ok(())
+}
+
+fn already_tracked_entry(
+  config: &Config,
+  tool: &str,
+  repo_relative: &str,
+  dest_path: &Path,
+  profile: Option<&str>,
+) -> bool {
+  let normalized_dest = normalize_path(dest_path);
+  if let Some(tool_config) = config.tools.get(tool) {
+    return tool_config
+      .files
+      .iter()
+      .chain(tool_config.folders.iter())
+      .any(|entry| {
+        entry.repo == repo_relative
+          && entry.profile.as_deref() == profile
+          && normalize_path(&resolve_entry_dest(entry)) == normalized_dest
+      });
+  }
+  false
+}
+
+fn resolve_entry_dest(entry: &FileEntry) -> PathBuf {
+  let entry_dest = Path::new(&entry.dest);
+  if entry_dest.is_absolute() {
+    entry_dest.to_path_buf()
+  } else if let Some(home) = home_override::home_dir() {
+    home.join(entry_dest)
+  } else {
+    entry_dest.to_path_buf()
+  }
 }
 
 #[cfg(test)]
@@ -558,6 +607,39 @@ mod add_command_tests {
     assert_eq!(tool_entry.files[0].dest, dest_path.to_string_lossy());
     Ok(())
   }
+
+  #[test]
+  fn register_repo_file_skips_duplicate_entry() -> Result<(), Box<dyn Error>> {
+    let repo_dir = tempdir()?;
+    let repo_path = repo_dir.path().join("repo");
+    let repo_tool_dir = repo_path.join("codex");
+    let repo_file = repo_tool_dir.join("config.toml");
+    fs::create_dir_all(&repo_tool_dir)?;
+    fs::write(&repo_file, "content")?;
+
+    let mut config = Config::default();
+    config.general.repo_path = repo_path.to_string_lossy().to_string();
+
+    let dest_path = PathBuf::from("/tmp/.codex/config.toml");
+    config.add_file_to_tool("codex", "codex/config.toml", &dest_path, None);
+
+    register_repo_file(
+      &mut config,
+      "codex",
+      &repo_path,
+      repo_file,
+      &dest_path,
+      None,
+      true,
+    )?;
+
+    let tool_entry = config
+      .tools
+      .get("codex")
+      .expect("tool should exist");
+    assert_eq!(tool_entry.files.len(), 1);
+    Ok(())
+  }
 }
 
 /// Handle the apply command.
@@ -583,6 +665,7 @@ pub(super) fn handle_apply_command(
     if diff.as_bool() && !state_diff.files_to_sync.is_empty() {
       display_diffs(&state_diff);
     }
+    report_discrepancies(&config, profile)?;
   } else {
     use flux_lib::commands::ApplyOptions;
     // apply_config now handles history recording internally
@@ -1088,6 +1171,11 @@ pub(super) fn handle_status_command(
     let reports = check_status(&config, profile)?;
     display_status(&reports);
   }
+
+  if !json {
+    report_discrepancies(&config, profile)?;
+  }
+
   Ok(())
 }
 
@@ -1115,6 +1203,8 @@ pub(super) fn handle_doctor_command(profile: Option<&str>) -> Result<()> {
   let health_report = run_health_checks(&config)?;
 
   display_doctor_report(&report, &diff, &health_report);
+
+  report_discrepancies(&config, profile)?;
 
   let mut exit_code = 0;
   if !report.is_valid {
@@ -1162,6 +1252,18 @@ fn display_doctor_report(
   }
 
   display_health_report(health_report);
+}
+
+fn report_discrepancies(
+  config: &Config,
+  profile: Option<&str>,
+) -> Result<()> {
+  let discrepancies = find_discrepancies(config, profile)?;
+  if discrepancies.is_empty() {
+    return Ok(());
+  }
+  display_discrepancies(&discrepancies);
+  Ok(())
 }
 
 /// Execute the command internally.
