@@ -6,6 +6,15 @@
           "allFeatures": true // Enable all features
         }
       }
+    },
+    "tombi": {
+      "binary": {
+        "arguments": [
+          "lsp",
+          "--offline"
+        ]
+      }
     }
-  }
+  },
+  "language_servers": ["!tombi"]
 }
