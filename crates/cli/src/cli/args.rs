@@ -215,7 +215,7 @@ pub enum Commands {
     },
     /// Generate shell completions
     Completion {
-        /// Shell type (zsh, bash, fish, etc.)
+        /// Shell type (zsh supported only)
         shell: String,
     },
     /// Health check and diagnostics (includes validation and state diff)
