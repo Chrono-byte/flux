@@ -1,567 +1,560 @@
 {
-    "$schema": "https://json-schema.org/draft-07/schema#",
-    "$id": "https://github.com/chrono/dotfiles-manager/schemas/config.schema.json",
-    "title": "flux Dotfiles Manager Configuration",
-    "description": "Schema for flux dotfiles manager configuration file (config.toml)",
-    "type": "object",
-    "properties": {
-        "general": {
-            "type": "object",
-            "description": "General configuration settings",
-            "x-taplo": {
-                "initKeys": [
-                    "repo_path",
-                    "current_profile",
-                    "symlink_resolution"
-                ]
-            },
-            "properties": {
-                "repo_path": {
-                    "type": "string",
-                    "description": "Repository path where dotfiles are stored. Supports tilde expansion (~).",
-                    "default": "~/.dotfiles",
-                    "examples": [
-                        "~/.dotfiles",
-                        "/home/user/dotfiles"
-                    ],
-                    "x-taplo": {
-                        "docs": {
-                            "main": "Repository path where dotfiles are stored.\n\nSupports tilde expansion (`~`) which will be expanded to your home directory.\n\n**Examples:**\n- `~/.dotfiles` - Standard location in home directory\n- `/home/user/dotfiles` - Absolute path\n- `~/Documents/dotfiles` - Custom location with tilde expansion"
-                        }
-                    }
-                },
-                "current_profile": {
-                    "type": "string",
-                    "description": "Current active profile name. Must be alphanumeric with underscores or hyphens.",
-                    "default": "default",
-                    "pattern": "^[a-zA-Z0-9_-]+$",
-                    "examples": [
-                        "default",
-                        "work",
-                        "laptop",
-                        "desktop"
-                    ],
-                    "x-taplo": {
-                        "docs": {
-                            "main": "Current active profile name.\n\nProfiles allow you to have different configurations for different environments (work, home, laptop, etc.). Files can be marked as profile-specific in the `tools` section.\n\n**Constraints:**\n- Must be alphanumeric with underscores or hyphens\n- Pattern: `^[a-zA-Z0-9_-]+$`\n\n**Examples:**\n- `default` - Default profile\n- `work` - Work environment\n- `laptop` - Laptop-specific configuration"
-                        }
-                    }
-                },
-                "symlink_resolution": {
-                    "type": "string",
-                    "description": "Symlink resolution strategy",
-                    "enum": [
-                        "auto",
-                        "relative",
-                        "absolute",
-                        "follow",
-                        "replace"
-                    ],
-                    "default": "auto",
-                    "x-taplo": {
-                        "docs": {
-                            "main": "Symlink resolution strategy for managing dotfiles.\n\n- **auto**: Use relative if possible, absolute if needed (recommended)\n- **relative**: Always create relative symlinks\n- **absolute**: Always create absolute symlinks\n- **follow**: Follow existing symlinks, replace target\n- **replace**: Replace symlinks with actual files (copy)",
-                            "enumValues": [
-                                "Use relative if possible, absolute if needed (recommended)",
-                                "Always create relative symlinks",
-                                "Always create absolute symlinks",
-                                "Follow existing symlinks, replace target",
-                                "Replace symlinks with actual files (copy)"
-                            ],
-                            "defaultValue": "Use relative if possible, absolute if needed (recommended)"
-                        }
-                    }
-                },
-                "default_remote": {
-                    "type": "string",
-                    "description": "Default remote name for git push/pull operations (optional, defaults to 'origin')",
-                    "examples": [
-                        "origin",
-                        "upstream",
-                        "github"
-                    ]
-                },
-                "default_branch": {
-                    "type": "string",
-                    "description": "Default branch name for git push/pull operations (optional, defaults to 'main' if no HEAD)",
-                    "examples": [
-                        "main",
-                        "master",
-                        "develop"
-                    ]
-                },
-                "push_timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds for push/pull operations (optional, defaults to 60)",
-                    "minimum": 1,
-                    "examples": [
-                        30,
-                        60,
-                        120
-                    ],
-                    "x-taplo": {
-                        "docs": {
-                            "main": "Timeout in seconds for git push/pull operations.\n\nIf omitted, defaults to 60 seconds. Can be overridden on the command line with `--timeout`.\n\n**Examples:**\n- `30` - 30 second timeout\n- `60` - 60 second timeout (default)\n- `120` - 2 minute timeout for slower connections"
-                        }
-                    }
-                },
-                "include": {
-                    "type": "array",
-                    "description": "List of config files to include and merge. Later files override earlier ones. Paths can be relative (to config file directory), absolute, or use tilde expansion.",
-                    "items": {
-                        "type": "string"
-                    },
-                    "examples": [
-                        [
-                            "profiles/base.toml",
-                            "profiles/laptop.toml"
-                        ],
-                        [
-                            "~/.config/flux/shared.toml",
-                            "../common.toml"
-                        ]
-                    ]
-                }
-            },
-            "required": [
-                "repo_path",
-                "current_profile",
-                "symlink_resolution"
-            ]
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/chrono/dotfiles-manager/schemas/config.schema.json",
+  "title": "flux Dotfiles Manager Configuration",
+  "description": "Schema for flux dotfiles manager configuration file (config.toml)",
+  "type": "object",
+  "properties": {
+    "general": {
+      "type": "object",
+      "description": "General configuration settings",
+      "properties": {
+        "repo_path": {
+          "type": "string",
+          "description": "Repository path where dotfiles are stored. Supports tilde expansion (~).",
+          "default": "~/.dotfiles",
+          "examples": [
+            "~/.dotfiles",
+            "/home/user/dotfiles"
+          ],
+          "x-taplo": {
+            "docs": {
+              "main": "Repository path where dotfiles are stored.\n\nSupports tilde expansion (`~`) which will be expanded to your home directory.\n\n**Examples:**\n- `~/.dotfiles` - Standard location in home directory\n- `/home/user/dotfiles` - Absolute path\n- `~/Documents/dotfiles` - Custom location with tilde expansion"
+            }
+          }
         },
-        "tools": {
-            "type": "object",
-            "description": "Tool configurations. Each key is a tool name, and each value contains files to track.",
-            "x-taplo": {
-                "docs": {
-                    "main": "Tool configurations for managing dotfiles.\n\nEach key is a tool name (e.g., `sway`, `cursor`, `vim`), and each value contains a list of files to track. Files can be profile-specific by adding a `profile` field.\n\n**Example:**\n```toml\n[tools.sway]\nfiles = [\n    { repo = \"config\", dest = \".config/sway/config\" },\n    { repo = \"config.work\", dest = \".config/sway/config\", profile = \"work\" }\n]\n```"
-                }
-            },
-            "additionalProperties": {
-                "type": "object",
-                "properties": {
-                    "files": {
-                        "type": "array",
-                        "description": "List of files to track for this tool",
-                        "x-taplo": {
-                            "initKeys": [
-                                "repo",
-                                "dest"
-                            ]
-                        },
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "repo": {
-                                    "type": "string",
-                                    "description": "Path to file in repository (relative to tool directory in repo)",
-                                    "x-taplo": {
-                                        "docs": {
-                                            "main": "Path to file in repository, relative to the tool's directory.\n\nFor example, if the tool is `sway` and `repo = \"config\"`, the file will be at `{repo_path}/sway/config`."
-                                        }
-                                    }
-                                },
-                                "dest": {
-                                    "type": "string",
-                                    "description": "Destination path in home directory (relative to home, e.g., '.config/sway/config'). Supports simple templates like `{{profile}}`, `{{host}}`, `{{user}}`.",
-                                    "x-taplo": {
-                                        "docs": {
-                                            "main": "Destination path in home directory.\n\nThis is relative to your home directory. Use dot notation for hidden files/directories.\n\nYou can also use simple template variables which will be expanded at runtime:\n- `{{profile}}` - current profile name\n- `{{host}}` - hostname\n- `{{user}}` / `{{username}}` - current user\n- `{{os}}` - operating system identifier\n- custom variables from `[environment.values]`.\n\n**Examples:**\n- `.config/sway/config` - Standard config location\n- `.vimrc` - Vim configuration\n- `.bashrc` - Bash configuration\n- `.config/{{profile}}/sway/config` - Profile-specific path"
-                                        }
-                                    }
-                                },
-                                "profile": {
-                                    "type": "string",
-                                    "description": "Optional profile name. If specified, this file is only active for this profile.",
-                                    "pattern": "^[a-zA-Z0-9_-]+$",
-                                    "x-taplo": {
-                                        "docs": {
-                                            "main": "Optional profile name.\n\nIf specified, this file will only be active when the `current_profile` matches this value. This allows you to have different configurations for different environments.\n\n**Example:**\n```toml\n{ repo = \"config.work\", dest = \".config/sway/config\", profile = \"work\" }\n```\n\nThis file will only be used when `current_profile = \"work\"`."
-                                        }
-                                    }
-                                },
-                                "conditions": {
-                                    "type": "object",
-                                    "description": "Optional conditions that control when this entry is active (OS, host, env vars, available commands). All specified conditions must match.",
-                                    "properties": {
-                                        "os": {
-                                            "type": "array",
-                                            "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
-                                            "items": {
-                                                "type": "string"
-                                            },
-                                            "examples": [
-                                                [
-                                                    "linux"
-                                                ],
-                                                [
-                                                    "linux",
-                                                    "darwin"
-                                                ]
-                                            ]
-                                        },
-                                        "host": {
-                                            "type": "array",
-                                            "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
-                                            "items": {
-                                                "type": "string"
-                                            },
-                                            "examples": [
-                                                [
-                                                    "work-laptop"
-                                                ],
-                                                [
-                                                    "chrono-desktop",
-                                                    "work-laptop"
-                                                ]
-                                            ]
-                                        },
-                                        "env": {
-                                            "type": "object",
-                                            "description": "Required environment variable values. Each key/value pair must match the current environment.",
-                                            "additionalProperties": {
-                                                "type": "string"
-                                            },
-                                            "examples": [
-                                                {
-                                                    "XDG_SESSION_TYPE": "wayland"
-                                                },
-                                                {
-                                                    "FLUX_ENV": "work"
-                                                }
-                                            ]
-                                        },
-                                        "cmd_exists": {
-                                            "type": "array",
-                                            "description": "Commands that must exist in PATH for this entry to apply.",
-                                            "items": {
-                                                "type": "string"
-                                            },
-                                            "examples": [
-                                                [
-                                                    "nvim"
-                                                ],
-                                                [
-                                                    "nvim",
-                                                    "kitty"
-                                                ]
-                                            ]
-                                        }
-                                    },
-                                    "additionalProperties": false
-                                },
-                            },
-                            "required": [
-                                "repo",
-                                "dest"
-                            ],
-                            "additionalProperties": false
-                        }
-                    }
-                },
-                "folders": {
-                    "type": "array",
-                    "description": "List of folders to track for this tool",
-                    "x-taplo": {
-                        "initKeys": [
-                            "repo",
-                            "dest"
-                        ],
-                        "docs": {
-                            "main": "Track an entire directory from the repo into your home directory."
-                        }
-                    },
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "repo": {
-                                "type": "string",
-                                "description": "Path to folder in repository (relative to tool directory in repo)",
-                                "x-taplo": {
-                                    "docs": {
-                                        "main": "Path to a directory inside the tool's repo folder (e.g., `nvim`)."
-                                    }
-                                }
-                            },
-                            "dest": {
-                                "type": "string",
-                                "description": "Destination directory in home (relative to home, e.g., '.config/nvim'). Supports simple templates.",
-                                "x-taplo": {
-                                    "docs": {
-                                        "main": "Destination directory path in the home directory. Use template variables like `{{profile}}` and `{{host}}`."
-                                    }
-                                }
-                            },
-                            "profile": {
-                                "type": "string",
-                                "description": "Optional profile name. If specified, this folder is only active for this profile.",
-                                "pattern": "^[a-zA-Z0-9_-]+$",
-                                "x-taplo": {
-                                    "docs": {
-                                        "main": "Optional profile name for folder entries. Matches when `current_profile` equals this value."
-                                    }
-                                }
-                            },
-                            "conditions": {
-                                "type": "object",
-                                "description": "Optional conditions that control when this entry is active (OS, host, env vars, available commands). All specified conditions must match.",
-                                "properties": {
-                                    "os": {
-                                        "type": "array",
-                                        "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "examples": [
-                                            [
-                                                "linux"
-                                            ],
-                                            [
-                                                "linux",
-                                                "darwin"
-                                            ]
-                                        ]
-                                    },
-                                    "host": {
-                                        "type": "array",
-                                        "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "examples": [
-                                            [
-                                                "work-laptop"
-                                            ],
-                                            [
-                                                "chrono-desktop",
-                                                "work-laptop"
-                                            ]
-                                        ]
-                                    },
-                                    "env": {
-                                        "type": "object",
-                                        "description": "Required environment variable values. Each key/value pair must match the current environment.",
-                                        "additionalProperties": {
-                                            "type": "string"
-                                        },
-                                        "examples": [
-                                            {
-                                                "XDG_SESSION_TYPE": "wayland"
-                                            },
-                                            {
-                                                "FLUX_ENV": "work"
-                                            }
-                                        ]
-                                    },
-                                    "cmd_exists": {
-                                        "type": "array",
-                                        "description": "Commands that must exist in PATH for this entry to apply.",
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "examples": [
-                                            [
-                                                "nvim"
-                                            ],
-                                            [
-                                                "nvim",
-                                                "kitty"
-                                            ]
-                                        ]
-                                    }
-                                },
-                                "additionalProperties": false
-                            },
-                        },
-                        "required": [
-                            "repo",
-                            "dest"
-                        ],
-                        "additionalProperties": false
-                    }
-                },
-                "required": [
-                    "files"
-                ],
-                "additionalProperties": false
-            },
-            "examples": [
-                {
-                    "sway": {
-                        "files": [
-                            {
-                                "repo": "config",
-                                "dest": ".config/sway/config"
-                            }
-                        ]
-                    }
-                },
-                {
-                    "cursor": {
-                        "files": [
-                            {
-                                "repo": "settings.json",
-                                "dest": ".config/Cursor/User/settings.json"
-                            },
-                            {
-                                "repo": "keybindings.json",
-                                "dest": ".config/Cursor/User/keybindings.json"
-                            }
-                        ]
-                    }
-                },
-                {
-                    "sway_work": {
-                        "files": [
-                            {
-                                "repo": "config",
-                                "dest": ".config/sway/config",
-                                "profile": "work"
-                            }
-                        ]
-                    }
-                }
-            ]
+        "current_profile": {
+          "type": "string",
+          "description": "Current active profile name. Must be alphanumeric with underscores or hyphens.",
+          "default": "default",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "examples": [
+            "default",
+            "work",
+            "laptop",
+            "desktop"
+          ],
+          "x-taplo": {
+            "docs": {
+              "main": "Current active profile name.\n\nProfiles allow you to have different configurations for different environments (work, home, laptop, etc.). Files can be marked as profile-specific in the `tools` section.\n\n**Constraints:**\n- Must be alphanumeric with underscores or hyphens\n- Pattern: `^[a-zA-Z0-9_-]+$`\n\n**Examples:**\n- `default` - Default profile\n- `work` - Work environment\n- `laptop` - Laptop-specific configuration"
+            }
+          }
         },
-        "hooks": {
-            "type": "object",
-            "description": "Hooks configuration for executing commands at various points in the apply/commit lifecycle",
-            "x-taplo": {
-                "docs": {
-                    "main": "Hooks allow you to execute shell commands at various points in the apply/commit lifecycle.\n\n**Example:**\n```toml\n[hooks]\npre_apply = [\n    { command = \"echo 'Starting apply...'\" },\n    { command = \"systemctl --user restart some-service\", conditions = { os = [\"linux\"] } }\n]\npost_apply = [\n    { command = \"notify-send 'Dotfiles applied'\" }\n]\npre_commit = [\n    { command = \"git add -A\" }\n]\npost_commit = [\n    { command = \"git push\", timeout = 60 }\n]\n```"
-                }
-            },
-            "properties": {
-                "pre_apply": {
-                    "type": "array",
-                    "description": "Commands to run before applying changes. If any command fails, the apply is aborted.",
-                    "items": {
-                        "$ref": "#/$defs/hookCommand"
-                    }
-                },
-                "post_apply": {
-                    "type": "array",
-                    "description": "Commands to run after applying changes. Failures are non-fatal (warnings only).",
-                    "items": {
-                        "$ref": "#/$defs/hookCommand"
-                    }
-                },
-                "pre_commit": {
-                    "type": "array",
-                    "description": "Commands to run before committing changes. If any command fails, the commit is aborted.",
-                    "items": {
-                        "$ref": "#/$defs/hookCommand"
-                    }
-                },
-                "post_commit": {
-                    "type": "array",
-                    "description": "Commands to run after committing changes. Failures are non-fatal (warnings only).",
-                    "items": {
-                        "$ref": "#/$defs/hookCommand"
-                    }
-                }
-            },
-            "additionalProperties": false
+        "symlink_resolution": {
+          "type": "string",
+          "description": "Symlink resolution strategy",
+          "enum": [
+            "auto",
+            "relative",
+            "absolute",
+            "follow",
+            "replace"
+          ],
+          "default": "auto",
+          "x-taplo": {
+            "docs": {
+              "main": "Symlink resolution strategy for managing dotfiles.\n\n- **auto**: Use relative if possible, absolute if needed (recommended)\n- **relative**: Always create relative symlinks\n- **absolute**: Always create absolute symlinks\n- **follow**: Follow existing symlinks, replace target\n- **replace**: Replace symlinks with actual files (copy)",
+              "enumValues": [
+                "Use relative if possible, absolute if needed (recommended)",
+                "Always create relative symlinks",
+                "Always create absolute symlinks",
+                "Follow existing symlinks, replace target",
+                "Replace symlinks with actual files (copy)"
+              ],
+              "defaultValue": "Use relative if possible, absolute if needed (recommended)"
+            }
+          }
+        },
+        "default_remote": {
+          "type": "string",
+          "description": "Default remote name for git push/pull operations (optional, defaults to 'origin')",
+          "examples": [
+            "origin",
+            "upstream",
+            "github"
+          ]
+        },
+        "default_branch": {
+          "type": "string",
+          "description": "Default branch name for git push/pull operations (optional, defaults to 'main' if no HEAD)",
+          "examples": [
+            "main",
+            "master",
+            "develop"
+          ]
+        },
+        "push_timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds for push/pull operations (optional, defaults to 60)",
+          "minimum": 1,
+          "examples": [
+            30,
+            60,
+            120
+          ],
+          "x-taplo": {
+            "docs": {
+              "main": "Timeout in seconds for git push/pull operations.\n\nIf omitted, defaults to 60 seconds. Can be overridden on the command line with `--timeout`.\n\n**Examples:**\n- `30` - 30 second timeout\n- `60` - 60 second timeout (default)\n- `120` - 2 minute timeout for slower connections"
+            }
+          }
+        },
+        "include": {
+          "type": "array",
+          "description": "List of config files to include and merge. Later files override earlier ones. Paths can be relative (to config file directory), absolute, or use tilde expansion.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [
+            [
+              "profiles/base.toml",
+              "profiles/laptop.toml"
+            ],
+            [
+              "~/.config/flux/shared.toml",
+              "../common.toml"
+            ]
+          ]
         }
+      },
+      "required": [
+        "repo_path",
+        "current_profile",
+        "symlink_resolution"
+      ]
     },
-    "$defs": {
-        "hookCommand": {
-            "type": "object",
-            "description": "A single hook command definition",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "Shell command to execute"
+    "tools": {
+      "type": "object",
+      "description": "Tool configurations. Each key is a tool name, and each value contains files to track.",
+      "x-taplo": {
+        "docs": {
+          "main": "Tool configurations for managing dotfiles.\n\nEach key is a tool name (e.g., `sway`, `cursor`, `vim`), and each value contains a list of files to track. Files can be profile-specific by adding a `profile` field.\n\n**Example:**\n```toml\n[tools.sway]\nfiles = [\n    { repo = \"config\", dest = \".config/sway/config\" },\n    { repo = \"config.work\", dest = \".config/sway/config\", profile = \"work\" }\n]\n```"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "description": "List of files to track for this tool",
+            "x-taplo": {
+              "initKeys": [
+                "repo",
+                "dest"
+              ]
+            },
+            "items": {
+              "type": "object",
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "description": "Path to file in repository (relative to tool directory in repo)",
+                  "x-taplo": {
+                    "docs": {
+                      "main": "Path to file in repository, relative to the tool's directory.\n\nFor example, if the tool is `sway` and `repo = \"config\"`, the file will be at `{repo_path}/sway/config`."
+                    }
+                  }
+                },
+                "dest": {
+                  "type": "string",
+                  "description": "Destination path in home directory (relative to home, e.g., '.config/sway/config'). Supports simple templates like `{{profile}}`, `{{host}}`, `{{user}}`.",
+                  "x-taplo": {
+                    "docs": {
+                      "main": "Destination path in home directory.\n\nThis is relative to your home directory. Use dot notation for hidden files/directories.\n\nYou can also use simple template variables which will be expanded at runtime:\n- `{{profile}}` - current profile name\n- `{{host}}` - hostname\n- `{{user}}` / `{{username}}` - current user\n- `{{os}}` - operating system identifier\n- custom variables from `[environment.values]`.\n\n**Examples:**\n- `.config/sway/config` - Standard config location\n- `.vimrc` - Vim configuration\n- `.bashrc` - Bash configuration\n- `.config/{{profile}}/sway/config` - Profile-specific path"
+                    }
+                  }
+                },
+                "profile": {
+                  "type": "string",
+                  "description": "Optional profile name. If specified, this file is only active for this profile.",
+                  "pattern": "^[a-zA-Z0-9_-]+$",
+                  "x-taplo": {
+                    "docs": {
+                      "main": "Optional profile name.\n\nIf specified, this file will only be active when the `current_profile` matches this value. This allows you to have different configurations for different environments.\n\n**Example:**\n```toml\n{ repo = \"config.work\", dest = \".config/sway/config\", profile = \"work\" }\n```\n\nThis file will only be used when `current_profile = \"work\"`."
+                    }
+                  }
                 },
                 "conditions": {
-                    "$ref": "#/$defs/conditionSpec"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds (default: 30)",
-                    "default": 30,
-                    "minimum": 1
+                  "type": "object",
+                  "description": "Optional conditions that control when this entry is active (OS, host, env vars, available commands). All specified conditions must match.",
+                  "properties": {
+                    "os": {
+                      "type": "array",
+                      "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        [
+                          "linux"
+                        ],
+                        [
+                          "linux",
+                          "darwin"
+                        ]
+                      ]
+                    },
+                    "host": {
+                      "type": "array",
+                      "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        [
+                          "work-laptop"
+                        ],
+                        [
+                          "chrono-desktop",
+                          "work-laptop"
+                        ]
+                      ]
+                    },
+                    "env": {
+                      "type": "object",
+                      "description": "Required environment variable values. Each key/value pair must match the current environment.",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        {
+                          "XDG_SESSION_TYPE": "wayland"
+                        },
+                        {
+                          "FLUX_ENV": "work"
+                        }
+                      ]
+                    },
+                    "cmd_exists": {
+                      "type": "array",
+                      "description": "Commands that must exist in PATH for this entry to apply.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "examples": [
+                        [
+                          "nvim"
+                        ],
+                        [
+                          "nvim",
+                          "kitty"
+                        ]
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
                 }
-            },
-            "required": [
-                "command"
-            ],
-            "additionalProperties": false
+              },
+              "required": [
+                "repo",
+                "dest"
+              ],
+              "additionalProperties": false
+            }
+          }
         },
-        "conditionSpec": {
+        "folders": {
+          "type": "array",
+          "description": "List of folders to track for this tool",
+          "x-taplo": {
+            "initKeys": [
+              "repo",
+              "dest"
+            ],
+            "docs": {
+              "main": "Track an entire directory from the repo into your home directory."
+            }
+          },
+          "items": {
             "type": "object",
-            "description": "Conditions that control when a config entry should be active. All specified condition groups must match.",
             "properties": {
-                "os": {
+              "repo": {
+                "type": "string",
+                "description": "Path to folder in repository (relative to tool directory in repo)",
+                "x-taplo": {
+                  "docs": {
+                    "main": "Path to a directory inside the tool's repo folder (e.g., `nvim`)."
+                  }
+                }
+              },
+              "dest": {
+                "type": "string",
+                "description": "Destination directory in home (relative to home, e.g., '.config/nvim'). Supports simple templates.",
+                "x-taplo": {
+                  "docs": {
+                    "main": "Destination directory path in the home directory. Use template variables like `{{profile}}` and `{{host}}`."
+                  }
+                }
+              },
+              "profile": {
+                "type": "string",
+                "description": "Optional profile name. If specified, this folder is only active for this profile.",
+                "pattern": "^[a-zA-Z0-9_-]+$",
+                "x-taplo": {
+                  "docs": {
+                    "main": "Optional profile name for folder entries. Matches when `current_profile` equals this value."
+                  }
+                }
+              },
+              "conditions": {
+                "type": "object",
+                "description": "Optional conditions that control when this entry is active (OS, host, env vars, available commands). All specified conditions must match.",
+                "properties": {
+                  "os": {
                     "type": "array",
                     "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
                     "items": {
-                        "type": "string"
+                      "type": "string"
                     },
                     "examples": [
-                        [
-                            "linux"
-                        ],
-                        [
-                            "darwin"
-                        ],
-                        [
-                            "linux",
-                            "darwin"
-                        ]
+                      [
+                        "linux"
+                      ],
+                      [
+                        "linux",
+                        "darwin"
+                      ]
                     ]
-                },
-                "host": {
+                  },
+                  "host": {
                     "type": "array",
                     "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
                     "items": {
-                        "type": "string"
+                      "type": "string"
                     },
                     "examples": [
-                        [
-                            "laptop"
-                        ],
-                        [
-                            "desktop",
-                            "workstation"
-                        ]
+                      [
+                        "work-laptop"
+                      ],
+                      [
+                        "chrono-desktop",
+                        "work-laptop"
+                      ]
                     ]
-                },
-                "env": {
+                  },
+                  "env": {
                     "type": "object",
-                    "description": "Required environment variable values. All specified variables must match.",
+                    "description": "Required environment variable values. Each key/value pair must match the current environment.",
                     "additionalProperties": {
-                        "type": "string"
+                      "type": "string"
                     },
                     "examples": [
-                        {
-                            "TERM": "xterm-256color",
-                            "EDITOR": "nvim"
-                        }
+                      {
+                        "XDG_SESSION_TYPE": "wayland"
+                      },
+                      {
+                        "FLUX_ENV": "work"
+                      }
                     ]
-                },
-                "cmd_exists": {
+                  },
+                  "cmd_exists": {
                     "type": "array",
-                    "description": "List of commands that must exist in PATH. If omitted, no command checks are performed.",
+                    "description": "Commands that must exist in PATH for this entry to apply.",
                     "items": {
-                        "type": "string"
+                      "type": "string"
                     },
                     "examples": [
-                        [
-                            "docker"
-                        ],
-                        [
-                            "nvim",
-                            "tmux"
-                        ]
+                      [
+                        "nvim"
+                      ],
+                      [
+                        "nvim",
+                        "kitty"
+                      ]
                     ]
-                }
+                  }
+                },
+                "additionalProperties": false
+              }
             },
+            "required": [
+              "repo",
+              "dest"
+            ],
             "additionalProperties": false
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "additionalProperties": false
+      },
+      "examples": [
+        {
+          "sway": {
+            "files": [
+              {
+                "repo": "config",
+                "dest": ".config/sway/config"
+              }
+            ]
+          }
+        },
+        {
+          "cursor": {
+            "files": [
+              {
+                "repo": "settings.json",
+                "dest": ".config/Cursor/User/settings.json"
+              },
+              {
+                "repo": "keybindings.json",
+                "dest": ".config/Cursor/User/keybindings.json"
+              }
+            ]
+          }
+        },
+        {
+          "sway_work": {
+            "files": [
+              {
+                "repo": "config",
+                "dest": ".config/sway/config",
+                "profile": "work"
+              }
+            ]
+          }
         }
+      ]
     },
-    "required": [
-        "general"
-    ],
-    "additionalProperties": false
+    "hooks": {
+      "type": "object",
+      "description": "Hooks configuration for executing commands at various points in the apply/commit lifecycle",
+      "x-taplo": {
+        "docs": {
+          "main": "Hooks allow you to execute shell commands at various points in the apply/commit lifecycle.\n\n**Example:**\n```toml\n[hooks]\npre_apply = [\n    { command = \"echo 'Starting apply...'\" },\n    { command = \"systemctl --user restart some-service\", conditions = { os = [\"linux\"] } }\n]\npost_apply = [\n    { command = \"notify-send 'Dotfiles applied'\" }\n]\npre_commit = [\n    { command = \"git add -A\" }\n]\npost_commit = [\n    { command = \"git push\", timeout = 60 }\n]\n```"
+        }
+      },
+      "properties": {
+        "pre_apply": {
+          "type": "array",
+          "description": "Commands to run before applying changes. If any command fails, the apply is aborted.",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        },
+        "post_apply": {
+          "type": "array",
+          "description": "Commands to run after applying changes. Failures are non-fatal (warnings only).",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        },
+        "pre_commit": {
+          "type": "array",
+          "description": "Commands to run before committing changes. If any command fails, the commit is aborted.",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        },
+        "post_commit": {
+          "type": "array",
+          "description": "Commands to run after committing changes. Failures are non-fatal (warnings only).",
+          "items": {
+            "$ref": "#/$defs/hookCommand"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "hookCommand": {
+      "type": "object",
+      "description": "A single hook command definition",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute"
+        },
+        "conditions": {
+          "$ref": "#/$defs/conditionSpec"
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Timeout in seconds (default: 30)",
+          "default": 30,
+          "minimum": 1
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    },
+    "conditionSpec": {
+      "type": "object",
+      "description": "Conditions that control when a config entry should be active. All specified condition groups must match.",
+      "properties": {
+        "os": {
+          "type": "array",
+          "description": "List of operating systems where this entry applies (e.g., \"linux\", \"darwin\"). If omitted, matches all OSes.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [
+            [
+              "linux"
+            ],
+            [
+              "darwin"
+            ],
+            [
+              "linux",
+              "darwin"
+            ]
+          ]
+        },
+        "host": {
+          "type": "array",
+          "description": "List of hostnames where this entry applies. If omitted, matches all hosts.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [
+            [
+              "laptop"
+            ],
+            [
+              "desktop",
+              "workstation"
+            ]
+          ]
+        },
+        "env": {
+          "type": "object",
+          "description": "Required environment variable values. All specified variables must match.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "examples": [
+            {
+              "TERM": "xterm-256color",
+              "EDITOR": "nvim"
+            }
+          ]
+        },
+        "cmd_exists": {
+          "type": "array",
+          "description": "List of commands that must exist in PATH. If omitted, no command checks are performed.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [
+            [
+              "docker"
+            ],
+            [
+              "nvim",
+              "tmux"
+            ]
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "general"
+  ],
+  "additionalProperties": false
 }
