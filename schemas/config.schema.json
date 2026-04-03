@@ -372,6 +372,28 @@
             }
           }
         },
+        "oneOf": [
+          {
+            "required": [
+              "files"
+            ],
+            "not": {
+              "required": [
+                "folders"
+              ]
+            }
+          },
+          {
+            "required": [
+              "folders"
+            ],
+            "not": {
+              "required": [
+                "files"
+              ]
+            }
+          }
+        ],
         "additionalProperties": false
       },
       "examples": [
