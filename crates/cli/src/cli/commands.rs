@@ -549,99 +549,6 @@ fn resolve_entry_dest(entry: &FileEntry) -> PathBuf {
   }
 }
 
-#[cfg(test)]
-mod add_command_tests {
-  use super::{detect_repo_symlink_target, register_repo_file};
-  use flux_lib::config::Config;
-  use std::{error::Error, fs, path::PathBuf};
-  use tempfile::tempdir;
-
-  #[cfg(unix)]
-  #[test]
-  fn detect_repo_symlink_target_detects_repo_link() -> Result<(), Box<dyn Error>> {
-    let repo_dir = tempdir()?;
-    let repo_path = repo_dir.path().join("repo");
-    let repo_tool_dir = repo_path.join("codex");
-    let repo_file = repo_tool_dir.join("config.toml");
-    fs::create_dir_all(&repo_tool_dir)?;
-    fs::write(&repo_file, "config")?;
-
-    let link_dir = tempdir()?;
-    let link_path = link_dir.path().join("config.toml");
-    std::os::unix::fs::symlink(&repo_file, &link_path)?;
-
-    let detected = detect_repo_symlink_target(&link_path, &repo_path)?;
-    assert_eq!(detected, Some(repo_file));
-    Ok(())
-  }
-
-  #[test]
-  fn register_repo_file_adds_entry_under_tool() -> Result<(), Box<dyn Error>> {
-    let repo_dir = tempdir()?;
-    let repo_path = repo_dir.path().join("repo");
-    let repo_tool_dir = repo_path.join("codex");
-    let repo_file = repo_tool_dir.join("config.toml");
-    fs::create_dir_all(&repo_tool_dir)?;
-    fs::write(&repo_file, "content")?;
-
-    let mut config = Config::default();
-    config.general.repo_path = repo_path.to_string_lossy().to_string();
-
-    let dest_path = PathBuf::from("/tmp/.codex/config.toml");
-    register_repo_file(
-      &mut config,
-      "codex",
-      &repo_path,
-      repo_file.clone(),
-      &dest_path,
-      None,
-      true,
-    )?;
-
-    let tool_entry = config
-      .tools
-      .get("codex")
-      .expect("tool should exist");
-    assert_eq!(tool_entry.files.len(), 1);
-    assert_eq!(tool_entry.files[0].repo, "codex/config.toml");
-    assert_eq!(tool_entry.files[0].dest, dest_path.to_string_lossy());
-    Ok(())
-  }
-
-  #[test]
-  fn register_repo_file_skips_duplicate_entry() -> Result<(), Box<dyn Error>> {
-    let repo_dir = tempdir()?;
-    let repo_path = repo_dir.path().join("repo");
-    let repo_tool_dir = repo_path.join("codex");
-    let repo_file = repo_tool_dir.join("config.toml");
-    fs::create_dir_all(&repo_tool_dir)?;
-    fs::write(&repo_file, "content")?;
-
-    let mut config = Config::default();
-    config.general.repo_path = repo_path.to_string_lossy().to_string();
-
-    let dest_path = PathBuf::from("/tmp/.codex/config.toml");
-    config.add_file_to_tool("codex", "codex/config.toml", &dest_path, None);
-
-    register_repo_file(
-      &mut config,
-      "codex",
-      &repo_path,
-      repo_file,
-      &dest_path,
-      None,
-      true,
-    )?;
-
-    let tool_entry = config
-      .tools
-      .get("codex")
-      .expect("tool should exist");
-    assert_eq!(tool_entry.files.len(), 1);
-    Ok(())
-  }
-}
-
 /// Handle the apply command.
 ///
 /// # Errors
@@ -1254,6 +1161,7 @@ fn display_doctor_report(
   display_health_report(health_report);
 }
 
+/// Report any discrepancies between the configuration and the system state.
 fn report_discrepancies(
   config: &Config,
   profile: Option<&str>,
@@ -1449,5 +1357,98 @@ pub(super) fn handle_completion_command(shell: &str) {
       shell
     );
     std::process::exit(1);
+  }
+}
+
+#[cfg(test)]
+mod add_command_tests {
+  use super::{detect_repo_symlink_target, register_repo_file};
+  use flux_lib::config::Config;
+  use std::{error::Error, fs, path::PathBuf};
+  use tempfile::tempdir;
+
+  #[cfg(unix)]
+  #[test]
+  fn detect_repo_symlink_target_detects_repo_link() -> Result<(), Box<dyn Error>> {
+    let repo_dir = tempdir()?;
+    let repo_path = repo_dir.path().join("repo");
+    let repo_tool_dir = repo_path.join("codex");
+    let repo_file = repo_tool_dir.join("config.toml");
+    fs::create_dir_all(&repo_tool_dir)?;
+    fs::write(&repo_file, "config")?;
+
+    let link_dir = tempdir()?;
+    let link_path = link_dir.path().join("config.toml");
+    std::os::unix::fs::symlink(&repo_file, &link_path)?;
+
+    let detected = detect_repo_symlink_target(&link_path, &repo_path)?;
+    assert_eq!(detected, Some(repo_file));
+    Ok(())
+  }
+
+  #[test]
+  fn register_repo_file_adds_entry_under_tool() -> Result<(), Box<dyn Error>> {
+    let repo_dir = tempdir()?;
+    let repo_path = repo_dir.path().join("repo");
+    let repo_tool_dir = repo_path.join("codex");
+    let repo_file = repo_tool_dir.join("config.toml");
+    fs::create_dir_all(&repo_tool_dir)?;
+    fs::write(&repo_file, "content")?;
+
+    let mut config = Config::default();
+    config.general.repo_path = repo_path.to_string_lossy().to_string();
+
+    let dest_path = PathBuf::from("/tmp/.codex/config.toml");
+    register_repo_file(
+      &mut config,
+      "codex",
+      &repo_path,
+      repo_file.clone(),
+      &dest_path,
+      None,
+      true,
+    )?;
+
+    let tool_entry = config
+      .tools
+      .get("codex")
+      .expect("tool should exist");
+    assert_eq!(tool_entry.files.len(), 1);
+    assert_eq!(tool_entry.files[0].repo, "codex/config.toml");
+    assert_eq!(tool_entry.files[0].dest, dest_path.to_string_lossy());
+    Ok(())
+  }
+
+  #[test]
+  fn register_repo_file_skips_duplicate_entry() -> Result<(), Box<dyn Error>> {
+    let repo_dir = tempdir()?;
+    let repo_path = repo_dir.path().join("repo");
+    let repo_tool_dir = repo_path.join("codex");
+    let repo_file = repo_tool_dir.join("config.toml");
+    fs::create_dir_all(&repo_tool_dir)?;
+    fs::write(&repo_file, "content")?;
+
+    let mut config = Config::default();
+    config.general.repo_path = repo_path.to_string_lossy().to_string();
+
+    let dest_path = PathBuf::from("/tmp/.codex/config.toml");
+    config.add_file_to_tool("codex", "codex/config.toml", &dest_path, None);
+
+    register_repo_file(
+      &mut config,
+      "codex",
+      &repo_path,
+      repo_file,
+      &dest_path,
+      None,
+      true,
+    )?;
+
+    let tool_entry_files_len = config
+      .tools
+      .get("codex")
+      .map(|entry| entry.files.len());
+    assert_eq!(tool_entry_files_len, Some(1));
+    Ok(())
   }
 }
