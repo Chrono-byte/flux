@@ -10,10 +10,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.5", features = ["derive"] }
-clap_complete = "4.5"
 colored = "3.0"
 dialoguer = "0.12"
 dirs = "6.0"
@@ -24,7 +21,6 @@ indicatif = "0.18"
 log = "0.4"
 nix = { version = "0.31.2", features = ["fs", "process"] }
 pathdiff = "0.2"
-rayon = "1.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 shellexpand = "3.1"
