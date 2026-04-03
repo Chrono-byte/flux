@@ -1061,93 +1061,20 @@ fn display_doctor_report(
 fn execute_internal(cmd: Commands) -> Result<()> {
   match cmd {
     Commands::Init { repo_path } => handle_init_command(repo_path)?,
-    Commands::Add {
-      tool,
-      file,
-      dest,
-      profile,
-      dry_run,
-      from_repo,
-    } => {
-      handle_add_command(
-        &tool,
-        &file,
-        dest.as_deref(),
-        profile.as_deref(),
-        dry_run,
-        from_repo,
-      )?;
-    }
-    Commands::Commit {
-      profile,
-      message,
-      dry_run,
-      verbose,
-    } => {
-      handle_commit_command(profile.as_deref(), message.as_deref(), dry_run, verbose)?;
-    }
+    add @ Commands::Add { .. } => run_add_command(add)?,
+    commit @ Commands::Commit { .. } => run_commit_command(commit)?,
     Commands::Rm {
       tool,
       file,
       dry_run,
     } => handle_rm_command(&tool, &file, dry_run)?,
     Commands::LsFiles { profile } => handle_ls_files_command(profile.as_deref())?,
-    Commands::Apply {
-      profile,
-      dry_run,
-      diff,
-      yes,
-      description,
-      force,
-    } => handle_apply_command(
-      profile.as_deref(),
-      Toggle::from_bool(dry_run),
-      Toggle::from_bool(diff),
-      Toggle::from_bool(yes),
-      description.as_deref(),
-      Toggle::from_bool(force),
-    )?,
-    Commands::History {
-      limit,
-      profile,
-      kind,
-      since,
-      json,
-    } => {
-      handle_history_command(
-        limit,
-        profile.as_deref(),
-        kind.as_deref(),
-        since.as_deref(),
-        json,
-      )?;
-    }
+    apply @ Commands::Apply { .. } => run_apply_command(apply)?,
+    history @ Commands::History { .. } => run_history_command(history)?,
     Commands::Profile { command } => handle_profile_command(command)?,
     Commands::Remote { command } => handle_remote_command(command)?,
-    Commands::Push {
-      remote,
-      branch,
-      set_upstream,
-      dry_run,
-      timeout,
-    } => {
-      tokio::runtime::Runtime::new()?.block_on(handle_push_command(
-        remote,
-        branch,
-        set_upstream,
-        dry_run,
-        timeout,
-      ))?;
-    }
-    Commands::Pull {
-      remote,
-      branch,
-      dry_run,
-      timeout,
-    } => {
-      tokio::runtime::Runtime::new()?
-        .block_on(handle_pull_command(remote, branch, dry_run, timeout))?;
-    }
+    push @ Commands::Push { .. } => run_push_command(push)?,
+    pull @ Commands::Pull { .. } => run_pull_command(pull)?,
     Commands::Status {
       profile,
       conflicts,
@@ -1164,6 +1091,128 @@ fn execute_internal(cmd: Commands) -> Result<()> {
   }
 
   Ok(())
+}
+
+/// Extract arguments from `Commands::Add` and run the add handler.
+fn run_add_command(cmd: Commands) -> Result<()> {
+  if let Commands::Add {
+    tool,
+    file,
+    dest,
+    profile,
+    dry_run,
+    from_repo,
+  } = cmd
+  {
+    handle_add_command(
+      &tool,
+      &file,
+      dest.as_deref(),
+      profile.as_deref(),
+      dry_run,
+      from_repo,
+    )
+  } else {
+    unreachable!("run_add_command received unexpected variant");
+  }
+}
+
+/// Extract arguments from `Commands::Commit` and run the commit handler.
+fn run_commit_command(cmd: Commands) -> Result<()> {
+  if let Commands::Commit {
+    profile,
+    message,
+    dry_run,
+    verbose,
+  } = cmd
+  {
+    handle_commit_command(profile.as_deref(), message.as_deref(), dry_run, verbose)
+  } else {
+    unreachable!("run_commit_command received unexpected variant");
+  }
+}
+
+/// Extract arguments from `Commands::Apply` and run the apply handler.
+fn run_apply_command(cmd: Commands) -> Result<()> {
+  if let Commands::Apply {
+    profile,
+    dry_run,
+    diff,
+    yes,
+    description,
+    force,
+  } = cmd
+  {
+    handle_apply_command(
+      profile.as_deref(),
+      Toggle::from_bool(dry_run),
+      Toggle::from_bool(diff),
+      Toggle::from_bool(yes),
+      description.as_deref(),
+      Toggle::from_bool(force),
+    )
+  } else {
+    unreachable!("run_apply_command received unexpected variant");
+  }
+}
+
+/// Extract arguments from `Commands::History` and run the history handler.
+fn run_history_command(cmd: Commands) -> Result<()> {
+  if let Commands::History {
+    limit,
+    profile,
+    kind,
+    since,
+    json,
+  } = cmd
+  {
+    handle_history_command(
+      limit,
+      profile.as_deref(),
+      kind.as_deref(),
+      since.as_deref(),
+      json,
+    )
+  } else {
+    unreachable!("run_history_command received unexpected variant");
+  }
+}
+
+/// Extract arguments from `Commands::Push` and run the push handler.
+fn run_push_command(cmd: Commands) -> Result<()> {
+  if let Commands::Push {
+    remote,
+    branch,
+    set_upstream,
+    dry_run,
+    timeout,
+  } = cmd
+  {
+    tokio::runtime::Runtime::new()?.block_on(handle_push_command(
+      remote,
+      branch,
+      set_upstream,
+      dry_run,
+      timeout,
+    ))
+  } else {
+    unreachable!("run_push_command received unexpected variant");
+  }
+}
+
+/// Extract arguments from `Commands::Pull` and run the pull handler.
+fn run_pull_command(cmd: Commands) -> Result<()> {
+  if let Commands::Pull {
+    remote,
+    branch,
+    dry_run,
+    timeout,
+  } = cmd
+  {
+    tokio::runtime::Runtime::new()?.block_on(handle_pull_command(remote, branch, dry_run, timeout))
+  } else {
+    unreachable!("run_pull_command received unexpected variant");
+  }
 }
 
 impl Commands {

@@ -1212,10 +1212,34 @@ pub fn show_git_status(git_repo: &GitRepository) -> Result<()> {
   // Check for uncommitted changes
   let changes = detect_changes(git_repo)?;
   let staged_count = changes.len();
-  let has_uncommitted = !changes.is_empty();
 
-  // Check ahead/behind and get upstream name if upstream exists
-  let (ahead, behind, upstream_name) = if let Ok(upstream_branch) = upstream {
+  let (ahead, behind, upstream_name) = calculate_upstream_status(git_repo, head_oid, upstream)?;
+
+  // Display git status
+  print_status_header(
+    &branch_name,
+    upstream_name.as_deref(),
+    &short_id,
+    &head_commit,
+  );
+
+  // Show ahead/behind
+  print_ahead_behind(ahead, behind);
+
+  // Show uncommitted changes
+  print_changes(&changes, git_repo, staged_count)?;
+
+  println!();
+  Ok(())
+}
+
+/// Compute ahead/behind counts and upstream name for the current branch.
+fn calculate_upstream_status(
+  git_repo: &GitRepository,
+  head_oid: git2::Oid,
+  upstream: std::result::Result<git2::Branch<'_>, git2::Error>,
+) -> Result<(Option<usize>, Option<usize>, Option<String>)> {
+  if let Ok(upstream_branch) = upstream {
     let upstream_oid = upstream_branch.get().target().ok_or_else(|| {
       git2::Error::new(
         git2::ErrorCode::NotFound,
@@ -1231,29 +1255,44 @@ pub fn show_git_status(git_repo: &GitRepository) -> Result<()> {
       .get()
       .name()
       .map_or_else(|| "unknown".to_string(), ToString::to_string);
-    (Some(ahead), Some(behind), Some(upstream_name))
+    Ok((Some(ahead), Some(behind), Some(upstream_name)))
   } else {
-    (None, None, None)
-  };
+    Ok((None, None, None))
+  }
+}
 
-  // Display git status
+/// Render the branch header for the git status output.
+fn print_status_header(
+  branch_name: &str,
+  upstream_name: Option<&str>,
+  short_id: &str,
+  head_commit: &git2::Commit,
+) {
   println!("\n{}", "Git Repository Status:".bold().cyan());
   println!("{}", "=".repeat(60).cyan());
   println!("  Branch: {}", branch_name.cyan());
 
-  if let Some(ref upstream_name) = upstream_name {
+  if let Some(upstream_name) = upstream_name {
     println!("  Upstream: {}", upstream_name.dimmed());
   }
 
-  println!("  HEAD: {} {}", short_id.cyan(), {
-    let message_raw = head_commit.message().unwrap_or("(no message)");
-    message_raw
+  println!(
+    "  HEAD: {} {}",
+    short_id.cyan(),
+    head_commit
+      .message()
+      .unwrap_or("(no message)")
       .lines()
       .next()
       .unwrap_or("(no message)")
-  });
+  );
+}
 
-  // Show ahead/behind
+/// Display ahead/behind information when the branch diverges.
+fn print_ahead_behind(
+  ahead: Option<usize>,
+  behind: Option<usize>,
+) {
   if let (Some(ahead_count), Some(behind_count)) = (ahead, behind)
     && (ahead_count > 0 || behind_count > 0)
   {
@@ -1276,24 +1315,32 @@ pub fn show_git_status(git_repo: &GitRepository) -> Result<()> {
       println!("  {}", status_parts.join(", "));
     }
   }
+}
 
-  // Show uncommitted changes
-  if has_uncommitted {
+/// Describe staged/unstaged changes or report a clean tree.
+fn print_changes(
+  changes: &[FileChange],
+  git_repo: &GitRepository,
+  staged_count: usize,
+) -> Result<()> {
+  if changes.is_empty() {
+    println!("\n  {} Working tree clean", "✓".green());
+  } else {
     println!(
       "\n  {} {} uncommitted change(s):",
       "→".yellow(),
       staged_count
     );
-    for change in &changes {
+    let repo_root = git_repo
+      .path()
+      .parent()
+      .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
+    for change in changes {
       let (icon, path) = match change {
         FileChange::Added(path) => ("+", path),
         FileChange::Modified(path) => ("M", path),
         FileChange::Deleted(path) => ("-", path),
       };
-      let repo_root = git_repo
-        .path()
-        .parent()
-        .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
       if let Ok(relative) = path.strip_prefix(repo_root) {
         println!(
           "    {} {}",
@@ -1308,10 +1355,6 @@ pub fn show_git_status(git_repo: &GitRepository) -> Result<()> {
         );
       }
     }
-  } else {
-    println!("\n  {} Working tree clean", "✓".green());
   }
-
-  println!();
   Ok(())
 }

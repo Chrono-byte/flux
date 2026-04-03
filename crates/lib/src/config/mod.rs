@@ -13,7 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::types::{Condition, ConditionGroup, ConditionSpec, FileEntry, SymlinkResolution};
+use crate::types::{
+  Condition, ConditionGroup, ConditionSpec, FileEntry, HookCommand, SymlinkResolution,
+};
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::home_override;
 use crate::utils::system;
@@ -157,54 +159,103 @@ impl Config {
       .canonicalize()
       .unwrap_or_else(|_| config_path.to_path_buf());
 
-    // Detect include cycles
-    if visited.contains(&config_path) {
+    Self::ensure_no_cycle(&config_path, visited)?;
+    visited.push(config_path.clone());
+
+    let result = (|| -> Result<Self> {
+      if !config_path.exists() {
+        return Self::handle_missing_config(visited.len(), &config_path);
+      }
+
+      let mut current = Self::parse_config(&Self::read_config_file(&config_path)?, &config_path)?;
+      Self::migrate_legacy_conditions(&mut current);
+
+      let base_dir = config_path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+      let merged_include =
+        Self::merge_included_configs(&base_dir, current.general.include.clone(), visited)?;
+      current.general.include = None;
+
+      let result = match merged_include {
+        Some(base) => Self::merge_configs(base, current),
+        None => current,
+      };
+
+      result.validate()?;
+      Ok(result)
+    })();
+
+    let _ = visited.pop();
+
+    result
+  }
+
+  /// Return an error if the path has already been loaded in this recursion.
+  fn ensure_no_cycle(
+    config_path: &Path,
+    visited: &[PathBuf],
+  ) -> Result<()> {
+    if visited.contains(&config_path.to_path_buf()) {
       let mut chain: Vec<String> = visited
         .iter()
         .map(|path| path.display().to_string())
         .collect();
       chain.push(config_path.display().to_string());
-      return Err(DotfilesError::Config(format!(
+      Err(DotfilesError::Config(format!(
         "Detected configuration include cycle: {}",
         chain.join(" -> ")
-      )));
+      )))
+    } else {
+      Ok(())
     }
-    visited.push(config_path.clone());
+  }
 
-    if !config_path.exists() {
-      // For the root config, create a default file if it doesn't exist.
-      // For included configs, treat missing files as an error.
-      if visited.len() == 1 {
-        let config = Self::default();
-        config.save(false)?;
-        let _ = visited.pop();
-        return Ok(config);
-      }
-      let _ = visited.pop();
-      return Err(DotfilesError::Config(format!(
+  /// Create the root config if missing or error for included files.
+  fn handle_missing_config(
+    visited_len: usize,
+    config_path: &Path,
+  ) -> Result<Self> {
+    if visited_len == 1 {
+      let config = Self::default();
+      config.save(false)?;
+      Ok(config)
+    } else {
+      Err(DotfilesError::Config(format!(
         "Included config file does not exist: {}",
         config_path.display()
-      )));
+      )))
     }
+  }
 
-    let content = fs::read_to_string(&config_path).map_err(|error| {
+  /// Read the config file contents or map any I/O errors.
+  fn read_config_file(config_path: &Path) -> Result<String> {
+    fs::read_to_string(config_path).map_err(|error| {
       DotfilesError::Config(format!(
         "Failed to read config {}: {}",
         config_path.display(),
         error
       ))
-    })?;
+    })
+  }
 
-    let mut current: Self = toml::from_str(&content).map_err(|error| {
+  /// Parse TOML content into a `Config`, wrapping parsing errors.
+  fn parse_config(
+    content: &str,
+    config_path: &Path,
+  ) -> Result<Self> {
+    toml::from_str(content).map_err(|error| {
       DotfilesError::Config(format!(
         "Failed to parse config {}: {}",
         config_path.display(),
         error
       ))
-    })?;
+    })
+  }
 
-    // Migrate legacy condition fields in file entries
-    for tool_config in current.tools.values_mut() {
+  /// Update any stored condition specs to the latest schema.
+  fn migrate_legacy_conditions(config: &mut Self) {
+    for tool_config in config.tools.values_mut() {
       for entry in &mut tool_config.files {
         if let Some(ref mut conditions) = entry.conditions {
           conditions.migrate_legacy();
@@ -212,69 +263,45 @@ impl Config {
       }
     }
 
-    // Migrate hooks conditions
-    if let Some(ref mut hooks) = current.hooks {
-      if let Some(ref mut pre_apply) = hooks.pre_apply {
-        for hook in pre_apply {
-          if let Some(ref mut conditions) = hook.conditions {
-            conditions.migrate_legacy();
-          }
-        }
-      }
-      if let Some(ref mut post_apply) = hooks.post_apply {
-        for hook in post_apply {
-          if let Some(ref mut conditions) = hook.conditions {
-            conditions.migrate_legacy();
-          }
-        }
-      }
-      if let Some(ref mut pre_commit) = hooks.pre_commit {
-        for hook in pre_commit {
-          if let Some(ref mut conditions) = hook.conditions {
-            conditions.migrate_legacy();
-          }
-        }
-      }
-      if let Some(ref mut post_commit) = hooks.post_commit {
-        for hook in post_commit {
-          if let Some(ref mut conditions) = hook.conditions {
-            conditions.migrate_legacy();
-          }
+    if let Some(ref mut hooks) = config.hooks {
+      Self::migrate_hook_group(&mut hooks.pre_apply);
+      Self::migrate_hook_group(&mut hooks.post_apply);
+      Self::migrate_hook_group(&mut hooks.pre_commit);
+      Self::migrate_hook_group(&mut hooks.post_commit);
+    }
+  }
+
+  /// Migrate any per-hook condition specs.
+  fn migrate_hook_group(group: &mut Option<Vec<HookCommand>>) {
+    if let Some(hooks) = group {
+      for hook in hooks {
+        if let Some(ref mut conditions) = hook.conditions {
+          conditions.migrate_legacy();
         }
       }
     }
+  }
 
-    // First, load and merge any included configs (if present).
-    let mut merged: Option<Self> = None;
-    if let Some(include_paths) = current.general.include.clone() {
-      let base_dir = config_path
-        .parent()
-        .map_or_else(|| PathBuf::from("."), PathBuf::from);
-
+  /// Load and merge any included configs listed in `general.include`.
+  fn merge_included_configs(
+    base_dir: &Path,
+    include_paths: Option<Vec<String>>,
+    visited: &mut Vec<PathBuf>,
+  ) -> Result<Option<Self>> {
+    if let Some(include_paths) = include_paths {
+      let mut merged = None;
       for raw in include_paths {
-        let include_path = Self::resolve_include_path(&base_dir, &raw);
+        let include_path = Self::resolve_include_path(base_dir, &raw);
         let included = Self::load_from_path(&include_path, visited)?;
         merged = Some(match merged {
           Some(base) => Self::merge_configs(base, included),
           None => included,
         });
       }
+      Ok(merged)
+    } else {
+      Ok(None)
     }
-
-    // We have already processed includes, so clear them to avoid re-saving them.
-    current.general.include = None;
-
-    let result = match merged {
-      Some(base) => Self::merge_configs(base, current),
-      None => current,
-    };
-
-    // Validate the final merged config
-    result.validate()?;
-
-    let _ = visited.pop();
-
-    Ok(result)
   }
 
   /// Save the configuration to disk.
