@@ -30,8 +30,6 @@ pub enum ConflictChoice {
   ViewDiff,
   /// Abort the operation
   Abort,
-  /// Backup local and use repo
-  BackupAndUseRepo,
 }
 
 /// Prompt the user for a conflict resolution using the modern `ConflictChoice` enum.
@@ -43,7 +41,6 @@ pub fn prompt_conflict_choice(file_path: &Path) -> Result<ConflictChoice> {
   let options = vec![
     "Keep local version",
     "Use repo version",
-    "Backup local and use repo",
     "View diff",
     "Abort",
   ];
@@ -61,9 +58,8 @@ pub fn prompt_conflict_choice(file_path: &Path) -> Result<ConflictChoice> {
   match selection {
     0 => Ok(ConflictChoice::KeepLocal),
     1 => Ok(ConflictChoice::UseRepo),
-    2 => Ok(ConflictChoice::BackupAndUseRepo),
-    3 => Ok(ConflictChoice::ViewDiff),
-    4 => Ok(ConflictChoice::Abort),
+    2 => Ok(ConflictChoice::ViewDiff),
+    3 => Ok(ConflictChoice::Abort),
     _ => Err(DotfilesError::Cancelled),
   }
 }

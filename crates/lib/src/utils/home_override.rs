@@ -1,11 +1,14 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::thread::ThreadId;
 
-/// Lazy static storing an optional overridden home directory for tests.
+/// Lazy static storing overridden home directories per thread.
 ///
-/// This is private and used only by tests to control what `home_dir()` returns.
-static HOME_OVERRIDE: std::sync::LazyLock<Mutex<Option<PathBuf>>> =
-  std::sync::LazyLock::new(|| Mutex::new(None));
+/// This keeps overrides scoped to the thread setting them so concurrent tests
+/// do not interfere with each other.
+static HOME_OVERRIDE: std::sync::LazyLock<Mutex<HashMap<ThreadId, Vec<PathBuf>>>> =
+  std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Return the home directory, allowing tests to override it.
 ///
@@ -17,7 +20,10 @@ pub fn home_dir() -> Option<PathBuf> {
     Ok(guard) => guard,
     Err(poisoned) => poisoned.into_inner(),
   };
-  override_guard.clone().or_else(dirs::home_dir)
+  override_guard
+    .get(&std::thread::current().id())
+    .and_then(|stack| stack.last().cloned())
+    .or_else(dirs::home_dir)
 }
 
 /// Override the home directory for the scope of a test.
@@ -29,7 +35,10 @@ pub fn set_override(path: PathBuf) {
     Ok(guard) => guard,
     Err(poisoned) => poisoned.into_inner(),
   };
-  *override_guard = Some(path);
+  let stack = override_guard
+    .entry(std::thread::current().id())
+    .or_insert_with(Vec::new);
+  stack.push(path);
 }
 
 /// Clear any previously set override.
@@ -40,5 +49,10 @@ pub fn clear_override() {
     Ok(guard) => guard,
     Err(poisoned) => poisoned.into_inner(),
   };
-  *override_guard = None;
+  if let Some(stack) = override_guard.get_mut(&std::thread::current().id()) {
+    let _ = stack.pop();
+    if stack.is_empty() {
+      let _ = override_guard.remove(&std::thread::current().id());
+    }
+  }
 }

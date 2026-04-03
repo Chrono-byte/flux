@@ -30,19 +30,6 @@
                         }
                     }
                 },
-                "backup_dir": {
-                    "type": "string",
-                    "description": "Directory for backups (created automatically on conflicts). Supports tilde expansion (~). If omitted, defaults to XDG data directory (~/.local/share/flux/backups on Linux).",
-                    "examples": [
-                        "~/.dotfiles-backups",
-                        "/tmp/dotfiles-backups"
-                    ],
-                    "x-taplo": {
-                        "docs": {
-                            "main": "Directory for backups created automatically when conflicts occur.\n\nSupports tilde expansion (`~`). If omitted, defaults to the XDG data directory. Backups are created when:\n- Installing files that would overwrite existing files\n- Switching profiles with conflicting configurations\n\n**Examples:**\n- `~/.dotfiles-backups` - Custom backup location\n- `/tmp/dotfiles-backups` - Temporary backup location"
-                        }
-                    }
-                },
                 "current_profile": {
                     "type": "string",
                     "description": "Current active profile name. Must be alphanumeric with underscores or hyphens.",

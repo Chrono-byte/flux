@@ -4,13 +4,11 @@ use crate::services::{FileOperation, Transaction, history, unified_diff};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
-use crate::utils::home_override;
 use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
 use crate::utils::prompt::prompt_yes_no;
 use colored::Colorize;
 use std::fmt::Write;
 use std::fs;
-use std::path::Path;
 use tempfile::TempDir;
 
 /// Options for applying configuration
@@ -26,7 +24,7 @@ pub struct ApplyOptions<'a> {
   pub yes: bool,
   /// Optional description for this apply operation
   pub description: Option<&'a str>,
-  /// Force sync: replace all files that aren't correct symlinks (no backups)
+  /// Force sync: replace all files that aren't correct symlinks (uses repo version)
   pub force: bool,
 }
 
@@ -209,7 +207,7 @@ pub fn display_diffs(diff: &StateDiff) {
 pub fn apply_config(options: &ApplyOptions<'_>) -> Result<()> {
   if options.force {
     println!(
-      "{} Force applying configuration (no backups, using repo version)...",
+      "{} Force applying configuration (using repo version)...",
       "→".cyan().bold()
     );
   } else {
@@ -341,26 +339,8 @@ fn create_and_setup_transaction(
 
   // Add file operations
   let symlink_resolution = options.config.general.symlink_resolution;
-  let home = home_override::home_dir()
-    .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
-
-  // Create a single timestamped backup directory for all files in this transaction
-  let backup_dir = options.config.get_backup_dir()?;
-  let transaction_backup_dir = backup_dir.join(
-    chrono::Local::now()
-      .format("%Y%m%d_%H%M%S")
-      .to_string(),
-  );
-
   for file in &diff.files_to_sync {
-    add_file_operation_to_transaction(
-      &mut transaction,
-      file,
-      options.force,
-      symlink_resolution,
-      &home,
-      &transaction_backup_dir,
-    );
+    add_file_operation_to_transaction(&mut transaction, file, symlink_resolution);
   }
 
   Ok(transaction)
@@ -398,44 +378,16 @@ fn run_post_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
 fn add_file_operation_to_transaction(
   transaction: &mut Transaction,
   file: &TrackedFile,
-  force: bool,
   symlink_resolution: crate::types::SymlinkResolution,
-  home: &Path,
-  backup_dir: &Path,
 ) {
-  if force {
-    // Force mode: no backups, just remove and create symlink
-    if file.dest_path.exists() {
-      transaction.add_operation(FileOperation::RemoveSymlink {
-        target: file.dest_path.clone(),
-      });
-    }
-    transaction.add_operation(FileOperation::CreateSymlink {
-      source: file.repo_path.clone(),
+  if file.dest_path.exists() || file.dest_path.is_symlink() {
+    transaction.add_operation(FileOperation::RemoveSymlink {
       target: file.dest_path.clone(),
-      resolution: symlink_resolution,
     });
-  } else {
-    // Normal mode: backup existing files
-    if file.dest_path.exists() {
-      let relative_path = match file.dest_path.strip_prefix(home) {
-        Ok(rel) => rel,
-        Err(_) => &file.dest_path,
-      };
-      let backup_path = backup_dir.join(relative_path);
-
-      transaction.add_operation(FileOperation::BackupAndReplace {
-        source: file.repo_path.clone(),
-        target: file.dest_path.clone(),
-        backup_path,
-        resolution: symlink_resolution,
-      });
-    } else {
-      transaction.add_operation(FileOperation::CreateSymlink {
-        source: file.repo_path.clone(),
-        target: file.dest_path.clone(),
-        resolution: symlink_resolution,
-      });
-    }
   }
+  transaction.add_operation(FileOperation::CreateSymlink {
+    source: file.repo_path.clone(),
+    target: file.dest_path.clone(),
+    resolution: symlink_resolution,
+  });
 }

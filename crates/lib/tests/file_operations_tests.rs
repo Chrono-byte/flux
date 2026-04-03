@@ -11,9 +11,11 @@ use std::{
   fs,
   path::{Path, PathBuf},
 };
-use tempfile::{Builder as TempDirBuilder, tempdir};
+use tempfile::{Builder as TempDirBuilder, TempDir, tempdir};
 
 struct Workspace {
+  _repo_temp: TempDir,
+  _home_temp: TempDir,
   repo_path: PathBuf,
   home_path: PathBuf,
 }
@@ -47,6 +49,8 @@ fn setup_workspace() -> Result<Workspace, Box<dyn std::error::Error>> {
   home_override::set_override(home_path.clone());
 
   Ok(Workspace {
+    _repo_temp: repo_temp,
+    _home_temp: home_temp,
     repo_path,
     home_path,
   })
@@ -176,7 +180,7 @@ mod file_operations_integration_tests {
 
     assert!(!dest_path.exists());
     assert!(!repo_file.exists());
-    assert!(config.tools.contains_key("flux"));
+    assert!(!config.tools.contains_key("flux"));
 
     Ok(())
   }

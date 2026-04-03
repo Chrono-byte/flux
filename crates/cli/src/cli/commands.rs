@@ -34,21 +34,11 @@ use flux_lib::{
 /// Handle the maintain command.
 pub(super) fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
   match command {
-    MaintainCommands::Migrate {
-      profile,
-      dry_run,
-      no_backup,
-    } => {
+    MaintainCommands::Migrate { profile, dry_run } => {
       let config = Config::load()?;
       let mut dry_run_tracker = DryRun::default();
 
-      migrate_files(
-        &config,
-        profile.as_deref(),
-        &mut dry_run_tracker,
-        dry_run,
-        no_backup,
-      )?;
+      migrate_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
 
       if dry_run {
         dry_run_tracker.display_summary();

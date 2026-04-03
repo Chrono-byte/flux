@@ -93,29 +93,6 @@ mod symlink_tests {
   }
 }
 
-mod backup_tests {
-  use tempfile::tempdir;
-
-  #[test]
-  fn test_backup_directory_creation() {
-    let dir = match tempdir() {
-      Ok(dir) => dir,
-      Err(error) => {
-        eprintln!("Failed to create temp directory: {error}");
-        return;
-      }
-    };
-    let backup_path = dir.path().join("backup");
-
-    if let Err(error) = std::fs::create_dir_all(&backup_path) {
-      eprintln!("Failed to create backup directory: {error}");
-      return;
-    }
-    assert!(backup_path.exists());
-    assert!(backup_path.is_dir());
-  }
-}
-
 // ============================================================================
 // Configuration Module - Extended Tests
 // ============================================================================
@@ -198,7 +175,6 @@ mod config_validation_tests {
         r#"
 [general]
 repo_path = "~/.dotfiles"
-backup_dir = "~/.dotfiles-backup"
 current_profile = "default"
 symlink_resolution = "{input_str}"
 "#
@@ -225,11 +201,6 @@ symlink_resolution = "{input_str}"
     let mut config = Config::default();
     config.general.repo_path = String::new();
     assert!(config.validate().is_err(), "Empty repo_path should fail");
-
-    // Test empty backup_dir
-    // let mut config = Config::default();
-    // config.general.backup_dir = String::new();
-    // assert!(config.validate().is_err(), "Empty backup_dir should fail");
 
     // Test empty profile
     let mut config = Config::default();

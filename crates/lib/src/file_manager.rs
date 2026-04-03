@@ -33,7 +33,6 @@ pub fn add_file(
   profile: Option<&str>,
   fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
-  // Create backup of destination file if it exists before making any changes
   let home = home_override::home_dir().ok_or_else(crate::utils::error_utils::home_dir_not_found)?;
 
   // Validate destination path is within home directory
@@ -763,7 +762,6 @@ fn determine_sync_action(
 }
 
 /// Handles the user-interactive part of resolving a file conflict.
-/// Assumes backup has already been created.
 fn handle_file_conflict(
   file: &TrackedFile,
   resolution: SymlinkResolution,
@@ -773,18 +771,18 @@ fn handle_file_conflict(
   let conflict_choice = if fs_manager.is_dry_run {
     if verbose {
       println!("  [DRY RUN] Files differ, would prompt for conflict resolution");
-      println!("  [DRY RUN] Assuming: Backup and Replace");
+      println!("  [DRY RUN] Assuming: Use repo version");
     }
-    ConflictChoice::BackupAndUseRepo
+    ConflictChoice::UseRepo
   } else {
-    // Backup was already created in sync_file
+    // Prompt user for conflict resolution
     prompt_conflict_choice(&file.dest_path)?
   };
 
   match conflict_choice {
-    ConflictChoice::BackupAndUseRepo | ConflictChoice::UseRepo => {
+    ConflictChoice::UseRepo => {
       if verbose {
-        println!("  User chose: Backup and Replace");
+        println!("  User chose: Use repo version");
       }
       create_symlink_managed(file, resolution, fs_manager, verbose)?;
     }
@@ -798,7 +796,7 @@ fn handle_file_conflict(
       if fs_manager.is_dry_run {
         if verbose {
           println!("  [DRY RUN] Would show diff and prompt again");
-          println!("  [DRY RUN] Assuming: Backup and Replace");
+          println!("  [DRY RUN] Assuming: Use repo version");
         }
         create_symlink_managed(file, resolution, fs_manager, verbose)?;
       } else {
@@ -806,7 +804,7 @@ fn handle_file_conflict(
         // Ask again after showing diff
         let post_diff_choice = prompt_conflict_choice(&file.dest_path)?;
         match post_diff_choice {
-          ConflictChoice::BackupAndUseRepo | ConflictChoice::UseRepo => {
+          ConflictChoice::UseRepo => {
             create_symlink_managed(file, resolution, fs_manager, verbose)?;
           }
           ConflictChoice::KeepLocal => {
@@ -829,7 +827,6 @@ fn handle_file_conflict(
 }
 
 /// Creates a symlink, managed by the `FileSystemManager`.
-/// Assumes backups have *already been created* by the caller.
 fn create_symlink_managed(
   file: &TrackedFile,
   resolution: SymlinkResolution,

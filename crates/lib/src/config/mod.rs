@@ -25,9 +25,6 @@ use crate::utils::system;
 pub struct GeneralConfig {
   /// Repository path (supports ~ expansion)
   pub repo_path: String,
-  /// Backup directory path (supports ~ expansion, optional - defaults to ~/.local/share/flux/backups)
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub backup_dir: Option<String>,
   /// Currently active profile name
   pub current_profile: String,
   /// Symlink resolution strategy
@@ -56,7 +53,6 @@ impl Default for GeneralConfig {
   fn default() -> Self {
     Self {
       repo_path: "~/.dotfiles".to_string(),
-      backup_dir: None,
       current_profile: "default".to_string(),
       symlink_resolution: SymlinkResolution::Auto,
       default_remote: None,
@@ -583,27 +579,6 @@ impl Config {
   pub fn get_repo_path(&self) -> PathBuf {
     let expanded = shellexpand::tilde(&self.general.repo_path).into_owned();
     PathBuf::from(expanded)
-  }
-
-  /// Get the backup directory path.
-  ///
-  /// # Errors
-  ///
-  /// Returns an error if the backup directory cannot be determined.
-  pub fn get_backup_dir(&self) -> Result<PathBuf> {
-    let backup_dir = if let Some(ref dir) = self.general.backup_dir {
-      shellexpand::tilde(dir).into_owned()
-    } else {
-      // Default to XDG data directory
-      let data_dir = dirs::data_local_dir()
-        .ok_or_else(|| DotfilesError::Config("Could not find data directory".to_string()))?;
-      data_dir
-        .join("flux")
-        .join("backups")
-        .to_string_lossy()
-        .to_string()
-    };
-    Ok(PathBuf::from(backup_dir))
   }
 
   /// Validate that the configuration is correct.

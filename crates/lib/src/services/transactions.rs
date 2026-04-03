@@ -39,17 +39,6 @@ pub enum FileOperation {
     /// Target path of the symlink to remove.
     target: PathBuf,
   },
-  /// Backup existing file and replace with symlink
-  BackupAndReplace {
-    /// Source path for the symlink.
-    source: PathBuf,
-    /// Target path where the symlink will be created.
-    target: PathBuf,
-    /// Path where the backup will be stored.
-    backup_path: PathBuf,
-    /// Symlink resolution strategy to use.
-    resolution: SymlinkResolution,
-  },
 }
 
 /// Result of executing an operation.
@@ -121,8 +110,7 @@ impl Transaction {
     self.operations.push(operation);
   }
 
-  /// Validate all operations in the transaction
-  /// Validate the transaction before preparation.
+  /// Validate the transaction. Runs before preparation.
   ///
   /// # Errors
   ///
@@ -160,24 +148,6 @@ impl Transaction {
           if !target.exists() && !target.is_symlink() {
             // Target doesn't exist, which is fine for removal
             // (idempotent operation)
-          }
-        }
-        FileOperation::BackupAndReplace {
-          source,
-          backup_path,
-          ..
-        } => {
-          if !source.exists() {
-            return Err(DotfilesError::Path(format!(
-              "Source file does not exist: {}",
-              source.display()
-            )));
-          }
-          // Check backup directory can be created
-          if let Some(parent) = backup_path.parent()
-            && !parent.exists()
-          {
-            // Will be created during prepare
           }
         }
       }
@@ -233,12 +203,6 @@ impl Transaction {
           resolution,
         } => Self::execute_create_symlink(source, target, *resolution, config, fs_manager),
         FileOperation::RemoveSymlink { target } => Self::execute_remove_symlink(target, fs_manager),
-        FileOperation::BackupAndReplace {
-          source,
-          target,
-          backup_path,
-          resolution,
-        } => Self::execute_backup_and_replace(source, target, backup_path, *resolution, fs_manager),
       };
 
       self.results.push(result.clone());
@@ -318,9 +282,6 @@ impl Transaction {
             )));
           }
         }
-        FileOperation::BackupAndReplace { .. } => {
-          // Other operations verified by their success flag
-        }
       }
     }
 
@@ -349,25 +310,7 @@ impl Transaction {
             }
           }
           FileOperation::RemoveSymlink { .. } => {
-            // Can't easily restore removed symlinks, but we have backups
-            // This would require storing the original state
-          }
-          FileOperation::BackupAndReplace {
-            target,
-            backup_path,
-            ..
-          } => {
-            // Restore from backup
-            if backup_path.exists() {
-              if let Some(parent) = target.parent() {
-                let _ = fs_manager.create_dir_all(parent);
-              }
-              if backup_path.is_dir() {
-                let _ = fs_manager.copy_dir_all(backup_path, target);
-              } else {
-                let _ = fs_manager.copy(backup_path, target);
-              }
-            }
+            // Removing existing content is destructive and cannot be reverted here.
           }
         }
       }
@@ -527,70 +470,6 @@ impl Transaction {
         success: true,
         error: None,
       }
-    }
-  }
-
-  /// Execute backup and replace operation.
-  fn execute_backup_and_replace(
-    source: &Path,
-    target: &Path,
-    backup_path: &Path,
-    resolution: SymlinkResolution,
-    fs_manager: &mut FileSystemManager,
-  ) -> OperationResult {
-    // Create backup
-    if target.exists() {
-      if let Some(parent) = backup_path.parent()
-        && let Err(error) = fs_manager.create_dir_all(parent)
-      {
-        return OperationResult {
-          operation: FileOperation::BackupAndReplace {
-            source: source.to_path_buf(),
-            target: target.to_path_buf(),
-            backup_path: backup_path.to_path_buf(),
-            resolution,
-          },
-          success: false,
-          error: Some(format!("Failed to create backup directory: {error}")),
-        };
-      }
-
-      if target.is_dir() {
-        if let Err(error) = fs_manager.copy_dir_all(target, backup_path) {
-          return OperationResult {
-            operation: FileOperation::BackupAndReplace {
-              source: source.to_path_buf(),
-              target: target.to_path_buf(),
-              backup_path: backup_path.to_path_buf(),
-              resolution,
-            },
-            success: false,
-            error: Some(format!("Failed to backup directory: {error}")),
-          };
-        }
-      } else if let Err(error) = fs_manager.copy(target, backup_path) {
-        return OperationResult {
-          operation: FileOperation::BackupAndReplace {
-            source: source.to_path_buf(),
-            target: target.to_path_buf(),
-            backup_path: backup_path.to_path_buf(),
-            resolution,
-          },
-          success: false,
-          error: Some(format!("Failed to backup file: {error}")),
-        };
-      }
-    }
-
-    OperationResult {
-      operation: FileOperation::BackupAndReplace {
-        source: source.to_path_buf(),
-        target: target.to_path_buf(),
-        backup_path: backup_path.to_path_buf(),
-        resolution,
-      },
-      success: true,
-      error: None,
     }
   }
 }

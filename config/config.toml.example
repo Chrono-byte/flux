@@ -13,9 +13,6 @@ repo_path = "~/.dotfiles"
 # Current active profile
 current_profile = "default"
 
-# Directory for backups (created automatically on conflicts)
-backup_dir = "~/.dotfiles-backups"
-
 # Symlink resolution strategy: auto, relative, absolute, follow, replace
 # - auto: Use relative if possible, absolute if needed (recommended)
 # - relative: Always create relative symlinks
@@ -262,4 +259,3 @@ files = [
 # post_commit = [
 #     { command = "echo 'Changes committed!'" }
 # ]
-

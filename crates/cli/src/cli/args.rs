@@ -110,7 +110,7 @@ pub enum Commands {
     /// Description for this generation
     #[arg(long)]
     description: Option<String>,
-    /// Force sync: replace all files that aren't correct symlinks (no backups, uses repo version)
+    /// Force sync: replace all files that aren't correct symlinks (uses repo version)
     #[arg(long)]
     force: bool,
   },
@@ -231,9 +231,6 @@ pub enum MaintainCommands {
     /// Dry run mode
     #[arg(long)]
     dry_run: bool,
-    /// Skip backup and copy - just remove existing files and create symlinks to repo
-    #[arg(long)]
-    no_backup: bool,
   },
   /// Generate a .gitignore file for the repository
   Gitignore,
