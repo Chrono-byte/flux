@@ -16,5 +16,5 @@
       }
     }
   },
-  "language_servers": ["!tombi"]
+  "language_servers": ["!tombi", "..."]
 }

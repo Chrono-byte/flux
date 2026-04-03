@@ -537,6 +537,31 @@ mod dry_run_extended_tests {
   }
 }
 
+mod filesystem_manager_dry_run_tests {
+  use flux_lib::file_manager::FileSystemManager;
+  use flux_lib::utils::dry_run::DryRun;
+  use std::error::Error;
+  use std::fs;
+  use tempfile::tempdir;
+
+  #[test]
+  fn create_dir_all_skips_existing_directories() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempdir()?;
+    let existing = temp_dir.path().join("existing");
+    fs::create_dir_all(&existing)?;
+
+    let mut dry_run = DryRun::default();
+    let mut fs_manager = FileSystemManager::new(&mut dry_run, true);
+    fs_manager.create_dir_all(&existing)?;
+
+    assert!(
+      dry_run.operations().is_empty(),
+      "No operations should be logged when the directory already exists"
+    );
+    Ok(())
+  }
+}
+
 // ============================================================================
 // File Entry Type - Extended Tests
 // ============================================================================

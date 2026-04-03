@@ -6,9 +6,11 @@ use clap::CommandFactory;
 use colored::Colorize;
 use std::env;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::args::{Cli, Commands, MaintainCommands, ProfileCommands, RemoteCommands};
+use flux_lib::utils::path_utils::resolve_symlink_target;
 use flux_lib::{
   commands::apply::StateDiff,
   commands::doctor::HealthReport,
@@ -168,10 +170,9 @@ pub(super) fn handle_add_command(
   let mut config = Config::load()?;
   let mut dry_run_tracker = DryRun::default();
   let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, dry_run);
+  let repo_path = config.get_repo_path();
 
   if from_repo {
-    // File already exists in repo - register it without copying
-    let repo_path = config.get_repo_path();
     let repo_file = repo_path.join(tool).join(file);
 
     if !repo_file.exists() {
@@ -182,36 +183,22 @@ pub(super) fn handle_add_command(
     }
 
     let dest_path = dest.map_or_else(
-      || std::path::Path::new(file).to_path_buf(),
-      |dest| std::path::Path::new(dest).to_path_buf(),
+      || Path::new(file).to_path_buf(),
+      |dest| Path::new(dest).to_path_buf(),
     );
 
-    // Register file in config without copying (file already in repo)
-    let repo_relative = repo_file
-      .strip_prefix(&repo_path)
-      .map_err(|_| DotfilesError::Path("Could not compute repo relative path".to_string()))?
-      .to_string_lossy()
-      .to_string();
-
-    if repo_file.is_dir() {
-      config.add_folder_to_tool(tool, &repo_relative, &dest_path, profile);
-    } else {
-      config.add_file_to_tool(tool, &repo_relative, &dest_path, profile);
-    }
-
-    if dry_run {
-      println!(
-        "  [DRY RUN] Would register {} from repo",
-        repo_file.display()
-      );
-    } else {
-      config.save(false)?;
-      // Git-like output: "add 'file'"
-      println!("add '{}'", dest_path.display());
-    }
+    register_repo_file(
+      &mut config,
+      tool,
+      &repo_path,
+      repo_file,
+      &dest_path,
+      profile,
+      dry_run,
+    )?;
   } else {
     // Standard flow: copy source file to repository
-    let source_path = std::path::Path::new(file);
+    let source_path = Path::new(file);
     if !source_path.exists() {
       return Err(DotfilesError::Path(format!(
         "Source file does not exist: {file}"
@@ -219,24 +206,36 @@ pub(super) fn handle_add_command(
     }
 
     let dest_path = if let Some(dest) = dest {
-      std::path::Path::new(dest).to_path_buf()
+      Path::new(dest).to_path_buf()
     } else {
       // Use source path relative to home directory
       let home = home_override::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
       source_path
         .strip_prefix(&home)
-        .map_or_else(|_| source_path.to_path_buf(), std::path::Path::to_path_buf)
+        .map_or_else(|_| source_path.to_path_buf(), Path::to_path_buf)
     };
 
-    add_file(
-      &mut config,
-      tool,
-      source_path,
-      &dest_path,
-      profile,
-      &mut fs_manager,
-    )?;
+    if let Some(repo_file) = detect_repo_symlink_target(source_path, &repo_path)? {
+      register_repo_file(
+        &mut config,
+        tool,
+        &repo_path,
+        repo_file,
+        &dest_path,
+        profile,
+        dry_run,
+      )?;
+    } else {
+      add_file(
+        &mut config,
+        tool,
+        source_path,
+        &dest_path,
+        profile,
+        &mut fs_manager,
+      )?;
+    }
   }
 
   if dry_run {
@@ -435,6 +434,129 @@ impl Toggle {
     } else {
       Toggle::Disabled
     }
+  }
+}
+
+/// Detects whether the source path is a symlink pointing into the repository.
+fn detect_repo_symlink_target(
+  source_path: &Path,
+  repo_path: &Path,
+) -> Result<Option<PathBuf>> {
+  if !source_path.is_symlink() {
+    return Ok(None);
+  }
+
+  let link_target = std::fs::read_link(source_path).map_err(|error| {
+    DotfilesError::Path(format!(
+      "Failed to read symlink {}: {error}",
+      source_path.display()
+    ))
+  })?;
+
+  let resolved_target = resolve_symlink_target(source_path, &link_target);
+  if !resolved_target.starts_with(repo_path) {
+    return Ok(None);
+  }
+
+  Ok(Some(resolved_target))
+}
+
+/// Register a repo file directly in the configuration without copying.
+fn register_repo_file(
+  config: &mut Config,
+  tool: &str,
+  repo_path: &Path,
+  repo_file: PathBuf,
+  dest_path: &Path,
+  profile: Option<&str>,
+  dry_run: bool,
+) -> Result<()> {
+  let repo_relative = repo_file.strip_prefix(repo_path).map_err(|_| {
+    DotfilesError::Path(format!(
+      "Repository file {} is outside {}",
+      repo_file.display(),
+      repo_path.display()
+    ))
+  })?;
+
+  let repo_relative = repo_relative.to_string_lossy().to_string();
+
+  if repo_file.is_dir() {
+    config.add_folder_to_tool(tool, &repo_relative, dest_path, profile);
+  } else {
+    config.add_file_to_tool(tool, &repo_relative, dest_path, profile);
+  }
+
+  if dry_run {
+    println!(
+      "  [DRY RUN] Would register {} from repo",
+      repo_file.display()
+    );
+  } else {
+    config.save(false)?;
+    println!("add '{}'", dest_path.display());
+  }
+
+  Ok(())
+}
+
+#[cfg(test)]
+mod add_command_tests {
+  use super::{detect_repo_symlink_target, register_repo_file};
+  use flux_lib::config::Config;
+  use std::{error::Error, fs, path::PathBuf};
+  use tempfile::tempdir;
+
+  #[cfg(unix)]
+  #[test]
+  fn detect_repo_symlink_target_detects_repo_link() -> Result<(), Box<dyn Error>> {
+    let repo_dir = tempdir()?;
+    let repo_path = repo_dir.path().join("repo");
+    let repo_tool_dir = repo_path.join("codex");
+    let repo_file = repo_tool_dir.join("config.toml");
+    fs::create_dir_all(&repo_tool_dir)?;
+    fs::write(&repo_file, "config")?;
+
+    let link_dir = tempdir()?;
+    let link_path = link_dir.path().join("config.toml");
+    std::os::unix::fs::symlink(&repo_file, &link_path)?;
+
+    let detected = detect_repo_symlink_target(&link_path, &repo_path)?;
+    assert_eq!(detected, Some(repo_file));
+    Ok(())
+  }
+
+  #[test]
+  fn register_repo_file_adds_entry_under_tool() -> Result<(), Box<dyn Error>> {
+    let repo_dir = tempdir()?;
+    let repo_path = repo_dir.path().join("repo");
+    let repo_tool_dir = repo_path.join("codex");
+    let repo_file = repo_tool_dir.join("config.toml");
+    fs::create_dir_all(&repo_tool_dir)?;
+    fs::write(&repo_file, "content")?;
+
+    let mut config = Config::default();
+    config.general.repo_path = repo_path.to_string_lossy().to_string();
+
+    let dest_path = PathBuf::from("/tmp/.codex/config.toml");
+    register_repo_file(
+      &mut config,
+      "codex",
+      &repo_path,
+      repo_file.clone(),
+      &dest_path,
+      None,
+      true,
+    )?;
+
+    let tool_entry = config
+      .tools
+      .get("codex")
+      .expect("tool should exist");
+    assert_eq!(tool_entry.files.len(), 1);
+    assert_eq!(tool_entry.files[0].repo, "codex/config.toml");
+    assert_eq!(tool_entry.files[0].dest, dest_path.to_string_lossy());
+    Ok(())
   }
 }
 

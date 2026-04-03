@@ -361,6 +361,9 @@ impl<'a> FileSystemManager<'a> {
     path: &Path,
   ) -> Result<()> {
     if self.is_dry_run {
+      if path.exists() && path.is_dir() {
+        return Ok(());
+      }
       println!("  [DRY RUN] Would create directory: {}", path.display());
       self
         .dry_run

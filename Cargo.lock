@@ -328,7 +328,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flux-cli"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "atty",
  "chrono",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "flux-lib"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "chrono",
  "colored",
