@@ -205,6 +205,12 @@ impl DryRun {
       format!("Total operations: {}", self.operations.len()).bold()
     );
   }
+
+  /// Returns the operations that have been logged.
+  #[cfg_attr(not(test), allow(dead_code))]
+  pub fn operations(&self) -> &[Operation] {
+    &self.operations
+  }
 }
 
 impl Default for DryRun {
