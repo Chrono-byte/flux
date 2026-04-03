@@ -16,7 +16,7 @@ pub mod untracked;
 pub mod validate;
 
 pub use apply::{
-    ApplyOptions, apply_config, compare_states, display_diffs, display_preview, format_diffs,
+  ApplyOptions, apply_config, compare_states, display_diffs, display_preview, format_diffs,
 };
 pub use doctor::{display_health_report, run_health_checks};
 pub use migrate::migrate_files;

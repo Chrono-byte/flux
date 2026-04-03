@@ -11,16 +11,16 @@ use std::path::PathBuf;
 
 /// Environment configuration keys
 pub mod env_keys {
-    /// Configuration file environment variable
-    pub const CONFIG_FILE: &str = "DOTFILES_CONFIG";
-    /// Log level environment variable
-    pub const LOG_LEVEL: &str = "DOTFILES_LOG";
-    /// Log format environment variable
-    pub const LOG_FORMAT: &str = "DOTFILES_LOG_FORMAT";
-    /// Git username environment variable
-    pub const GIT_USERNAME: &str = "GIT_USERNAME";
-    /// Git password environment variable
-    pub const GIT_PASSWORD: &str = "GIT_PASSWORD";
+  /// Configuration file environment variable
+  pub const CONFIG_FILE: &str = "DOTFILES_CONFIG";
+  /// Log level environment variable
+  pub const LOG_LEVEL: &str = "DOTFILES_LOG";
+  /// Log format environment variable
+  pub const LOG_FORMAT: &str = "DOTFILES_LOG_FORMAT";
+  /// Git username environment variable
+  pub const GIT_USERNAME: &str = "GIT_USERNAME";
+  /// Git password environment variable
+  pub const GIT_PASSWORD: &str = "GIT_PASSWORD";
 }
 
 /// Type-safe environment configuration
@@ -29,226 +29,231 @@ pub mod env_keys {
 /// Provides early detection of configuration issues with helpful error messages.
 #[derive(Debug, Clone)]
 pub struct EnvironmentConfig {
-    /// Path to configuration file (from `DOTFILES_CONFIG` or default locations)
-    pub config_file: Option<PathBuf>,
+  /// Path to configuration file (from `DOTFILES_CONFIG` or default locations)
+  pub config_file: Option<PathBuf>,
 
-    /// Log level (from `DOTFILES_LOG` environment variable)
-    pub log_level: LogLevel,
+  /// Log level (from `DOTFILES_LOG` environment variable)
+  pub log_level: LogLevel,
 
-    /// Log format (from `DOTFILES_LOG_FORMAT` environment variable)
-    pub log_format: LogFormat,
+  /// Log format (from `DOTFILES_LOG_FORMAT` environment variable)
+  pub log_format: LogFormat,
 
-    /// Git username (from `GIT_USERNAME` environment variable, for HTTPS auth)
-    pub git_username: Option<String>,
+  /// Git username (from `GIT_USERNAME` environment variable, for HTTPS auth)
+  pub git_username: Option<String>,
 
-    /// Git password (from `GIT_PASSWORD` environment variable, for HTTPS auth)
-    pub git_password: Option<String>,
+  /// Git password (from `GIT_PASSWORD` environment variable, for HTTPS auth)
+  pub git_password: Option<String>,
 
-    /// Whether we're in CI/CD environment
-    pub is_ci_environment: bool,
+  /// Whether we're in CI/CD environment
+  pub is_ci_environment: bool,
 }
 
 /// Log level configuration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
-    /// Trace log level
-    Trace,
-    /// Debug log level
-    Debug,
-    /// Info log level
-    Info,
-    /// Warn log level
-    Warn,
-    /// Error log level
-    Error,
+  /// Trace log level
+  Trace,
+  /// Debug log level
+  Debug,
+  /// Info log level
+  Info,
+  /// Warn log level
+  Warn,
+  /// Error log level
+  Error,
 }
 
 impl LogLevel {
-    /// Parse from environment variable string
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the log level string is invalid.
-    pub fn from_env(input_str: &str) -> Result<Self> {
-        match input_str.to_lowercase().as_str() {
-            "trace" => Ok(Self::Trace),
-            "debug" => Ok(Self::Debug),
-            "info" => Ok(Self::Info),
-            "warn" => Ok(Self::Warn),
-            "error" => Ok(Self::Error),
-            _ => Err(DotfilesError::Config(format!(
-                "Invalid log level '{input_str}'. Supported values: trace, debug, info, warn, error"
-            ))),
-        }
+  /// Parse from environment variable string
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the log level string is invalid.
+  pub fn from_env(input_str: &str) -> Result<Self> {
+    match input_str.to_lowercase().as_str() {
+      "trace" => Ok(Self::Trace),
+      "debug" => Ok(Self::Debug),
+      "info" => Ok(Self::Info),
+      "warn" => Ok(Self::Warn),
+      "error" => Ok(Self::Error),
+      _ => Err(DotfilesError::Config(format!(
+        "Invalid log level '{input_str}'. Supported values: trace, debug, info, warn, error"
+      ))),
     }
+  }
 
-    /// Convert to string for log configuration
-    #[must_use]
-    pub const fn to_string(self) -> &'static str {
-        match self {
-            Self::Trace => "trace",
-            Self::Debug => "debug",
-            Self::Info => "info",
-            Self::Warn => "warn",
-            Self::Error => "error",
-        }
+  /// Convert to string for log configuration
+  #[must_use]
+  pub const fn to_string(self) -> &'static str {
+    match self {
+      Self::Trace => "trace",
+      Self::Debug => "debug",
+      Self::Info => "info",
+      Self::Warn => "warn",
+      Self::Error => "error",
     }
+  }
 }
 
 /// Log format configuration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogFormat {
-    /// Default log format
-    Default,
-    /// JSON log format
-    Json,
-    /// Compact log format
-    Compact,
+  /// Default log format
+  Default,
+  /// JSON log format
+  Json,
+  /// Compact log format
+  Compact,
 }
 
 impl LogFormat {
-    /// Parse from environment variable string
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the log format string is invalid.
-    pub fn from_env(input_str: &str) -> Result<Self> {
-        match input_str.to_lowercase().as_str() {
-            "default" => Ok(Self::Default),
-            "json" => Ok(Self::Json),
-            "compact" => Ok(Self::Compact),
-            _ => Err(DotfilesError::Config(format!(
-                "Invalid log format '{input_str}'. Supported values: default, json, compact"
-            ))),
-        }
+  /// Parse from environment variable string
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the log format string is invalid.
+  pub fn from_env(input_str: &str) -> Result<Self> {
+    match input_str.to_lowercase().as_str() {
+      "default" => Ok(Self::Default),
+      "json" => Ok(Self::Json),
+      "compact" => Ok(Self::Compact),
+      _ => Err(DotfilesError::Config(format!(
+        "Invalid log format '{input_str}'. Supported values: default, json, compact"
+      ))),
     }
+  }
 
-    /// Convert to string
-    #[must_use]
-    pub const fn to_string(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Json => "json",
-            Self::Compact => "compact",
-        }
+  /// Convert to string
+  #[must_use]
+  pub const fn to_string(self) -> &'static str {
+    match self {
+      Self::Default => "default",
+      Self::Json => "json",
+      Self::Compact => "compact",
     }
+  }
 }
 
 impl Default for EnvironmentConfig {
-    fn default() -> Self {
-        Self {
-            config_file: None,
-            log_level: LogLevel::Info,
-            log_format: LogFormat::Default,
-            git_username: None,
-            git_password: None,
-            is_ci_environment: env::var("CI").is_ok() || env::var("CONTINUOUS_INTEGRATION").is_ok(),
-        }
+  fn default() -> Self {
+    Self {
+      config_file: None,
+      log_level: LogLevel::Info,
+      log_format: LogFormat::Default,
+      git_username: None,
+      git_password: None,
+      is_ci_environment: env::var("CI").is_ok() || env::var("CONTINUOUS_INTEGRATION").is_ok(),
     }
+  }
 }
 
 impl EnvironmentConfig {
-    /// Load and validate environment configuration.
-    ///
-    /// Reads environment variables, validates values, and returns errors with
-    /// helpful suggestions for invalid values. Logs configuration at debug level.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any environment variable has an invalid value.
-    pub fn load() -> Result<Self> {
-        let mut config = Self::default();
+  /// Load and validate environment configuration.
+  ///
+  /// Reads environment variables, validates values, and returns errors with
+  /// helpful suggestions for invalid values. Logs configuration at debug level.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if any environment variable has an invalid value.
+  pub fn load() -> Result<Self> {
+    let mut config = Self::default();
 
-        // Load config file path from environment
-        if let Ok(config_path_str) = env::var(env_keys::CONFIG_FILE) {
-            let config_path = PathBuf::from(&config_path_str);
-            if !config_path.exists() {
-                warn!(
-                    "Configuration file specified in {} does not exist: {}",
-                    env_keys::CONFIG_FILE,
-                    config_path.display()
-                );
-            }
-            config.config_file = Some(config_path);
-            debug!(
-                "Config file from {}: {}",
-                env_keys::CONFIG_FILE,
-                config_path_str
-            );
-        }
-
-        // Load log level from environment
-        if let Ok(log_level_str) = env::var(env_keys::LOG_LEVEL) {
-            config.log_level = LogLevel::from_env(&log_level_str)?;
-            debug!(
-                "Log level from {}: {}",
-                env_keys::LOG_LEVEL,
-                config.log_level.to_string()
-            );
-        }
-
-        // Load log format from environment
-        if let Ok(log_format_str) = env::var(env_keys::LOG_FORMAT) {
-            config.log_format = LogFormat::from_env(&log_format_str)?;
-            debug!(
-                "Log format from {}: {}",
-                env_keys::LOG_FORMAT,
-                config.log_format.to_string()
-            );
-        }
-
-        // Load git credentials
-        if let Ok(username) = env::var(env_keys::GIT_USERNAME) {
-            if username.is_empty() {
-                return Err(DotfilesError::Config(format!(
-                    "{} is set but empty. Please provide a non-empty git username.",
-                    env_keys::GIT_USERNAME
-                )));
-            }
-            config.git_username = Some(username);
-            debug!(
-                "Git username loaded from {} (length: {} chars)",
-                env_keys::GIT_USERNAME,
-                config.git_username.as_ref().map_or(0, String::len)
-            );
-        }
-
-        if let Ok(password) = env::var(env_keys::GIT_PASSWORD) {
-            if password.is_empty() {
-                return Err(DotfilesError::Config(format!(
-                    "{} is set but empty. Please provide a non-empty git password or token.",
-                    env_keys::GIT_PASSWORD
-                )));
-            }
-            config.git_password = Some(password);
-            debug!(
-                "Git password loaded from {} (length: {} chars)",
-                env_keys::GIT_PASSWORD,
-                config.git_password.as_ref().map_or(0, String::len)
-            );
-        }
-
-        // Detect CI environment
-        config.is_ci_environment =
-            env::var("CI").is_ok() || env::var("CONTINUOUS_INTEGRATION").is_ok();
-        if config.is_ci_environment {
-            info!("Running in CI/CD environment");
-        }
-
-        Ok(config)
-    }
-
-    /// Display configuration summary for debugging
-    pub fn display_summary(&self) {
-        debug!("Environment Configuration Summary:");
-        debug!("  Config file: {:?}", self.config_file);
-        debug!("  Log level: {}", self.log_level.to_string());
-        debug!("  Log format: {}", self.log_format.to_string());
-        debug!(
-            "  Git credentials: username={}, password={}",
-            self.git_username.is_some(),
-            self.git_password.is_some()
+    // Load config file path from environment
+    if let Ok(config_path_str) = env::var(env_keys::CONFIG_FILE) {
+      let config_path = PathBuf::from(&config_path_str);
+      if !config_path.exists() {
+        warn!(
+          "Configuration file specified in {} does not exist: {}",
+          env_keys::CONFIG_FILE,
+          config_path.display()
         );
-        debug!("  CI environment: {}", self.is_ci_environment);
+      }
+      config.config_file = Some(config_path);
+      debug!(
+        "Config file from {}: {}",
+        env_keys::CONFIG_FILE,
+        config_path_str
+      );
     }
+
+    // Load log level from environment
+    if let Ok(log_level_str) = env::var(env_keys::LOG_LEVEL) {
+      config.log_level = LogLevel::from_env(&log_level_str)?;
+      debug!(
+        "Log level from {}: {}",
+        env_keys::LOG_LEVEL,
+        config.log_level.to_string()
+      );
+    }
+
+    // Load log format from environment
+    if let Ok(log_format_str) = env::var(env_keys::LOG_FORMAT) {
+      config.log_format = LogFormat::from_env(&log_format_str)?;
+      debug!(
+        "Log format from {}: {}",
+        env_keys::LOG_FORMAT,
+        config.log_format.to_string()
+      );
+    }
+
+    // Load git credentials
+    if let Ok(username) = env::var(env_keys::GIT_USERNAME) {
+      if username.is_empty() {
+        return Err(DotfilesError::Config(format!(
+          "{} is set but empty. Please provide a non-empty git username.",
+          env_keys::GIT_USERNAME
+        )));
+      }
+      config.git_username = Some(username);
+      debug!(
+        "Git username loaded from {} (length: {} chars)",
+        env_keys::GIT_USERNAME,
+        config
+          .git_username
+          .as_ref()
+          .map_or(0, String::len)
+      );
+    }
+
+    if let Ok(password) = env::var(env_keys::GIT_PASSWORD) {
+      if password.is_empty() {
+        return Err(DotfilesError::Config(format!(
+          "{} is set but empty. Please provide a non-empty git password or token.",
+          env_keys::GIT_PASSWORD
+        )));
+      }
+      config.git_password = Some(password);
+      debug!(
+        "Git password loaded from {} (length: {} chars)",
+        env_keys::GIT_PASSWORD,
+        config
+          .git_password
+          .as_ref()
+          .map_or(0, String::len)
+      );
+    }
+
+    // Detect CI environment
+    config.is_ci_environment = env::var("CI").is_ok() || env::var("CONTINUOUS_INTEGRATION").is_ok();
+    if config.is_ci_environment {
+      info!("Running in CI/CD environment");
+    }
+
+    Ok(config)
+  }
+
+  /// Display configuration summary for debugging
+  pub fn display_summary(&self) {
+    debug!("Environment Configuration Summary:");
+    debug!("  Config file: {:?}", self.config_file);
+    debug!("  Log level: {}", self.log_level.to_string());
+    debug!("  Log format: {}", self.log_format.to_string());
+    debug!(
+      "  Git credentials: username={}, password={}",
+      self.git_username.is_some(),
+      self.git_password.is_some()
+    );
+    debug!("  CI environment: {}", self.is_ci_environment);
+  }
 }

@@ -10,57 +10,57 @@ use uuid::Uuid;
 /// Represents the state of a transaction during its lifecycle
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransactionState {
-    /// Transaction has been started
-    Started,
-    /// All operations validated and prepared
-    Prepared,
-    /// Changes have been committed to the system
-    Committed,
-    /// State has been verified after commit
-    Verified,
-    /// Transaction was rolled back
-    RolledBack,
+  /// Transaction has been started
+  Started,
+  /// All operations validated and prepared
+  Prepared,
+  /// Changes have been committed to the system
+  Committed,
+  /// State has been verified after commit
+  Verified,
+  /// Transaction was rolled back
+  RolledBack,
 }
 
 /// Represents a single operation within a transaction
 #[derive(Debug, Clone)]
 pub enum FileOperation {
-    /// Create a symlink from source to target
-    CreateSymlink {
-        /// Source path for the symlink.
-        source: PathBuf,
-        /// Target path where the symlink will be created.
-        target: PathBuf,
-        /// Symlink resolution strategy to use.
-        resolution: SymlinkResolution,
-    },
-    /// Remove a symlink at target
-    RemoveSymlink {
-        /// Target path of the symlink to remove.
-        target: PathBuf,
-    },
-    /// Backup existing file and replace with symlink
-    BackupAndReplace {
-        /// Source path for the symlink.
-        source: PathBuf,
-        /// Target path where the symlink will be created.
-        target: PathBuf,
-        /// Path where the backup will be stored.
-        backup_path: PathBuf,
-        /// Symlink resolution strategy to use.
-        resolution: SymlinkResolution,
-    },
+  /// Create a symlink from source to target
+  CreateSymlink {
+    /// Source path for the symlink.
+    source: PathBuf,
+    /// Target path where the symlink will be created.
+    target: PathBuf,
+    /// Symlink resolution strategy to use.
+    resolution: SymlinkResolution,
+  },
+  /// Remove a symlink at target
+  RemoveSymlink {
+    /// Target path of the symlink to remove.
+    target: PathBuf,
+  },
+  /// Backup existing file and replace with symlink
+  BackupAndReplace {
+    /// Source path for the symlink.
+    source: PathBuf,
+    /// Target path where the symlink will be created.
+    target: PathBuf,
+    /// Path where the backup will be stored.
+    backup_path: PathBuf,
+    /// Symlink resolution strategy to use.
+    resolution: SymlinkResolution,
+  },
 }
 
 /// Result of executing an operation.
 #[derive(Debug, Clone)]
 pub struct OperationResult {
-    /// The operation that was executed
-    pub operation: FileOperation,
-    /// Whether the operation succeeded
-    pub success: bool,
-    /// Error message if the operation failed
-    pub error: Option<String>,
+  /// The operation that was executed
+  pub operation: FileOperation,
+  /// Whether the operation succeeded
+  pub success: bool,
+  /// Error message if the operation failed
+  pub error: Option<String>,
 }
 
 /// Manages atomic file operations within a transaction.
@@ -68,519 +68,529 @@ pub struct OperationResult {
 /// See [`TransactionState`] for the transaction lifecycle.
 #[derive(Debug)]
 pub struct Transaction {
-    /// Unique transaction identifier
-    pub id: String,
-    /// Current state in the transaction lifecycle
-    pub state: TransactionState,
-    /// Temporary directory for staging changes
-    pub temp_dir: PathBuf,
-    /// Operations to be executed
-    pub operations: Vec<FileOperation>,
-    /// Results from executed operations
-    pub results: Vec<OperationResult>,
-    /// Additional metadata (description, profile, timestamp, etc.)
-    pub metadata: HashMap<String, String>,
+  /// Unique transaction identifier
+  pub id: String,
+  /// Current state in the transaction lifecycle
+  pub state: TransactionState,
+  /// Temporary directory for staging changes
+  pub temp_dir: PathBuf,
+  /// Operations to be executed
+  pub operations: Vec<FileOperation>,
+  /// Results from executed operations
+  pub results: Vec<OperationResult>,
+  /// Additional metadata (description, profile, timestamp, etc.)
+  pub metadata: HashMap<String, String>,
 }
 
 impl Default for Transaction {
-    fn default() -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            state: TransactionState::Started,
-            temp_dir: PathBuf::new(),
-            operations: Vec::new(),
-            results: Vec::new(),
-            metadata: HashMap::new(),
-        }
+  fn default() -> Self {
+    Self {
+      id: Uuid::new_v4().to_string(),
+      state: TransactionState::Started,
+      temp_dir: PathBuf::new(),
+      operations: Vec::new(),
+      results: Vec::new(),
+      metadata: HashMap::new(),
     }
+  }
 }
 
 impl Transaction {
-    /// Begin a new transaction
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the temporary directory cannot be created.
-    pub fn begin(temp_dir: PathBuf) -> Result<Self> {
-        // Create temp directory if it doesn't exist
-        if !temp_dir.exists() {
-            fs::create_dir_all(&temp_dir)?;
-        }
-
-        Ok(Self {
-            temp_dir,
-            ..Default::default()
-        })
+  /// Begin a new transaction
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the temporary directory cannot be created.
+  pub fn begin(temp_dir: PathBuf) -> Result<Self> {
+    // Create temp directory if it doesn't exist
+    if !temp_dir.exists() {
+      fs::create_dir_all(&temp_dir)?;
     }
 
-    /// Add an operation to the transaction
-    pub fn add_operation(&mut self, operation: FileOperation) {
-        self.operations.push(operation);
+    Ok(Self {
+      temp_dir,
+      ..Default::default()
+    })
+  }
+
+  /// Add an operation to the transaction
+  pub fn add_operation(
+    &mut self,
+    operation: FileOperation,
+  ) {
+    self.operations.push(operation);
+  }
+
+  /// Validate all operations in the transaction
+  /// Validate the transaction before preparation.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the transaction is not in the correct state or if validation fails.
+  pub fn validate(
+    &mut self,
+    _config: &Config,
+  ) -> Result<()> {
+    if self.state != TransactionState::Started {
+      return Err(DotfilesError::Config(
+        "Transaction must be in Started state to validate".to_string(),
+      ));
     }
 
-    /// Validate all operations in the transaction
-    /// Validate the transaction before preparation.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the transaction is not in the correct state or if validation fails.
-    pub fn validate(&mut self, _config: &Config) -> Result<()> {
-        if self.state != TransactionState::Started {
-            return Err(DotfilesError::Config(
-                "Transaction must be in Started state to validate".to_string(),
-            ));
+    // Validate each operation
+    for op in &self.operations {
+      match op {
+        FileOperation::CreateSymlink { source, target, .. } => {
+          // Check source exists
+          if !source.exists() {
+            return Err(DotfilesError::Path(format!(
+              "Source file does not exist: {}",
+              source.display()
+            )));
+          }
+          // Check target parent directory exists or can be created
+          if let Some(parent) = target.parent()
+            && !parent.exists()
+          {
+            // Will be created during prepare
+          }
         }
-
-        // Validate each operation
-        for op in &self.operations {
-            match op {
-                FileOperation::CreateSymlink { source, target, .. } => {
-                    // Check source exists
-                    if !source.exists() {
-                        return Err(DotfilesError::Path(format!(
-                            "Source file does not exist: {}",
-                            source.display()
-                        )));
-                    }
-                    // Check target parent directory exists or can be created
-                    if let Some(parent) = target.parent()
-                        && !parent.exists()
-                    {
-                        // Will be created during prepare
-                    }
-                }
-                FileOperation::RemoveSymlink { target } => {
-                    // Check target exists or is a symlink
-                    if !target.exists() && !target.is_symlink() {
-                        // Target doesn't exist, which is fine for removal
-                        // (idempotent operation)
-                    }
-                }
-                FileOperation::BackupAndReplace {
-                    source,
-                    backup_path,
-                    ..
-                } => {
-                    if !source.exists() {
-                        return Err(DotfilesError::Path(format!(
-                            "Source file does not exist: {}",
-                            source.display()
-                        )));
-                    }
-                    // Check backup directory can be created
-                    if let Some(parent) = backup_path.parent()
-                        && !parent.exists()
-                    {
-                        // Will be created during prepare
-                    }
-                }
-            }
+        FileOperation::RemoveSymlink { target } => {
+          // Check target exists or is a symlink
+          if !target.exists() && !target.is_symlink() {
+            // Target doesn't exist, which is fine for removal
+            // (idempotent operation)
+          }
         }
-
-        self.state = TransactionState::Prepared;
-        Ok(())
+        FileOperation::BackupAndReplace {
+          source,
+          backup_path,
+          ..
+        } => {
+          if !source.exists() {
+            return Err(DotfilesError::Path(format!(
+              "Source file does not exist: {}",
+              source.display()
+            )));
+          }
+          // Check backup directory can be created
+          if let Some(parent) = backup_path.parent()
+            && !parent.exists()
+          {
+            // Will be created during prepare
+          }
+        }
+      }
     }
 
-    /// Prepare all operations (stage changes in temp directory)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the transaction is not in the correct state or if preparation fails.
-    pub fn prepare(&self, _config: &Config) -> Result<()> {
-        // Note: config parameter kept for future use
-        if self.state != TransactionState::Prepared {
-            return Err(DotfilesError::Config(
-                "Transaction must be in Prepared state to prepare".to_string(),
-            ));
-        }
+    self.state = TransactionState::Prepared;
+    Ok(())
+  }
 
-        // For file operations, we'll stage them during commit
-        // This phase is mainly for validation and setup
-        Ok(())
+  /// Prepare all operations (stage changes in temp directory)
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the transaction is not in the correct state or if preparation fails.
+  pub fn prepare(
+    &self,
+    _config: &Config,
+  ) -> Result<()> {
+    // Note: config parameter kept for future use
+    if self.state != TransactionState::Prepared {
+      return Err(DotfilesError::Config(
+        "Transaction must be in Prepared state to prepare".to_string(),
+      ));
     }
 
-    /// Commit all operations atomically
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the transaction is not in the correct state or if any operation fails.
-    pub fn commit(&mut self, config: &Config, fs_manager: &mut FileSystemManager) -> Result<()> {
-        if self.state != TransactionState::Prepared {
-            return Err(DotfilesError::Config(
-                "Transaction must be in Prepared state to commit".to_string(),
-            ));
-        }
+    // For file operations, we'll stage them during commit
+    // This phase is mainly for validation and setup
+    Ok(())
+  }
 
-        // Execute all operations
-        for op in self.operations.clone() {
-            let result = match &op {
-                FileOperation::CreateSymlink {
-                    source,
-                    target,
-                    resolution,
-                } => Self::execute_create_symlink(source, target, *resolution, config, fs_manager),
-                FileOperation::RemoveSymlink { target } => {
-                    Self::execute_remove_symlink(target, fs_manager)
-                }
-                FileOperation::BackupAndReplace {
-                    source,
-                    target,
-                    backup_path,
-                    resolution,
-                } => Self::execute_backup_and_replace(
-                    source,
-                    target,
-                    backup_path,
-                    *resolution,
-                    fs_manager,
-                ),
-            };
-
-            self.results.push(result.clone());
-
-            // If any operation fails, rollback
-            if !result.success {
-                self.rollback(config, fs_manager);
-                let error_message = result.error.as_deref().unwrap_or("Unknown error");
-                return Err(DotfilesError::Config(format!(
-                    "Transaction failed: {error_message}"
-                )));
-            }
-        }
-
-        self.state = TransactionState::Committed;
-        Ok(())
+  /// Commit all operations atomically
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the transaction is not in the correct state or if any operation fails.
+  pub fn commit(
+    &mut self,
+    config: &Config,
+    fs_manager: &mut FileSystemManager,
+  ) -> Result<()> {
+    if self.state != TransactionState::Prepared {
+      return Err(DotfilesError::Config(
+        "Transaction must be in Prepared state to commit".to_string(),
+      ));
     }
 
-    /// Verify that all changes were applied correctly
-    /// Verify that all operations completed successfully.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the transaction is not in the correct state or if verification fails.
-    pub fn verify(&mut self) -> Result<()> {
-        if self.state != TransactionState::Committed {
-            return Err(DotfilesError::Config(
-                "Transaction must be in Committed state to verify".to_string(),
-            ));
-        }
+    // Execute all operations
+    for op in self.operations.clone() {
+      let result = match &op {
+        FileOperation::CreateSymlink {
+          source,
+          target,
+          resolution,
+        } => Self::execute_create_symlink(source, target, *resolution, config, fs_manager),
+        FileOperation::RemoveSymlink { target } => Self::execute_remove_symlink(target, fs_manager),
+        FileOperation::BackupAndReplace {
+          source,
+          target,
+          backup_path,
+          resolution,
+        } => Self::execute_backup_and_replace(source, target, backup_path, *resolution, fs_manager),
+      };
 
-        // Build a set of targets that are created after being removed
-        // (to skip verification for RemoveSymlink operations that are immediately followed by CreateSymlink)
-        let mut targets_created_after_removal = std::collections::HashSet::new();
-        for (i, result) in self.results.iter().enumerate() {
-            if let FileOperation::RemoveSymlink { target } = &result.operation {
-                // Check if the next operation creates a symlink at the same target
-                if let Some(next_result) = self.results.get(i + 1)
-                    && let FileOperation::CreateSymlink {
-                        target: create_target,
-                        ..
-                    } = &next_result.operation
-                    && target == create_target
-                {
-                    let _ = targets_created_after_removal.insert(target.clone());
-                }
-            }
-        }
+      self.results.push(result.clone());
 
-        // Verify each operation succeeded
-        for result in &self.results {
-            if !result.success {
-                let error_message = result.error.as_deref().unwrap_or("Unknown error");
-                return Err(DotfilesError::Config(format!(
-                    "Verification failed: operation did not succeed: {error_message}"
-                )));
-            }
-
-            // Additional verification for file and package operations
-            match &result.operation {
-                FileOperation::CreateSymlink { target, .. } => {
-                    if !target.exists() && !target.is_symlink() {
-                        return Err(DotfilesError::Path(format!(
-                            "Verification failed: symlink does not exist: {}",
-                            target.display()
-                        )));
-                    }
-                }
-                FileOperation::RemoveSymlink { target } => {
-                    // Skip verification if this target is immediately recreated
-                    if !targets_created_after_removal.contains(target)
-                        && (target.exists() || target.is_symlink())
-                    {
-                        return Err(DotfilesError::Path(format!(
-                            "Verification failed: symlink still exists: {}",
-                            target.display()
-                        )));
-                    }
-                }
-                FileOperation::BackupAndReplace { .. } => {
-                    // Other operations verified by their success flag
-                }
-            }
-        }
-
-        self.state = TransactionState::Verified;
-        Ok(())
+      // If any operation fails, rollback
+      if !result.success {
+        self.rollback(config, fs_manager);
+        let error_message = result.error.as_deref().unwrap_or("Unknown error");
+        return Err(DotfilesError::Config(format!(
+          "Transaction failed: {error_message}"
+        )));
+      }
     }
 
-    /// Rollback all changes made by this transaction
-    pub fn rollback(&mut self, _config: &Config, fs_manager: &mut FileSystemManager) {
-        if self.state == TransactionState::RolledBack {
-            return; // Already rolled back
-        }
+    self.state = TransactionState::Committed;
+    Ok(())
+  }
 
-        // Rollback in reverse order
-        for result in self.results.iter().rev() {
-            if result.success {
-                match &result.operation {
-                    FileOperation::CreateSymlink { target, .. } => {
-                        // Remove the symlink we created
-                        if target.exists() || target.is_symlink() {
-                            let _ = fs_manager.remove_file(target);
-                        }
-                    }
-                    FileOperation::RemoveSymlink { .. } => {
-                        // Can't easily restore removed symlinks, but we have backups
-                        // This would require storing the original state
-                    }
-                    FileOperation::BackupAndReplace {
-                        target,
-                        backup_path,
-                        ..
-                    } => {
-                        // Restore from backup
-                        if backup_path.exists() {
-                            if let Some(parent) = target.parent() {
-                                let _ = fs_manager.create_dir_all(parent);
-                            }
-                            if backup_path.is_dir() {
-                                let _ = fs_manager.copy_dir_all(backup_path, target);
-                            } else {
-                                let _ = fs_manager.copy(backup_path, target);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        self.state = TransactionState::RolledBack;
+  /// Verify that all changes were applied correctly
+  /// Verify that all operations completed successfully.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the transaction is not in the correct state or if verification fails.
+  pub fn verify(&mut self) -> Result<()> {
+    if self.state != TransactionState::Committed {
+      return Err(DotfilesError::Config(
+        "Transaction must be in Committed state to verify".to_string(),
+      ));
     }
 
-    /// Clean up temporary files and directories
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if cleanup fails.
-    pub fn cleanup(&self) -> Result<()> {
-        if self.temp_dir.exists() {
-            fs::remove_dir_all(&self.temp_dir)?;
-        }
-        Ok(())
-    }
-
-    // Private helper methods for executing operations
-
-    /// Execute creation of a symlink.
-    fn execute_create_symlink(
-        source: &Path,
-        target: &Path,
-        resolution: SymlinkResolution,
-        _config: &Config,
-        fs_manager: &mut FileSystemManager,
-    ) -> OperationResult {
-        // Create parent directory if needed
-        if let Some(parent) = target.parent()
-            && let Err(error) = fs_manager.create_dir_all(parent)
+    // Build a set of targets that are created after being removed
+    // (to skip verification for RemoveSymlink operations that are immediately followed by CreateSymlink)
+    let mut targets_created_after_removal = std::collections::HashSet::new();
+    for (i, result) in self.results.iter().enumerate() {
+      if let FileOperation::RemoveSymlink { target } = &result.operation {
+        // Check if the next operation creates a symlink at the same target
+        if let Some(next_result) = self.results.get(i + 1)
+          && let FileOperation::CreateSymlink {
+            target: create_target,
+            ..
+          } = &next_result.operation
+          && target == create_target
         {
-            return OperationResult {
-                operation: FileOperation::CreateSymlink {
-                    source: source.to_path_buf(),
-                    target: target.to_path_buf(),
-                    resolution,
-                },
-                success: false,
-                error: Some(format!("Failed to create parent directory: {error}")),
-            };
+          let _ = targets_created_after_removal.insert(target.clone());
         }
+      }
+    }
 
-        // Create symlink using atomic approach
-        let link_target = match resolution {
-            SymlinkResolution::Auto | SymlinkResolution::Relative | SymlinkResolution::Follow => {
-                target.parent().map_or_else(
-                    || source.to_path_buf(),
-                    |parent| {
-                        pathdiff::diff_paths(source, parent).unwrap_or_else(|| source.to_path_buf())
-                    },
-                )
+    // Verify each operation succeeded
+    for result in &self.results {
+      if !result.success {
+        let error_message = result.error.as_deref().unwrap_or("Unknown error");
+        return Err(DotfilesError::Config(format!(
+          "Verification failed: operation did not succeed: {error_message}"
+        )));
+      }
+
+      // Additional verification for file and package operations
+      match &result.operation {
+        FileOperation::CreateSymlink { target, .. } => {
+          if !target.exists() && !target.is_symlink() {
+            return Err(DotfilesError::Path(format!(
+              "Verification failed: symlink does not exist: {}",
+              target.display()
+            )));
+          }
+        }
+        FileOperation::RemoveSymlink { target } => {
+          // Skip verification if this target is immediately recreated
+          if !targets_created_after_removal.contains(target)
+            && (target.exists() || target.is_symlink())
+          {
+            return Err(DotfilesError::Path(format!(
+              "Verification failed: symlink still exists: {}",
+              target.display()
+            )));
+          }
+        }
+        FileOperation::BackupAndReplace { .. } => {
+          // Other operations verified by their success flag
+        }
+      }
+    }
+
+    self.state = TransactionState::Verified;
+    Ok(())
+  }
+
+  /// Rollback all changes made by this transaction
+  pub fn rollback(
+    &mut self,
+    _config: &Config,
+    fs_manager: &mut FileSystemManager,
+  ) {
+    if self.state == TransactionState::RolledBack {
+      return; // Already rolled back
+    }
+
+    // Rollback in reverse order
+    for result in self.results.iter().rev() {
+      if result.success {
+        match &result.operation {
+          FileOperation::CreateSymlink { target, .. } => {
+            // Remove the symlink we created
+            if target.exists() || target.is_symlink() {
+              let _ = fs_manager.remove_file(target);
             }
-            SymlinkResolution::Absolute => source.to_path_buf(),
-            SymlinkResolution::Replace => {
-                // For Replace, we copy instead of symlink
-                let temp_path = target.with_extension("flux-temp-copy");
-                if let Err(error) = fs_manager.copy(source, &temp_path) {
-                    return OperationResult {
-                        operation: FileOperation::CreateSymlink {
-                            source: source.to_path_buf(),
-                            target: target.to_path_buf(),
-                            resolution,
-                        },
-                        success: false,
-                        error: Some(format!("Failed to copy file: {error}")),
-                    };
-                }
-                if let Err(error) = fs_manager.rename(&temp_path, target) {
-                    return OperationResult {
-                        operation: FileOperation::CreateSymlink {
-                            source: source.to_path_buf(),
-                            target: target.to_path_buf(),
-                            resolution,
-                        },
-                        success: false,
-                        error: Some(format!("Failed to rename temp file: {error}")),
-                    };
-                }
-                return OperationResult {
-                    operation: FileOperation::CreateSymlink {
-                        source: source.to_path_buf(),
-                        target: target.to_path_buf(),
-                        resolution,
-                    },
-                    success: true,
-                    error: None,
-                };
+          }
+          FileOperation::RemoveSymlink { .. } => {
+            // Can't easily restore removed symlinks, but we have backups
+            // This would require storing the original state
+          }
+          FileOperation::BackupAndReplace {
+            target,
+            backup_path,
+            ..
+          } => {
+            // Restore from backup
+            if backup_path.exists() {
+              if let Some(parent) = target.parent() {
+                let _ = fs_manager.create_dir_all(parent);
+              }
+              if backup_path.is_dir() {
+                let _ = fs_manager.copy_dir_all(backup_path, target);
+              } else {
+                let _ = fs_manager.copy(backup_path, target);
+              }
             }
-        };
-
-        // Create temp symlink first
-        let ext_str = target.extension().and_then(|ext| ext.to_str()).unwrap_or_default();
-        let temp_link_path = target.with_extension(format!("{ext_str}.flux-temp"));
-
-        // Remove old temp link if exists
-        let _ = fs_manager.remove_file(&temp_link_path);
-
-        if let Err(error) = fs_manager.symlink(&link_target, &temp_link_path) {
-            return OperationResult {
-                operation: FileOperation::CreateSymlink {
-                    source: source.to_path_buf(),
-                    target: target.to_path_buf(),
-                    resolution,
-                },
-                success: false,
-                error: Some(format!("Failed to create temp symlink: {error}")),
-            };
+          }
         }
+      }
+    }
 
-        // Atomically rename
-        if let Err(error) = fs_manager.rename(&temp_link_path, target) {
-            return OperationResult {
-                operation: FileOperation::CreateSymlink {
-                    source: source.to_path_buf(),
-                    target: target.to_path_buf(),
-                    resolution,
-                },
-                success: false,
-                error: Some(format!("Failed to rename temp symlink: {error}")),
-            };
-        }
+    self.state = TransactionState::RolledBack;
+  }
 
-        OperationResult {
+  /// Clean up temporary files and directories
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if cleanup fails.
+  pub fn cleanup(&self) -> Result<()> {
+    if self.temp_dir.exists() {
+      fs::remove_dir_all(&self.temp_dir)?;
+    }
+    Ok(())
+  }
+
+  // Private helper methods for executing operations
+
+  /// Execute creation of a symlink.
+  fn execute_create_symlink(
+    source: &Path,
+    target: &Path,
+    resolution: SymlinkResolution,
+    _config: &Config,
+    fs_manager: &mut FileSystemManager,
+  ) -> OperationResult {
+    // Create parent directory if needed
+    if let Some(parent) = target.parent()
+      && let Err(error) = fs_manager.create_dir_all(parent)
+    {
+      return OperationResult {
+        operation: FileOperation::CreateSymlink {
+          source: source.to_path_buf(),
+          target: target.to_path_buf(),
+          resolution,
+        },
+        success: false,
+        error: Some(format!("Failed to create parent directory: {error}")),
+      };
+    }
+
+    // Create symlink using atomic approach
+    let link_target = match resolution {
+      SymlinkResolution::Auto | SymlinkResolution::Relative | SymlinkResolution::Follow => {
+        target.parent().map_or_else(
+          || source.to_path_buf(),
+          |parent| pathdiff::diff_paths(source, parent).unwrap_or_else(|| source.to_path_buf()),
+        )
+      }
+      SymlinkResolution::Absolute => source.to_path_buf(),
+      SymlinkResolution::Replace => {
+        // For Replace, we copy instead of symlink
+        let temp_path = target.with_extension("flux-temp-copy");
+        if let Err(error) = fs_manager.copy(source, &temp_path) {
+          return OperationResult {
             operation: FileOperation::CreateSymlink {
-                source: source.to_path_buf(),
-                target: target.to_path_buf(),
-                resolution,
+              source: source.to_path_buf(),
+              target: target.to_path_buf(),
+              resolution,
             },
-            success: true,
-            error: None,
+            success: false,
+            error: Some(format!("Failed to copy file: {error}")),
+          };
         }
+        if let Err(error) = fs_manager.rename(&temp_path, target) {
+          return OperationResult {
+            operation: FileOperation::CreateSymlink {
+              source: source.to_path_buf(),
+              target: target.to_path_buf(),
+              resolution,
+            },
+            success: false,
+            error: Some(format!("Failed to rename temp file: {error}")),
+          };
+        }
+        return OperationResult {
+          operation: FileOperation::CreateSymlink {
+            source: source.to_path_buf(),
+            target: target.to_path_buf(),
+            resolution,
+          },
+          success: true,
+          error: None,
+        };
+      }
+    };
+
+    // Create temp symlink first
+    let ext_str = target
+      .extension()
+      .and_then(|ext| ext.to_str())
+      .unwrap_or_default();
+    let temp_link_path = target.with_extension(format!("{ext_str}.flux-temp"));
+
+    // Remove old temp link if exists
+    let _ = fs_manager.remove_file(&temp_link_path);
+
+    if let Err(error) = fs_manager.symlink(&link_target, &temp_link_path) {
+      return OperationResult {
+        operation: FileOperation::CreateSymlink {
+          source: source.to_path_buf(),
+          target: target.to_path_buf(),
+          resolution,
+        },
+        success: false,
+        error: Some(format!("Failed to create temp symlink: {error}")),
+      };
     }
 
-    /// Execute removal of a symlink.
-    fn execute_remove_symlink(
-        target: &Path,
-        fs_manager: &mut FileSystemManager,
-    ) -> OperationResult {
-        let target_path = target.to_path_buf();
-        if let Err(error) = fs_manager.remove_file(&target_path) {
-            OperationResult {
-                operation: FileOperation::RemoveSymlink {
-                    target: target_path,
-                },
-                success: false,
-                error: Some(format!("Failed to remove symlink: {error}")),
-            }
-        } else {
-            OperationResult {
-                operation: FileOperation::RemoveSymlink {
-                    target: target_path,
-                },
-                success: true,
-                error: None,
-            }
-        }
+    // Atomically rename
+    if let Err(error) = fs_manager.rename(&temp_link_path, target) {
+      return OperationResult {
+        operation: FileOperation::CreateSymlink {
+          source: source.to_path_buf(),
+          target: target.to_path_buf(),
+          resolution,
+        },
+        success: false,
+        error: Some(format!("Failed to rename temp symlink: {error}")),
+      };
     }
 
-    /// Execute backup and replace operation.
-    fn execute_backup_and_replace(
-        source: &Path,
-        target: &Path,
-        backup_path: &Path,
-        resolution: SymlinkResolution,
-        fs_manager: &mut FileSystemManager,
-    ) -> OperationResult {
-        // Create backup
-        if target.exists() {
-            if let Some(parent) = backup_path.parent()
-                && let Err(error) = fs_manager.create_dir_all(parent)
-            {
-                return OperationResult {
-                    operation: FileOperation::BackupAndReplace {
-                        source: source.to_path_buf(),
-                        target: target.to_path_buf(),
-                        backup_path: backup_path.to_path_buf(),
-                        resolution,
-                    },
-                    success: false,
-                    error: Some(format!("Failed to create backup directory: {error}")),
-                };
-            }
+    OperationResult {
+      operation: FileOperation::CreateSymlink {
+        source: source.to_path_buf(),
+        target: target.to_path_buf(),
+        resolution,
+      },
+      success: true,
+      error: None,
+    }
+  }
 
-            if target.is_dir() {
-                if let Err(error) = fs_manager.copy_dir_all(target, backup_path) {
-                    return OperationResult {
-                        operation: FileOperation::BackupAndReplace {
-                            source: source.to_path_buf(),
-                            target: target.to_path_buf(),
-                            backup_path: backup_path.to_path_buf(),
-                            resolution,
-                        },
-                        success: false,
-                        error: Some(format!("Failed to backup directory: {error}")),
-                    };
-                }
-            } else if let Err(error) = fs_manager.copy(target, backup_path) {
-                return OperationResult {
-                    operation: FileOperation::BackupAndReplace {
-                        source: source.to_path_buf(),
-                        target: target.to_path_buf(),
-                        backup_path: backup_path.to_path_buf(),
-                        resolution,
-                    },
-                    success: false,
-                    error: Some(format!("Failed to backup file: {error}")),
-                };
-            }
-        }
+  /// Execute removal of a symlink.
+  fn execute_remove_symlink(
+    target: &Path,
+    fs_manager: &mut FileSystemManager,
+  ) -> OperationResult {
+    let target_path = target.to_path_buf();
+    if let Err(error) = fs_manager.remove_file(&target_path) {
+      OperationResult {
+        operation: FileOperation::RemoveSymlink {
+          target: target_path,
+        },
+        success: false,
+        error: Some(format!("Failed to remove symlink: {error}")),
+      }
+    } else {
+      OperationResult {
+        operation: FileOperation::RemoveSymlink {
+          target: target_path,
+        },
+        success: true,
+        error: None,
+      }
+    }
+  }
 
-        OperationResult {
+  /// Execute backup and replace operation.
+  fn execute_backup_and_replace(
+    source: &Path,
+    target: &Path,
+    backup_path: &Path,
+    resolution: SymlinkResolution,
+    fs_manager: &mut FileSystemManager,
+  ) -> OperationResult {
+    // Create backup
+    if target.exists() {
+      if let Some(parent) = backup_path.parent()
+        && let Err(error) = fs_manager.create_dir_all(parent)
+      {
+        return OperationResult {
+          operation: FileOperation::BackupAndReplace {
+            source: source.to_path_buf(),
+            target: target.to_path_buf(),
+            backup_path: backup_path.to_path_buf(),
+            resolution,
+          },
+          success: false,
+          error: Some(format!("Failed to create backup directory: {error}")),
+        };
+      }
+
+      if target.is_dir() {
+        if let Err(error) = fs_manager.copy_dir_all(target, backup_path) {
+          return OperationResult {
             operation: FileOperation::BackupAndReplace {
-                source: source.to_path_buf(),
-                target: target.to_path_buf(),
-                backup_path: backup_path.to_path_buf(),
-                resolution,
+              source: source.to_path_buf(),
+              target: target.to_path_buf(),
+              backup_path: backup_path.to_path_buf(),
+              resolution,
             },
-            success: true,
-            error: None,
+            success: false,
+            error: Some(format!("Failed to backup directory: {error}")),
+          };
         }
+      } else if let Err(error) = fs_manager.copy(target, backup_path) {
+        return OperationResult {
+          operation: FileOperation::BackupAndReplace {
+            source: source.to_path_buf(),
+            target: target.to_path_buf(),
+            backup_path: backup_path.to_path_buf(),
+            resolution,
+          },
+          success: false,
+          error: Some(format!("Failed to backup file: {error}")),
+        };
+      }
     }
+
+    OperationResult {
+      operation: FileOperation::BackupAndReplace {
+        source: source.to_path_buf(),
+        target: target.to_path_buf(),
+        backup_path: backup_path.to_path_buf(),
+        resolution,
+      },
+      success: true,
+      error: None,
+    }
+  }
 }

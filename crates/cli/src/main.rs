@@ -13,20 +13,20 @@ use flux_lib::utils::logging;
 use std::path::Path;
 
 fn main() {
-    let cli = Cli::parse();
+  let cli = Cli::parse();
 
-    if cli.no_color {
-        control::set_override(false);
-    }
+  if cli.no_color {
+    control::set_override(false);
+  }
 
-    if let Some(config_path) = &cli.config {
-        Config::set_path_override(Path::new(config_path));
-    }
+  if let Some(config_path) = &cli.config {
+    Config::set_path_override(Path::new(config_path));
+  }
 
-    logging::init_logging(cli.log_level.as_deref());
+  logging::init_logging(cli.log_level.as_deref());
 
-    if let Err(err) = { cli.command.execute() } {
-        eprintln!("{} {}", "Error:".red().bold(), err);
-        std::process::exit(1);
-    }
+  if let Err(err) = { cli.command.execute() } {
+    eprintln!("{} {}", "Error:".red().bold(), err);
+    std::process::exit(1);
+  }
 }

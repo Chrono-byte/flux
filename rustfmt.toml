@@ -5,21 +5,19 @@
 # Edition
 edition = "2024"
 
-# Maximum width of each line
-max_width = 100
 
 # Use spaces for indentation (4 spaces per tab)
 hard_tabs = false
-tab_spaces = 4
+tab_spaces = 2
 
 # Put a newline after the opening brace of a block
 newline_style = "Unix"
 
 # Controls the formatting of function signatures
-fn_params_layout = "Tall"
+fn_params_layout = "Vertical"
 
-# Controls the formatting of chains
-chain_width = 80
+# Maximum width of each line
+chain_width = 50
 use_small_heuristics = "Default"
 
 # Controls the formatting of match expressions
