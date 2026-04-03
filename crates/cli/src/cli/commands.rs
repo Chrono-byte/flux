@@ -193,7 +193,7 @@ pub(super) fn handle_add_command(
       &mut config,
       tool,
       &repo_path,
-      repo_file,
+      &repo_file,
       &dest_path,
       profile,
       dry_run,
@@ -223,7 +223,7 @@ pub(super) fn handle_add_command(
         &mut config,
         tool,
         &repo_path,
-        repo_file,
+        &repo_file,
         &dest_path,
         profile,
         dry_run,
@@ -469,7 +469,7 @@ fn register_repo_file(
   config: &mut Config,
   tool: &str,
   repo_path: &Path,
-  repo_file: PathBuf,
+  repo_file: &Path,
   dest_path: &Path,
   profile: Option<&str>,
   dry_run: bool,
@@ -516,6 +516,7 @@ fn register_repo_file(
   Ok(())
 }
 
+/// Check if an entry is already tracked in the config.
 fn already_tracked_entry(
   config: &Config,
   tool: &str,
@@ -538,6 +539,7 @@ fn already_tracked_entry(
   false
 }
 
+/// Resolve the destination path for a file entry.
 fn resolve_entry_dest(entry: &FileEntry) -> PathBuf {
   let entry_dest = Path::new(&entry.dest);
   if entry_dest.is_absolute() {
@@ -1403,19 +1405,26 @@ mod add_command_tests {
       &mut config,
       "codex",
       &repo_path,
-      repo_file.clone(),
+      &repo_file,
       &dest_path,
       None,
       true,
     )?;
 
-    let tool_entry = config
-      .tools
-      .get("codex")
-      .expect("tool should exist");
+    let tool_entry = config.tools.get("codex");
+    assert!(tool_entry.is_some());
+
+    let tool_entry = tool_entry.unwrap_or_else(|| unreachable!());
     assert_eq!(tool_entry.files.len(), 1);
-    assert_eq!(tool_entry.files[0].repo, "codex/config.toml");
-    assert_eq!(tool_entry.files[0].dest, dest_path.to_string_lossy());
+
+    let file = tool_entry.files.first();
+    assert!(file.is_some());
+
+    let file = file.unwrap_or_else(|| unreachable!());
+
+    assert_eq!(file.repo, "codex/config.toml");
+    assert_eq!(file.dest, dest_path.to_string_lossy());
+
     Ok(())
   }
 
@@ -1438,7 +1447,7 @@ mod add_command_tests {
       &mut config,
       "codex",
       &repo_path,
-      repo_file,
+      &repo_file,
       &dest_path,
       None,
       true,
