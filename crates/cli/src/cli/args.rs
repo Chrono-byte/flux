@@ -138,12 +138,6 @@ pub enum Commands {
         #[command(subcommand)]
         command: ProfileCommands,
     },
-    /// Configuration management operations
-    Config {
-        /// Command to execute
-        #[command(subcommand)]
-        command: ConfigCommands,
-    },
     /// Manage remote repositories
     Remote {
         /// Command to execute
@@ -292,23 +286,6 @@ pub enum RemoteCommands {
         /// Remote name
         name: String,
         /// Dry run mode
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-#[derive(Subcommand)]
-/// Commands for managing config.
-pub enum ConfigCommands {
-    /// Sync XDG config to repo (overwrite repo config with XDG config)
-    Sync {
-        /// Dry run mode (show what would be done without actually doing it)
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Format and organize XDG config file
-    Format {
-        /// Dry run mode (show what would be done without actually doing it)
         #[arg(long)]
         dry_run: bool,
     },

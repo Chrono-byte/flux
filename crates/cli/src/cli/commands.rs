@@ -8,9 +8,7 @@ use std::env;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use super::args::{
-    Cli, Commands, ConfigCommands, MaintainCommands, ProfileCommands, RemoteCommands,
-};
+use super::args::{Cli, Commands, MaintainCommands, ProfileCommands, RemoteCommands};
 use flux_lib::{
     commands::apply::StateDiff,
     commands::doctor::HealthReport,
@@ -743,71 +741,6 @@ pub(super) fn handle_profile_command(command: ProfileCommands) -> Result<()> {
     Ok(())
 }
 
-/// Handle the config command.
-///
-/// # Parameters
-///
-/// * `command`: The config command to handle.
-///
-/// # Returns
-///
-/// Returns the result of the config command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be synced or formatted.
-/// Handle the config command.
-///
-/// # Parameters
-///
-/// * `command`: The config command to handle.
-///
-/// # Returns
-///
-/// Returns the result of the config command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be synced or formatted.
-pub(super) fn handle_config_command(command: &ConfigCommands) -> Result<()> {
-    match command {
-        ConfigCommands::Sync { dry_run } => {
-            Config::sync_repo_to_xdg(*dry_run)?;
-        }
-        ConfigCommands::Format { dry_run } => {
-            let xdg_config = Config::get_xdg_config_path()?;
-
-            if !xdg_config.exists() {
-                return Err(DotfilesError::Config(
-                    "XDG config does not exist. Nothing to format.".to_string(),
-                ));
-            }
-
-            if *dry_run {
-                println!(
-                    "{} [DRY RUN] Would format and organize {}",
-                    "⊘".yellow(),
-                    xdg_config.display()
-                );
-                return Ok(());
-            }
-
-            // Load config (prefers XDG location if it exists)
-            let config = Config::load()?;
-
-            // Save formatted config back to XDG location
-            config.save(true)?;
-
-            println!(
-                "{} Formatted and organized config: {}",
-                "✓".green(),
-                xdg_config.display()
-            );
-        }
-    }
-    Ok(())
-}
-
 /// Handle the remote command.
 ///
 /// # Parameters
@@ -1172,7 +1105,6 @@ fn execute_internal(cmd: Commands) -> Result<()> {
             json,
         )?,
         Commands::Profile { command } => handle_profile_command(command)?,
-        Commands::Config { command } => handle_config_command(&command)?,
         Commands::Remote { command } => handle_remote_command(command)?,
         Commands::Push {
             remote,
@@ -1219,24 +1151,7 @@ impl Commands {
     }
 }
 
-/// Handle the import command.
-///
-/// # Parameters
-///
-/// * `command`: The import command to handle.
-///
-/// # Returns
-///
-/// Returns the result of the import command.
 /// Handle the completion command.
-///
-/// # Parameters
-///
-/// * `shell`: The shell type to generate completions for.
-///
-/// # Returns
-///
-/// Returns the result of the completion command.
 pub(super) fn handle_completion_command(shell: &str) {
     use clap_complete::{generate, shells::Zsh};
     let mut cmd = Cli::command();
