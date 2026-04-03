@@ -207,7 +207,8 @@ impl DryRun {
   }
 
   /// Returns the operations that have been logged.
-  #[cfg_attr(not(test), allow(dead_code))]
+  #[cfg(not(test))]
+  #[must_use = "operations should not be ignored in tests"]
   pub fn operations(&self) -> &[Operation] {
     &self.operations
   }
