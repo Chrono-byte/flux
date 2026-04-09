@@ -1,7 +1,6 @@
 use crate::config::Config;
 use crate::utils::error::Result;
 use crate::utils::error_utils;
-use colored::Colorize;
 use std::path::PathBuf;
 
 /// Create a new profile directory in the repository.
@@ -17,8 +16,6 @@ pub fn create_profile(
   let profile_dir = repo_path.join("profiles").join(name);
 
   std::fs::create_dir_all(&profile_dir)?;
-
-  println!("{} Created profile: {}", "✓".green(), name);
   Ok(())
 }
 
@@ -42,8 +39,6 @@ pub fn switch_profile(
 
   config.general.current_profile = name.to_string();
   config.save(false)?;
-
-  println!("{} Switched to profile: {}", "✓".green(), name);
   Ok(())
 }
 

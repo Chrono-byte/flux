@@ -5,7 +5,6 @@ use crate::utils::path_utils::{
   files_differ, find_symlinked_parent, normalize_path, resolve_symlink_target,
   symlink_points_to_correct_target,
 };
-use colored::Colorize;
 use serde::Serialize;
 use std::fs;
 use std::time::SystemTime;
@@ -262,108 +261,4 @@ pub fn check_conflicts(
   }
 
   Ok(conflicted)
-}
-
-/// Display the status of the tracked files with git-like formatting.
-///
-/// # Parameters
-///
-/// * `reports`: The status reports to display.
-pub fn display_status(reports: &[StatusReport]) {
-  if reports.is_empty() {
-    println!("{}", "No tracked files found.".yellow());
-    return;
-  }
-
-  // Group reports by status type
-  let mut synced: Vec<&StatusReport> = Vec::new();
-  let mut missing_symlinks: Vec<&StatusReport> = Vec::new();
-  let mut broken_symlinks: Vec<&StatusReport> = Vec::new();
-  let mut out_of_sync: Vec<&StatusReport> = Vec::new();
-  let mut missing_repo: Vec<&StatusReport> = Vec::new();
-
-  for report in reports {
-    match report.status {
-      FileStatus::Synced => synced.push(report),
-      FileStatus::MissingSymlink => missing_symlinks.push(report),
-      FileStatus::BrokenSymlink => broken_symlinks.push(report),
-      FileStatus::OutOfSync => out_of_sync.push(report),
-      FileStatus::MissingRepo => missing_repo.push(report),
-    }
-  }
-
-  // Sort each group by destination path for consistent output
-  synced.sort_by_key(|report| &report.file.dest_path);
-  missing_symlinks.sort_by_key(|report| &report.file.dest_path);
-  broken_symlinks.sort_by_key(|report| &report.file.dest_path);
-  out_of_sync.sort_by_key(|report| &report.file.dest_path);
-  missing_repo.sort_by_key(|report| &report.file.repo_path);
-
-  // Display issues sections (similar to git's "Changes not staged for commit")
-  let has_issues = !missing_symlinks.is_empty()
-    || !broken_symlinks.is_empty()
-    || !out_of_sync.is_empty()
-    || !missing_repo.is_empty();
-
-  if has_issues {
-    // Missing symlinks (similar to "Changes not staged for commit")
-    if !missing_symlinks.is_empty() {
-      println!("\n{}", "Missing symlinks:".yellow().bold());
-      for report in &missing_symlinks {
-        println!("  {}", format_file_path(&report.file.dest_path).yellow());
-      }
-    }
-
-    // Broken symlinks
-    if !broken_symlinks.is_empty() {
-      println!("\n{}", "Broken symlinks:".yellow().bold());
-      for report in &broken_symlinks {
-        println!("  {}", format_file_path(&report.file.dest_path).yellow());
-      }
-    }
-
-    // Out of sync
-    if !out_of_sync.is_empty() {
-      println!("\n{}", "Out of sync:".yellow().bold());
-      for report in &out_of_sync {
-        println!("  {}", format_file_path(&report.file.dest_path).yellow());
-      }
-    }
-
-    // Missing repo files
-    if !missing_repo.is_empty() {
-      println!("\n{}", "Missing repo files:".red().bold());
-      for report in &missing_repo {
-        println!("  {}", format_file_path(&report.file.repo_path).red());
-      }
-    }
-  }
-
-  // Summary (similar to git status summary)
-  let total = reports.len();
-  let synced_count = synced.len();
-  let issues_count = total - synced_count;
-
-  if issues_count == 0 {
-    println!("\n{}", "nothing to sync, working tree clean".green());
-  } else {
-    println!(
-      "\n{} {} file(s) synced, {} file(s) need attention",
-      "Summary:".bold(),
-      synced_count.to_string().green(),
-      issues_count.to_string().yellow()
-    );
-  }
-}
-
-/// Format a file path for display, showing relative path when possible.
-fn format_file_path(path: &std::path::Path) -> String {
-  // Try to show relative path from current directory, fallback to full path
-  std::env::current_dir()
-    .ok()
-    .and_then(|cwd| path.strip_prefix(&cwd).ok())
-    .map_or_else(
-      || path.display().to_string(),
-      |rel| rel.display().to_string(),
-    )
 }

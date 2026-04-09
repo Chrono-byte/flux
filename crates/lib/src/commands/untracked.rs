@@ -4,8 +4,6 @@ use crate::utils::error::Result;
 use crate::utils::path_utils::{
   files_differ, resolve_symlink_target, symlink_points_to_correct_target,
 };
-use colored::Colorize;
-use std::collections::HashMap;
 use std::fs;
 
 /// A discrepancy found in a tracked file.
@@ -168,90 +166,4 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
       }))
     }
   }
-}
-
-/// Display the discrepancies found in the tracked files.
-pub fn display_discrepancies(discrepancies: &[Discrepancy]) {
-  if discrepancies.is_empty() {
-    println!(
-      "{}",
-      "✓ All tracked files are correctly configured.".green()
-    );
-    return;
-  }
-
-  println!("\n{}", "Discrepancies Found:".bold().red());
-  println!("{}", "=".repeat(80).red());
-
-  // Group by tool
-  let mut by_tool: HashMap<String, Vec<&Discrepancy>> = HashMap::new();
-  for discrepancy in discrepancies {
-    by_tool
-      .entry(discrepancy.file.tool.clone())
-      .or_default()
-      .push(discrepancy);
-  }
-
-  let mut tool_names: Vec<_> = by_tool.keys().collect();
-  tool_names.sort();
-
-  let empty_vec = Vec::new();
-  for tool in tool_names {
-    let tool_discrepancies = by_tool.get(tool).unwrap_or(&empty_vec);
-    println!(
-      "\n{} {} ({} issue(s))",
-      "Tool:".bold().yellow(),
-      tool.cyan(),
-      tool_discrepancies.len()
-    );
-
-    for discrepancy in tool_discrepancies {
-      let icon = match discrepancy.issue {
-        IssueType::Missing => "⊘".red(),
-        IssueType::NotSymlink => "⚠".yellow(),
-        IssueType::WrongTarget | IssueType::ContentDiffers => "↻".yellow(),
-        IssueType::MissingRepo => "✗".red(),
-        IssueType::BrokenSymlink => "⚠".red(),
-      };
-
-      let profile_info = discrepancy.file.profile.as_ref().map_or_else(
-        || "".normal(),
-        |profile| format!(" [profile: {profile}]").yellow(),
-      );
-
-      println!("  {} {}", icon, discrepancy.message.bright_white());
-      println!(
-        "      Repo: {}",
-        discrepancy
-          .file
-          .repo_path
-          .display()
-          .to_string()
-          .bright_black()
-      );
-      println!(
-        "      Dest: {}{}",
-        discrepancy
-          .file
-          .dest_path
-          .display()
-          .to_string()
-          .bright_black(),
-        profile_info
-      );
-    }
-  }
-
-  println!("\n{}", "=".repeat(80).red());
-  println!(
-    "{} Found {} discrepancy(ies) in tracked files",
-    "→".cyan(),
-    discrepancies.len()
-  );
-  println!(
-    "\n{}",
-    "Tip: Run 'sync' command to fix these issues"
-      .yellow()
-      .italic()
-  );
 }

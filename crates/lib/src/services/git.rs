@@ -3,7 +3,6 @@ use crate::utils::dry_run::{DryRun, Operation};
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::error_utils;
 use crate::utils::home_override;
-use colored::Colorize;
 use git2::{CredentialType, RemoteCallbacks, Repository, Signature};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,6 +15,96 @@ pub struct GitRepository {
   repo: Repository,
   /// The path to the repository
   repo_path: PathBuf,
+}
+
+/// Summary of a commit operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitReport {
+  /// Short branch name, if one was available.
+  pub branch_name: Option<String>,
+  /// Short commit id.
+  pub short_id: String,
+  /// Commit message used.
+  pub message: String,
+}
+
+/// Information about a configured remote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteInfo {
+  /// Remote name.
+  pub name: String,
+  /// Fetch URL.
+  pub fetch_url: String,
+  /// Push URL.
+  pub push_url: String,
+}
+
+/// Summary of `git remote -v`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemoteListReport {
+  /// Configured remotes.
+  pub remotes: Vec<RemoteInfo>,
+}
+
+/// Summary of a push operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushReport {
+  /// Remote name used.
+  pub remote: String,
+  /// Branch name used.
+  pub branch: String,
+  /// Remote URL.
+  pub remote_url: String,
+  /// Whether local and remote were already up to date.
+  pub up_to_date: bool,
+  /// Whether upstream was configured.
+  pub set_upstream: bool,
+  /// Short HEAD before the push.
+  pub head_before: Option<String>,
+  /// Short HEAD after the push.
+  pub head_after: Option<String>,
+}
+
+/// Summary of a pull operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullReport {
+  /// Remote name used.
+  pub remote: String,
+  /// Branch name used.
+  pub branch: String,
+  /// Whether the pull was already up to date.
+  pub up_to_date: bool,
+  /// Whether the merge was fast-forward.
+  pub was_fast_forward: bool,
+  /// Short HEAD before the pull.
+  pub head_before: Option<String>,
+  /// Short HEAD after the pull.
+  pub head_after: Option<String>,
+  /// Files changed by the merge.
+  pub files_changed: usize,
+  /// Insertions in the merge.
+  pub insertions: usize,
+  /// Deletions in the merge.
+  pub deletions: usize,
+}
+
+/// Snapshot of `git status`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitStatusReport {
+  /// Current branch name.
+  pub branch_name: Option<String>,
+  /// Upstream branch name.
+  pub upstream_name: Option<String>,
+  /// Short HEAD commit id.
+  pub short_id: Option<String>,
+  /// First-line commit message.
+  pub head_message: Option<String>,
+  /// Number of commits ahead of upstream.
+  pub ahead: Option<usize>,
+  /// Number of commits behind upstream.
+  pub behind: Option<usize>,
+  /// Current file changes.
+  pub changes: Vec<FileChange>,
 }
 
 impl std::fmt::Debug for GitRepository {
@@ -333,7 +422,7 @@ fn try_default_ssh_keys(username: &str) -> Option<git2::Cred> {
 /// Traces git authentication attempts if the `FLUX_GIT_TRACE_AUTH` environment variable is set.
 fn trace_git_auth(args: std::fmt::Arguments<'_>) {
   if std::env::var_os("FLUX_GIT_TRACE_AUTH").is_some() {
-    eprintln!("[flux git auth] {args}");
+    log::debug!("[flux git auth] {args}");
   }
 }
 
@@ -638,12 +727,16 @@ pub fn commit_changes(
   commit_message: &str,
   dry_run: &mut DryRun,
   is_dry_run: bool,
-) -> Result<()> {
+) -> Result<CommitReport> {
   if is_dry_run {
     dry_run.log_operation(Operation::GitCommit {
       message: commit_message.to_string(),
     });
-    return Ok(());
+    return Ok(CommitReport {
+      branch_name: None,
+      short_id: String::new(),
+      message: commit_message.to_string(),
+    });
   }
 
   // Get the current index (which has been staged by stage_changes)
@@ -678,27 +771,19 @@ pub fn commit_changes(
   new_index.read_tree(&tree)?;
   new_index.write()?;
 
-  // Get the commit we just created
   let commit_id = git_repo
     .inner()
     .head()?
     .target()
     .ok_or_else(|| DotfilesError::Config("Could not get commit ID after commit".to_string()))?;
-  let short_id = commit_id.to_string()[..7].to_string();
+  let short_id = short_oid(&commit_id.to_string());
+  let branch_name = git_repo.get_current_branch().ok();
 
-  // Get branch name (or "detached HEAD" if not on a branch)
-  let branch_name = git_repo
-    .get_current_branch()
-    .unwrap_or_else(|_| "detached HEAD".to_string());
-
-  // Show git-like output: [branch-name abc1234] commit message
-  println!(
-    "[{} {}] {}",
-    branch_name.cyan(),
-    short_id.cyan(),
-    commit_message
-  );
-  Ok(())
+  Ok(CommitReport {
+    branch_name,
+    short_id,
+    message: commit_message.to_string(),
+  })
 }
 
 /// Detect changes in the git repository.
@@ -740,7 +825,6 @@ pub fn add_remote(
   }
 
   let _ = git_repo.inner().remote(name, url)?;
-  println!("{} Added remote '{}': {}", "✓".green(), name, url);
   Ok(())
 }
 
@@ -763,7 +847,6 @@ pub fn remove_remote(
   }
 
   git_repo.inner().remote_delete(name)?;
-  println!("{} Removed remote '{}'", "✓".green(), name);
   Ok(())
 }
 
@@ -788,7 +871,6 @@ pub fn set_remote_url(
   }
 
   git_repo.inner().remote_set_url(name, url)?;
-  println!("{} Set URL for remote '{}': {}", "✓".green(), name, url);
   Ok(())
 }
 
@@ -797,32 +879,28 @@ pub fn set_remote_url(
 /// # Errors
 ///
 /// Returns an error if remotes cannot be listed.
-pub fn list_remotes(git_repo: &GitRepository) -> Result<()> {
+pub fn list_remotes(git_repo: &GitRepository) -> Result<RemoteListReport> {
   let remotes = git_repo.inner().remotes()?;
+  let mut report = RemoteListReport::default();
 
-  if remotes.is_empty() {
-    println!("{} No remotes configured.", "⊘".yellow());
-    return Ok(());
-  }
-
-  println!();
   for name in &remotes {
     if let Some(remote_name) = name
       && let Ok(remote) = git_repo.inner().find_remote(remote_name)
     {
-      let fetch_url = remote.url().unwrap_or("(invalid URL)");
-      let push_url = remote.pushurl();
-
-      // Show fetch URL
-      println!("{}  {} (fetch)", remote_name.cyan(), fetch_url);
-
-      // Show push URL (use fetch URL if push URL not set, or show if different)
-      let actual_push_url = push_url.unwrap_or(fetch_url);
-      println!("{}  {} (push)", remote_name.cyan(), actual_push_url);
+      let fetch_url = remote
+        .url()
+        .unwrap_or("(invalid URL)")
+        .to_string();
+      let push_url = remote.pushurl().unwrap_or(&fetch_url).to_string();
+      report.remotes.push(RemoteInfo {
+        name: remote_name.to_string(),
+        fetch_url,
+        push_url,
+      });
     }
   }
-  println!();
-  Ok(())
+
+  Ok(report)
 }
 
 /// Execute a git push operation with timeout.
@@ -873,39 +951,6 @@ fn is_push_up_to_date(
   }
 }
 
-/// Display push success message with git-like ref update output.
-fn display_push_success(
-  repo: &Repository,
-  branch_name: &str,
-  _remote_name: &str,
-  remote_url: &str,
-  head_before: Option<git2::Oid>,
-  _remote_ref_before: Option<git2::Oid>,
-) {
-  // Git-like output: "To <url>"
-  println!("To {remote_url}");
-
-  // Get current HEAD after push
-  let head_after = repo.head().ok().and_then(|head| head.target());
-
-  // Show ref update in git format: "abc1234..def5678  branch -> branch"
-  if let (Some(before), Some(after)) = (head_before, head_after) {
-    if before == after {
-      // New branch (no before)
-      let after_short = after.to_string()[..7].to_string();
-      println!("   {after_short}  {branch_name} -> {branch_name} (new branch)");
-    } else {
-      let before_short = before.to_string()[..7].to_string();
-      let after_short = after.to_string()[..7].to_string();
-      println!("   {before_short}..{after_short}  {branch_name} -> {branch_name}");
-    }
-  } else if let Some(after) = head_after {
-    // New branch
-    let after_short = after.to_string()[..7].to_string();
-    println!("   {after_short}  {branch_name} -> {branch_name} (new branch)");
-  }
-}
-
 /// Set upstream branch configuration.
 fn set_upstream_branch(
   repo: &Repository,
@@ -913,17 +958,11 @@ fn set_upstream_branch(
   branch_name: &str,
 ) -> Result<()> {
   let mut config = repo.config()?;
-  let upstream_branch = format!("{remote_name}/{branch_name}");
   config.set_str(&format!("branch.{branch_name}.remote"), remote_name)?;
   config.set_str(
     &format!("branch.{branch_name}.merge"),
     &format!("refs/heads/{branch_name}"),
   )?;
-  println!(
-    "  {} Set upstream to {}",
-    "✓".cyan(),
-    upstream_branch.cyan()
-  );
   Ok(())
 }
 
@@ -940,14 +979,22 @@ pub async fn push_to_remote(
   timeout_seconds: u64,
   dry_run: &mut DryRun,
   is_dry_run: bool,
-) -> Result<()> {
+) -> Result<PushReport> {
   if is_dry_run {
     dry_run.log_operation(Operation::GitPush {
       remote: remote_name.to_string(),
       branch: branch_name.to_string(),
       set_upstream,
     });
-    return Ok(());
+    return Ok(PushReport {
+      remote: remote_name.to_string(),
+      branch: branch_name.to_string(),
+      remote_url: String::new(),
+      up_to_date: false,
+      set_upstream,
+      head_before: None,
+      head_after: None,
+    });
   }
 
   let remote = git_repo.inner().find_remote(remote_name)?;
@@ -984,42 +1031,41 @@ pub async fn push_to_remote(
         head_before,
         remote_ref_before,
       );
-
-      if is_up_to_date {
-        // Git-like output for up-to-date
-        println!("Everything up-to-date");
-      } else {
-        display_push_success(
-          git_repo.inner(),
-          branch_name,
-          remote_name,
-          remote_url,
-          head_before,
-          remote_ref_before,
-        );
+      if set_upstream {
+        set_upstream_branch(git_repo.inner(), remote_name, branch_name)?;
       }
+      let head_after = git_repo
+        .inner()
+        .head()
+        .ok()
+        .and_then(|head| head.target())
+        .map(|oid| short_oid(&oid.to_string()));
+      let head_before = head_before.map(|oid| short_oid(&oid.to_string()));
+      Ok(PushReport {
+        remote: remote_name.to_string(),
+        branch: branch_name.to_string(),
+        remote_url: remote_url.to_string(),
+        up_to_date: is_up_to_date,
+        set_upstream,
+        head_before,
+        head_after,
+      })
     }
     Err(err) => {
       if err.to_string().contains("timed out") {
-        return Err(DotfilesError::Config(format!(
+        Err(DotfilesError::Config(format!(
           "Push operation timed out after {timeout_seconds} seconds"
-        )));
+        )))
+      } else {
+        let error_msg = format!("{err}");
+        Err(error_utils::git_operation_failed(
+          "push",
+          &git_repo.repo_path,
+          &error_msg,
+        ))
       }
-
-      let error_msg = format!("{err}");
-      return Err(error_utils::git_operation_failed(
-        "push",
-        &git_repo.repo_path,
-        &error_msg,
-      ));
     }
   }
-
-  if set_upstream {
-    set_upstream_branch(git_repo.inner(), remote_name, branch_name)?;
-  }
-
-  Ok(())
 }
 
 /// Execute a git fetch operation with timeout.
@@ -1121,6 +1167,178 @@ fn perform_merge(
   }
 }
 
+/// Calculate file statistics for a commit range.
+fn calculate_file_stats(
+  repo: &Repository,
+  old_commit: &git2::Commit,
+  new_commit: &git2::Commit,
+) -> (usize, usize, usize) {
+  let Ok(old_tree) = old_commit.tree() else {
+    return (0, 0, 0);
+  };
+  let Ok(new_tree) = new_commit.tree() else {
+    return (0, 0, 0);
+  };
+
+  let Ok(diff) = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None) else {
+    return (0, 0, 0);
+  };
+
+  let Ok(stats) = diff.stats() else {
+    return (0, 0, 0);
+  };
+
+  (stats.files_changed(), stats.insertions(), stats.deletions())
+}
+
+/// Shorten an optional commit id for reporting.
+fn short_commit_id(commit: Option<&git2::Commit>) -> Option<String> {
+  commit.map(|commit| short_oid(&commit.id().to_string()))
+}
+
+/// Inputs used to construct a [`PullReport`].
+struct PullReportParts {
+  /// Remote name used.
+  remote_name: String,
+  /// Branch name used.
+  branch_name: String,
+  /// Whether the pull was already up to date.
+  up_to_date: bool,
+  /// Whether the merge was fast-forward.
+  was_fast_forward: bool,
+  /// Short HEAD before the pull.
+  head_before: Option<String>,
+  /// Short HEAD after the pull.
+  head_after: Option<String>,
+  /// Files changed by the merge.
+  files_changed: usize,
+  /// Insertions in the merge.
+  insertions: usize,
+  /// Deletions in the merge.
+  deletions: usize,
+}
+
+/// Build a [`PullReport`] from precomputed fields.
+fn build_pull_report(parts: PullReportParts) -> PullReport {
+  PullReport {
+    remote: parts.remote_name,
+    branch: parts.branch_name,
+    up_to_date: parts.up_to_date,
+    was_fast_forward: parts.was_fast_forward,
+    head_before: parts.head_before,
+    head_after: parts.head_after,
+    files_changed: parts.files_changed,
+    insertions: parts.insertions,
+    deletions: parts.deletions,
+  }
+}
+
+/// Convert a pull timeout into a user-facing config error.
+fn pull_timeout_error(timeout_seconds: u64) -> DotfilesError {
+  DotfilesError::Config(format!(
+    "Pull operation timed out after {timeout_seconds} seconds"
+  ))
+}
+
+/// Map a fetch failure into a git operation failure while preserving timeouts.
+fn pull_fetch_error(
+  git_repo: &GitRepository,
+  err: &DotfilesError,
+  timeout_seconds: u64,
+) -> DotfilesError {
+  if err.to_string().contains("timed out") {
+    pull_timeout_error(timeout_seconds)
+  } else {
+    let error_msg = format!("{err}");
+    error_utils::git_operation_failed("pull", &git_repo.repo_path, &error_msg)
+  }
+}
+
+/// Finish pull reporting after the fetch step succeeds.
+fn complete_pull_after_fetch(
+  git_repo: &GitRepository,
+  remote_name: &str,
+  branch_name: &str,
+  head_before: Option<&git2::Commit<'_>>,
+) -> Result<PullReport> {
+  let remote_branch_ref = format!("refs/remotes/{remote_name}/{branch_name}");
+  let remote_branch = git_repo
+    .inner()
+    .find_reference(&remote_branch_ref)
+    .map_err(|_| {
+      DotfilesError::Config(format!(
+        "Could not find remote branch {remote_name}/{branch_name} after fetch"
+      ))
+    })?;
+
+  let remote_commit = remote_branch.peel_to_commit()?;
+  let remote_oid = remote_commit.id();
+
+  if let Some(head_oid) = head_before.map(git2::Commit::id)
+    && head_oid == remote_oid
+  {
+    return Ok(build_pull_report(PullReportParts {
+      remote_name: remote_name.to_string(),
+      branch_name: branch_name.to_string(),
+      up_to_date: true,
+      was_fast_forward: false,
+      head_before: short_commit_id(head_before),
+      head_after: short_commit_id(head_before),
+      files_changed: 0,
+      insertions: 0,
+      deletions: 0,
+    }));
+  }
+
+  let was_fast_forward = perform_merge(
+    git_repo.inner(),
+    remote_name,
+    branch_name,
+    &remote_branch,
+    &remote_commit,
+  )?;
+
+  let head_after = git_repo
+    .inner()
+    .head()
+    .ok()
+    .and_then(|head| head.peel_to_commit().ok());
+  let head_oid_after = head_after.as_ref().map(git2::Commit::id);
+
+  if let (Some(oid_before), Some(oid_after)) = (head_before.map(git2::Commit::id), head_oid_after)
+    && oid_before == oid_after
+  {
+    return Ok(build_pull_report(PullReportParts {
+      remote_name: remote_name.to_string(),
+      branch_name: branch_name.to_string(),
+      up_to_date: true,
+      was_fast_forward,
+      head_before: short_commit_id(head_before),
+      head_after: short_commit_id(head_after.as_ref()),
+      files_changed: 0,
+      insertions: 0,
+      deletions: 0,
+    }));
+  }
+
+  let (files_changed, insertions, deletions) = match (head_before, &head_after) {
+    (Some(before), Some(after)) => calculate_file_stats(git_repo.inner(), before, after),
+    _ => (0, 0, 0),
+  };
+
+  Ok(build_pull_report(PullReportParts {
+    remote_name: remote_name.to_string(),
+    branch_name: branch_name.to_string(),
+    up_to_date: false,
+    was_fast_forward,
+    head_before: short_commit_id(head_before),
+    head_after: short_commit_id(head_after.as_ref()),
+    files_changed,
+    insertions,
+    deletions,
+  }))
+}
+
 /// Check for merge conflicts and blocking untracked files.
 fn check_merge_conflicts(repo: &Repository) -> Result<()> {
   let index = repo.index()?;
@@ -1169,101 +1387,6 @@ fn check_merge_conflicts(repo: &Repository) -> Result<()> {
   Ok(())
 }
 
-/// Calculate file statistics for a commit range (like git diff --stat).
-fn calculate_file_stats(
-  repo: &Repository,
-  old_commit: &git2::Commit,
-  new_commit: &git2::Commit,
-) -> (usize, usize, usize) {
-  let Ok(old_tree) = old_commit.tree() else {
-    return (0, 0, 0);
-  };
-  let Ok(new_tree) = new_commit.tree() else {
-    return (0, 0, 0);
-  };
-
-  let Ok(diff) = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None) else {
-    return (0, 0, 0);
-  };
-
-  // Use diff stats for accurate file statistics
-  let Ok(stats) = diff.stats() else {
-    return (0, 0, 0);
-  };
-
-  let files_changed = stats.files_changed();
-  let insertions = stats.insertions();
-  let deletions = stats.deletions();
-
-  (files_changed, insertions, deletions)
-}
-
-/// Parameters for displaying pull success message.
-struct PullDisplayParams<'a> {
-  /// Repository reference.
-  repo: &'a Repository,
-  /// Commit before pull.
-  head_before: Option<git2::Commit<'a>>,
-  /// Commit after pull.
-  head_after: Option<git2::Commit<'a>>,
-  /// Whether the merge was a fast-forward.
-  was_fast_forward: bool,
-}
-
-/// Display pull success message with git-like output.
-fn display_pull_success(params: PullDisplayParams<'_>) {
-  use std::fmt::Write;
-
-  if let (Some(head_before), Some(head_after)) = (params.head_before, params.head_after)
-    && head_before.id() != head_after.id()
-  {
-    let before_short = head_before.id().to_string()[..7].to_string();
-    let after_short = head_after.id().to_string()[..7].to_string();
-
-    // Git-like output: "Updating abc1234..def5678"
-    println!("Updating {before_short}..{after_short}");
-
-    // Show fast-forward or merge info
-    if params.was_fast_forward {
-      println!("Fast-forward");
-    } else {
-      println!("Merge made by the 'recursive' strategy.");
-    }
-
-    // Calculate and show file statistics
-    let (files_changed, insertions, deletions) =
-      calculate_file_stats(params.repo, &head_before, &head_after);
-    if files_changed > 0 {
-      let mut stats = format!(
-        " {files_changed} file{} changed",
-        if files_changed == 1 { "" } else { "s" }
-      );
-      if insertions > 0 || deletions > 0 {
-        let mut parts = Vec::new();
-        if insertions > 0 {
-          parts.push(format!(
-            "{insertions} insertion{}",
-            if insertions == 1 { "" } else { "s" }
-          ));
-        }
-        if deletions > 0 {
-          parts.push(format!(
-            "{deletions} deletion{}",
-            if deletions == 1 { "" } else { "s" }
-          ));
-        }
-        let _ = write!(stats, ", {}", parts.join(", "));
-      }
-      println!("{stats}");
-    }
-
-    return;
-  }
-
-  // Already up-to-date
-  println!("Already up-to-date.");
-}
-
 /// Pull from a remote repository.
 ///
 /// # Errors
@@ -1276,13 +1399,23 @@ pub async fn pull_from_remote(
   timeout_seconds: u64,
   dry_run: &mut DryRun,
   is_dry_run: bool,
-) -> Result<()> {
+) -> Result<PullReport> {
   if is_dry_run {
     dry_run.log_operation(Operation::GitPull {
       remote: remote_name.to_string(),
       branch: branch_name.to_string(),
     });
-    return Ok(());
+    return Ok(build_pull_report(PullReportParts {
+      remote_name: remote_name.to_string(),
+      branch_name: branch_name.to_string(),
+      up_to_date: false,
+      was_fast_forward: false,
+      head_before: None,
+      head_after: None,
+      files_changed: 0,
+      insertions: 0,
+      deletions: 0,
+    }));
   }
 
   let remote = git_repo.inner().find_remote(remote_name)?;
@@ -1293,7 +1426,6 @@ pub async fn pull_from_remote(
     .head()
     .ok()
     .and_then(|head| head.peel_to_commit().ok());
-  let head_oid_before = head_before.as_ref().map(git2::Commit::id);
 
   let _start_time = std::time::Instant::now();
   trace_git_auth(format_args!(
@@ -1311,73 +1443,9 @@ pub async fn pull_from_remote(
   .await;
 
   match fetch_result {
-    Ok(()) => {
-      let remote_branch_ref = format!("refs/remotes/{remote_name}/{branch_name}");
-      let remote_branch = git_repo
-        .inner()
-        .find_reference(&remote_branch_ref)
-        .map_err(|_| {
-          DotfilesError::Config(format!(
-            "Could not find remote branch {remote_name}/{branch_name} after fetch"
-          ))
-        })?;
-
-      let remote_commit = remote_branch.peel_to_commit()?;
-      let remote_oid = remote_commit.id();
-
-      if let Some(head_oid) = head_oid_before
-        && head_oid == remote_oid
-      {
-        // Already up-to-date (no changes)
-        return Ok(());
-      }
-
-      let was_fast_forward = perform_merge(
-        git_repo.inner(),
-        remote_name,
-        branch_name,
-        &remote_branch,
-        &remote_commit,
-      )?;
-
-      let head_after = git_repo
-        .inner()
-        .head()
-        .ok()
-        .and_then(|head| head.peel_to_commit().ok());
-      let head_oid_after = head_after.as_ref().map(git2::Commit::id);
-
-      if let (Some(oid_before), Some(oid_after)) = (head_oid_before, head_oid_after)
-        && oid_before == oid_after
-      {
-        // Already up-to-date (no changes)
-        return Ok(());
-      }
-
-      display_pull_success(PullDisplayParams {
-        repo: git_repo.inner(),
-        head_before,
-        head_after,
-        was_fast_forward,
-      });
-    }
-    Err(err) => {
-      if err.to_string().contains("timed out") {
-        return Err(DotfilesError::Config(format!(
-          "Pull operation timed out after {timeout_seconds} seconds"
-        )));
-      }
-
-      let error_msg = format!("{err}");
-      return Err(error_utils::git_operation_failed(
-        "pull",
-        &git_repo.repo_path,
-        &error_msg,
-      ));
-    }
+    Ok(()) => complete_pull_after_fetch(git_repo, remote_name, branch_name, head_before.as_ref()),
+    Err(err) => Err(pull_fetch_error(git_repo, &err, timeout_seconds)),
   }
-
-  Ok(())
 }
 
 /// Show git repository status (like `git status`).
@@ -1385,13 +1453,20 @@ pub async fn pull_from_remote(
 /// # Errors
 ///
 /// Returns an error if the repository status cannot be determined.
-pub fn show_git_status(git_repo: &GitRepository) -> Result<()> {
+pub fn show_git_status(git_repo: &GitRepository) -> Result<GitStatusReport> {
   use git2::BranchType;
 
   // Get current branch
   let Ok(branch_name) = get_current_branch(git_repo) else {
-    println!("{} Not on any branch", "⊘".yellow());
-    return Ok(());
+    return Ok(GitStatusReport {
+      branch_name: None,
+      upstream_name: None,
+      short_id: None,
+      head_message: None,
+      ahead: None,
+      behind: None,
+      changes: Vec::new(),
+    });
   };
 
   // Get branch reference
@@ -1408,26 +1483,26 @@ pub fn show_git_status(git_repo: &GitRepository) -> Result<()> {
 
   // Check for uncommitted changes
   let changes = detect_changes(git_repo)?;
-  let staged_count = changes.len();
 
   let (ahead, behind, upstream_name) = calculate_upstream_status(git_repo, head_oid, upstream)?;
 
-  // Display git status
-  print_status_header(
-    &branch_name,
-    upstream_name.as_deref(),
-    &short_id,
-    &head_commit,
-  );
-
-  // Show ahead/behind
-  print_ahead_behind(ahead, behind);
-
-  // Show uncommitted changes
-  print_changes(&changes, git_repo, staged_count)?;
-
-  println!();
-  Ok(())
+  Ok(GitStatusReport {
+    branch_name: Some(branch_name),
+    upstream_name,
+    short_id: Some(short_id),
+    head_message: Some(
+      head_commit
+        .message()
+        .unwrap_or("(no message)")
+        .lines()
+        .next()
+        .unwrap_or("(no message)")
+        .to_string(),
+    ),
+    ahead,
+    behind,
+    changes,
+  })
 }
 
 /// Compute ahead/behind counts and upstream name for the current branch.
@@ -1456,102 +1531,4 @@ fn calculate_upstream_status(
   } else {
     Ok((None, None, None))
   }
-}
-
-/// Render the branch header for the git status output.
-fn print_status_header(
-  branch_name: &str,
-  upstream_name: Option<&str>,
-  short_id: &str,
-  head_commit: &git2::Commit,
-) {
-  println!("\n{}", "Git Repository Status:".bold().cyan());
-  println!("{}", "=".repeat(60).cyan());
-  println!("  Branch: {}", branch_name.cyan());
-
-  if let Some(upstream_name) = upstream_name {
-    println!("  Upstream: {}", upstream_name.dimmed());
-  }
-
-  println!(
-    "  HEAD: {} {}",
-    short_id.cyan(),
-    head_commit
-      .message()
-      .unwrap_or("(no message)")
-      .lines()
-      .next()
-      .unwrap_or("(no message)")
-  );
-}
-
-/// Display ahead/behind information when the branch diverges.
-fn print_ahead_behind(
-  ahead: Option<usize>,
-  behind: Option<usize>,
-) {
-  if let (Some(ahead_count), Some(behind_count)) = (ahead, behind)
-    && (ahead_count > 0 || behind_count > 0)
-  {
-    let mut status_parts = Vec::new();
-    if ahead_count > 0 {
-      status_parts.push(
-        format!("{ahead_count} commit(s) ahead")
-          .green()
-          .to_string(),
-      );
-    }
-    if behind_count > 0 {
-      status_parts.push(
-        format!("{behind_count} commit(s) behind")
-          .yellow()
-          .to_string(),
-      );
-    }
-    if !status_parts.is_empty() {
-      println!("  {}", status_parts.join(", "));
-    }
-  }
-}
-
-/// Describe staged/unstaged changes or report a clean tree.
-fn print_changes(
-  changes: &[FileChange],
-  git_repo: &GitRepository,
-  staged_count: usize,
-) -> Result<()> {
-  if changes.is_empty() {
-    println!("\n  {} Working tree clean", "✓".green());
-  } else {
-    println!(
-      "\n  {} {} uncommitted change(s):",
-      "→".yellow(),
-      staged_count
-    );
-    let repo_root = git_repo
-      .path()
-      .parent()
-      .ok_or_else(|| DotfilesError::Config("Could not determine repository path".to_string()))?;
-    for change in changes {
-      let (icon, path) = match change {
-        FileChange::Added(path) => ("+", path),
-        FileChange::Modified(path) => ("M", path),
-        FileChange::Deleted(path) => ("-", path),
-      };
-      if let Ok(relative) = path.strip_prefix(repo_root) {
-        println!(
-          "    {} {}",
-          icon.green(),
-          relative.display().to_string().dimmed()
-        );
-      } else {
-        println!(
-          "    {} {}",
-          icon.green(),
-          path.display().to_string().dimmed()
-        );
-      }
-    }
-  }
-  Ok(())
 }

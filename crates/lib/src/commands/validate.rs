@@ -2,7 +2,6 @@ use crate::config::Config;
 use crate::types::TrackedFile;
 use crate::utils::error::Result;
 use crate::utils::path_utils::symlink_points_to_correct_target;
-use colored::Colorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -229,60 +228,6 @@ fn collect_files(
   }
 
   Ok(())
-}
-
-/// Display the validation report.
-///
-/// # Parameters
-///
-/// * `report`: The validation report to display.
-///
-/// # Returns
-///
-/// Returns the validation report.
-pub fn display_validation(report: &ValidationReport) {
-  if report.is_valid {
-    println!("{}", "✓ Configuration is valid!".green().bold());
-    return;
-  }
-
-  println!("\n{}", "Validation Issues:".bold().red());
-  println!("{}", "=".repeat(60).red());
-
-  for issue in &report.issues {
-    match issue {
-      ValidationIssue::MissingRepoFile(file) => {
-        println!(
-          "{} Missing repo file: {}",
-          "✗".red(),
-          file.repo_path.display()
-        );
-      }
-      ValidationIssue::InvalidSymlink(file) => {
-        println!(
-          "{} Invalid symlink: {}",
-          "⚠".yellow(),
-          file.dest_path.display()
-        );
-      }
-      ValidationIssue::OrphanedEntry(tool, file) => {
-        println!("{} Orphaned file in {}: {}", "⊘".yellow(), tool, file);
-      }
-      ValidationIssue::MissingProfileDir(profile) => {
-        println!("{} Missing profile directory: {}", "⚠".yellow(), profile);
-      }
-      ValidationIssue::InvalidConfig(msg) => {
-        println!("{} {}", "✗".red(), msg);
-      }
-    }
-  }
-
-  println!("{}", "=".repeat(60).red());
-  println!(
-    "{} Found {} issue(s)",
-    "Summary:".bold(),
-    report.issues.len().to_string().red()
-  );
 }
 
 #[cfg(test)]

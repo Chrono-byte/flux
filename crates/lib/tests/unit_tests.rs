@@ -496,8 +496,7 @@ mod dry_run_extended_tests {
       message: "test commit".to_string(),
     });
 
-    // Display should not panic
-    dry_run.display_summary();
+    assert_eq!(dry_run.operations().len(), 3);
   }
 
   /// Test git remote operations
@@ -519,7 +518,7 @@ mod dry_run_extended_tests {
       name: "upstream".to_string(),
     });
 
-    dry_run.display_summary();
+    assert_eq!(dry_run.operations().len(), 3);
   }
 
   /// Test git push operation
@@ -533,7 +532,7 @@ mod dry_run_extended_tests {
       set_upstream: true,
     });
 
-    dry_run.display_summary();
+    assert_eq!(dry_run.operations().len(), 1);
   }
 }
 

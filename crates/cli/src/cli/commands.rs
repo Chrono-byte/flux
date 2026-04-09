@@ -10,15 +10,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::args::{Cli, Commands, MaintainCommands, ProfileCommands, RemoteCommands};
+use super::prompt::{prompt_commit_message, prompt_conflict_choice, prompt_yes_no};
+use super::render::{
+  display_apply_report, display_commit_report, display_diffs, display_discrepancies,
+  display_doctor_report, display_dry_run_summary, display_git_status, display_migrate_report,
+  display_preview, display_pull_report, display_push_report, display_remote_list, display_status,
+  display_sync_report, format_diffs,
+};
 use flux_lib::{
   commands::apply::StateDiff,
-  commands::doctor::HealthReport,
-  commands::untracked::{display_discrepancies, find_discrepancies},
-  commands::validate::ValidationReport,
+  commands::untracked::find_discrepancies,
   commands::{
-    apply_config, check_status, compare_states, display_diffs, display_health_report,
-    display_preview, display_status, display_validation, format_diffs, migrate_files,
-    run_health_checks, validate_config,
+    apply_config, check_status, compare_states, migrate_files, run_health_checks, validate_config,
   },
   config::Config,
   config::profile::{create_profile, get_profile_files, list_profiles, switch_profile},
@@ -32,7 +35,6 @@ use flux_lib::{
   types::FileEntry,
   utils::home_override,
   utils::path_utils::{normalize_path, resolve_symlink_target},
-  utils::prompt::prompt_commit_message,
   utils::{DotfilesError, DryRun, Result},
 };
 
@@ -43,10 +45,12 @@ pub(super) fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
       let config = Config::load()?;
       let mut dry_run_tracker = DryRun::default();
 
-      migrate_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
+      let report = migrate_files(&config, profile.as_deref(), &mut dry_run_tracker, dry_run)?;
 
       if dry_run {
-        dry_run_tracker.display_summary();
+        display_dry_run_summary(&dry_run_tracker);
+      } else {
+        display_migrate_report(&report);
       }
     }
     MaintainCommands::Gitignore => {
@@ -242,7 +246,7 @@ pub(super) fn handle_add_command(
   }
 
   if dry_run {
-    dry_run_tracker.display_summary();
+    display_dry_run_summary(&dry_run_tracker);
   }
   Ok(())
 }
@@ -267,7 +271,7 @@ pub(super) fn handle_commit_command(
   profile: Option<&str>,
   message: Option<&str>,
   dry_run: bool,
-  verbose: bool,
+  _verbose: bool,
 ) -> Result<()> {
   let config = Config::load()?;
   let mut dry_run_tracker = DryRun::default();
@@ -297,11 +301,18 @@ pub(super) fn handle_commit_command(
   }
 
   // Sync files first (quietly unless verbose)
-  sync_files(&config, profile, &mut dry_run_tracker, dry_run, verbose)?;
+  let sync_report = sync_files(
+    &config,
+    profile,
+    &mut dry_run_tracker,
+    dry_run,
+    Some(&prompt_conflict_choice),
+  )?;
 
   if dry_run {
-    dry_run_tracker.display_summary();
+    display_dry_run_summary(&dry_run_tracker);
   } else {
+    display_sync_report(&sync_report);
     // Automatically commit any changes to the repository
     let repo_path = config.get_repo_path();
     let repo = init_repo(&repo_path)?;
@@ -314,7 +325,8 @@ pub(super) fn handle_commit_command(
         prompt_commit_message(&changes)?
       };
       stage_changes(&repo, &changes, &mut dry_run_tracker, dry_run)?;
-      commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
+      let commit_report = commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
+      display_commit_report(&commit_report);
 
       // Run post-commit hooks
       if let Some(hooks_config) = &config.hooks
@@ -371,7 +383,7 @@ pub(super) fn handle_rm_command(
   remove_file(&mut config, tool, file, &mut fs_manager)?;
 
   if dry_run {
-    dry_run_tracker.display_summary();
+    display_dry_run_summary(&dry_run_tracker);
   }
   Ok(())
 }
@@ -579,14 +591,24 @@ pub(super) fn handle_apply_command(
   } else {
     use flux_lib::commands::ApplyOptions;
     // apply_config now handles history recording internally
-    apply_config(&ApplyOptions {
-      config: &config,
-      profile,
-      dry_run: dry_run.as_bool(),
-      yes: yes.as_bool(),
-      description,
-      force: force.as_bool(),
-    })?;
+    let report = apply_config(
+      &ApplyOptions {
+        config: &config,
+        profile,
+        dry_run: dry_run.as_bool(),
+        yes: yes.as_bool(),
+        description,
+        force: force.as_bool(),
+      },
+      Some(&prompt_yes_no),
+    )?;
+    if !report.diff.is_empty() {
+      display_preview(&report.diff);
+      if diff.as_bool() {
+        display_diffs(&report.diff);
+      }
+    }
+    display_apply_report(&report);
   }
   Ok(())
 }
@@ -846,9 +868,11 @@ pub(super) fn handle_profile_command(command: ProfileCommands) -> Result<()> {
     }
     ProfileCommands::Create { name } => {
       create_profile(&config, &name)?;
+      println!("{} Created profile: {}", "✓".green(), name);
     }
     ProfileCommands::Switch { name } => {
       switch_profile(&mut config, &name)?;
+      println!("{} Switched to profile: {}", "✓".green(), name);
     }
   }
   Ok(())
@@ -911,7 +935,8 @@ pub(super) async fn handle_remote_command(command: RemoteCommands) -> Result<()>
       let config = Config::load()?;
       let repo_path = config.get_repo_path();
       let repo = init_repo(&repo_path)?;
-      list_remotes(&repo)?;
+      let report = list_remotes(&repo)?;
+      display_remote_list(&report);
     }
     RemoteCommands::Add { name, url, dry_run } => {
       let config = Config::load()?;
@@ -920,7 +945,9 @@ pub(super) async fn handle_remote_command(command: RemoteCommands) -> Result<()>
       let mut dry_run_tracker = DryRun::default();
       add_remote(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
       if dry_run {
-        dry_run_tracker.display_summary();
+        display_dry_run_summary(&dry_run_tracker);
+      } else {
+        println!("{} Added remote '{}': {}", "✓".green(), name, url);
       }
     }
     RemoteCommands::SetUrl { name, url, dry_run } => {
@@ -930,7 +957,9 @@ pub(super) async fn handle_remote_command(command: RemoteCommands) -> Result<()>
       let mut dry_run_tracker = DryRun::default();
       set_remote_url(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
       if dry_run {
-        dry_run_tracker.display_summary();
+        display_dry_run_summary(&dry_run_tracker);
+      } else {
+        println!("{} Set URL for remote '{}': {}", "✓".green(), name, url);
       }
     }
     RemoteCommands::Remove { name, dry_run } => {
@@ -940,7 +969,9 @@ pub(super) async fn handle_remote_command(command: RemoteCommands) -> Result<()>
       let mut dry_run_tracker = DryRun::default();
       remove_remote(&repo, &name, &mut dry_run_tracker, dry_run)?;
       if dry_run {
-        dry_run_tracker.display_summary();
+        display_dry_run_summary(&dry_run_tracker);
+      } else {
+        println!("{} Removed remote '{}'", "✓".green(), name);
       }
     }
   }
@@ -992,7 +1023,7 @@ pub(super) async fn handle_push_command(
     .or(config.general.push_timeout)
     .unwrap_or(60);
 
-  push_to_remote(
+  let report = push_to_remote(
     &repo,
     &resolved_remote,
     &resolved_branch,
@@ -1004,8 +1035,11 @@ pub(super) async fn handle_push_command(
   .await?;
 
   if dry_run {
-    dry_run_tracker.display_summary();
+    display_dry_run_summary(&dry_run_tracker);
+  } else {
+    display_push_report(&report);
   }
+
   Ok(())
 }
 
@@ -1052,7 +1086,7 @@ pub(super) async fn handle_pull_command(
     .or(config.general.push_timeout)
     .unwrap_or(60);
 
-  pull_from_remote(
+  let report = pull_from_remote(
     &repo,
     &resolved_remote,
     &resolved_branch,
@@ -1063,7 +1097,9 @@ pub(super) async fn handle_pull_command(
   .await?;
 
   if dry_run {
-    dry_run_tracker.display_summary();
+    display_dry_run_summary(&dry_run_tracker);
+  } else {
+    display_pull_report(&report);
   }
   Ok(())
 }
@@ -1122,7 +1158,8 @@ pub(super) fn handle_status_command(
   } else {
     // Display git repository status
     if let Ok(repo) = init_repo(&repo_path) {
-      show_git_status(&repo)?;
+      let git_status = show_git_status(&repo)?;
+      display_git_status(&git_status);
     }
 
     // Display file synchronization status
@@ -1179,37 +1216,6 @@ pub(super) fn handle_doctor_command(profile: Option<&str>) -> Result<()> {
     std::process::exit(exit_code);
   }
   Ok(())
-}
-
-/// Display the doctor report, including validation issues, state diff, and health checks.
-fn display_doctor_report(
-  report: &ValidationReport,
-  diff: &StateDiff,
-  health_report: &HealthReport,
-) {
-  println!("\n{} Doctor Report", "→".cyan().bold());
-  println!("{}", "=".repeat(60).cyan());
-
-  if report.is_valid && diff.is_empty() {
-    println!(
-      "{} Configuration is valid and system is in sync",
-      "✓".green()
-    );
-  } else {
-    if !report.is_valid {
-      display_validation(report);
-    }
-
-    if !diff.is_empty() {
-      println!(
-        "\n{} System is not in sync with configuration",
-        "⚠".yellow()
-      );
-      display_preview(diff);
-    }
-  }
-
-  display_health_report(health_report);
 }
 
 /// Report any discrepancies between the configuration and the system state.

@@ -15,11 +15,9 @@ pub mod untracked;
 /// Validate command module.
 pub mod validate;
 
-pub use apply::{
-  ApplyOptions, apply_config, compare_states, display_diffs, display_preview, format_diffs,
-};
-pub use doctor::{display_health_report, run_health_checks};
-pub use migrate::migrate_files;
-pub use status::{check_status, display_status};
-pub use untracked::{display_discrepancies, find_discrepancies};
-pub use validate::{display_validation, validate_config};
+pub use apply::{ApplyOptions, ApplyReport, ApplyStatus, apply_config, compare_states};
+pub use doctor::run_health_checks;
+pub use migrate::{MigrateReport, migrate_files};
+pub use status::check_status;
+pub use untracked::find_discrepancies;
+pub use validate::validate_config;

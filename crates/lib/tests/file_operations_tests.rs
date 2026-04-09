@@ -152,7 +152,7 @@ mod file_operations_integration_tests {
     assert!(repo_file.exists());
 
     let mut dry_run_tracker = DryRun::default();
-    sync_files(&config, None, &mut dry_run_tracker, false, false)?;
+    let _ = sync_files(&config, None, &mut dry_run_tracker, false, None)?;
 
     assert!(dest_path.is_symlink(), "Sync should create a symlink");
     let symlink_target = fs::read_link(&dest_path)?;
@@ -172,7 +172,7 @@ mod file_operations_integration_tests {
     let repo_file = workspace.repo_path().join(Path::new(&repo_entry));
 
     let mut dry_run_tracker = DryRun::default();
-    sync_files(&config, None, &mut dry_run_tracker, false, false)?;
+    let _ = sync_files(&config, None, &mut dry_run_tracker, false, None)?;
 
     let mut remove_tracker = DryRun::default();
     let mut fs_manager = FileSystemManager::new(&mut remove_tracker, false);

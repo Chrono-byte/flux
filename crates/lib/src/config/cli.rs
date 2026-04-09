@@ -5,7 +5,7 @@
 //! improving maintainability through validation at startup.
 
 use crate::utils::error::{DotfilesError, Result};
-use log::{debug, info, warn};
+use log::{debug, warn};
 use std::env;
 use std::path::PathBuf;
 
@@ -37,15 +37,6 @@ pub struct EnvironmentConfig {
 
   /// Log format (from `DOTFILES_LOG_FORMAT` environment variable)
   pub log_format: LogFormat,
-
-  /// Git username (from `GIT_USERNAME` environment variable, for HTTPS auth)
-  pub git_username: Option<String>,
-
-  /// Git password (from `GIT_PASSWORD` environment variable, for HTTPS auth)
-  pub git_password: Option<String>,
-
-  /// Whether we're in CI/CD environment
-  pub is_ci_environment: bool,
 }
 
 /// Log level configuration
@@ -140,9 +131,6 @@ impl Default for EnvironmentConfig {
       config_file: None,
       log_level: LogLevel::Info,
       log_format: LogFormat::Default,
-      git_username: None,
-      git_password: None,
-      is_ci_environment: env::var("CI").is_ok() || env::var("CONTINUOUS_INTEGRATION").is_ok(),
     }
   }
 }
@@ -197,49 +185,6 @@ impl EnvironmentConfig {
       );
     }
 
-    // Load git credentials
-    if let Ok(username) = env::var(env_keys::GIT_USERNAME) {
-      if username.is_empty() {
-        return Err(DotfilesError::Config(format!(
-          "{} is set but empty. Please provide a non-empty git username.",
-          env_keys::GIT_USERNAME
-        )));
-      }
-      config.git_username = Some(username);
-      debug!(
-        "Git username loaded from {} (length: {} chars)",
-        env_keys::GIT_USERNAME,
-        config
-          .git_username
-          .as_ref()
-          .map_or(0, String::len)
-      );
-    }
-
-    if let Ok(password) = env::var(env_keys::GIT_PASSWORD) {
-      if password.is_empty() {
-        return Err(DotfilesError::Config(format!(
-          "{} is set but empty. Please provide a non-empty git password or token.",
-          env_keys::GIT_PASSWORD
-        )));
-      }
-      config.git_password = Some(password);
-      debug!(
-        "Git password loaded from {} (length: {} chars)",
-        env_keys::GIT_PASSWORD,
-        config
-          .git_password
-          .as_ref()
-          .map_or(0, String::len)
-      );
-    }
-
-    // Detect CI environment
-    config.is_ci_environment = env::var("CI").is_ok() || env::var("CONTINUOUS_INTEGRATION").is_ok();
-    if config.is_ci_environment {
-      info!("Running in CI/CD environment");
-    }
-
     Ok(config)
   }
 
@@ -249,11 +194,5 @@ impl EnvironmentConfig {
     debug!("  Config file: {:?}", self.config_file);
     debug!("  Log level: {}", self.log_level.to_string());
     debug!("  Log format: {}", self.log_format.to_string());
-    debug!(
-      "  Git credentials: username={}, password={}",
-      self.git_username.is_some(),
-      self.git_password.is_some()
-    );
-    debug!("  CI environment: {}", self.is_ci_environment);
   }
 }

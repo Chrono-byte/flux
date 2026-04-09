@@ -6,7 +6,6 @@ pub mod profile;
 pub use cli::EnvironmentConfig;
 
 // The config module itself is in this file
-use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -1001,12 +1000,6 @@ impl Config {
     }
 
     if dry_run {
-      println!(
-        "{} [DRY RUN] Would copy {} to {}",
-        "⊘".yellow(),
-        repo_config.display(),
-        xdg_config.display()
-      );
       return Ok(());
     }
 
@@ -1023,13 +1016,6 @@ impl Config {
       .map_err(|error| {
         DotfilesError::Config(format!("Failed to copy repo config to XDG: {error}"))
       })?;
-
-    println!(
-      "{} Synced repo config to XDG: {} -> {}",
-      "✓".green(),
-      repo_config.display(),
-      xdg_config.display()
-    );
 
     Ok(())
   }

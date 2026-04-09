@@ -1,15 +1,15 @@
 use crate::config::Config;
 use crate::file_manager::FileSystemManager;
-use crate::services::{FileOperation, Transaction, history, unified_diff};
+use crate::services::{FileOperation, Transaction, history};
 use crate::types::TrackedFile;
 use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
-use crate::utils::prompt::prompt_yes_no;
-use colored::Colorize;
-use std::fmt::Write;
 use std::fs;
 use tempfile::TempDir;
+
+/// Callback used by the CLI to confirm whether apply should proceed.
+type ConfirmCallback<'a> = dyn Fn(&str) -> Result<bool> + 'a;
 
 /// Options for applying configuration
 #[derive(Debug, Clone)]
@@ -51,6 +51,30 @@ impl StateDiff {
   pub const fn total_changes(&self) -> usize {
     self.files_to_sync.len()
   }
+}
+
+/// The outcome of applying configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyStatus {
+  /// No tracked files required changes.
+  NoChanges,
+  /// The apply was cancelled by the user.
+  Cancelled,
+  /// The apply was run in dry-run mode.
+  DryRun,
+  /// The apply completed successfully.
+  Applied,
+}
+
+/// Report returned by `apply_config`.
+#[derive(Debug, Clone)]
+pub struct ApplyReport {
+  /// The diff that was used for this apply run.
+  pub diff: StateDiff,
+  /// The final status of the apply run.
+  pub status: ApplyStatus,
+  /// Transaction ID when the apply completed successfully.
+  pub transaction_id: Option<String>,
 }
 
 /// Compare declared state (from config) with actual system state
@@ -119,130 +143,52 @@ fn needs_sync(
   Ok(true)
 }
 
-/// Display a preview of changes that would be applied
-pub fn display_preview(diff: &StateDiff) {
-  println!("\n{} Preview of changes:", "→".cyan().bold());
-
-  if diff.files_to_sync.is_empty() {
-    println!(
-      "  {} System is already in sync with configuration",
-      "✓".green()
-    );
-    return;
-  }
-
-  if !diff.files_to_sync.is_empty() {
-    println!(
-      "\n  {} Files to sync ({}):",
-      "📁".cyan(),
-      diff.files_to_sync.len()
-    );
-    for file in &diff.files_to_sync {
-      println!("    • {}", file.dest_path.display());
-    }
-  }
-
-  println!("\n  {} Total changes: {}", "→".cyan(), diff.total_changes());
-}
-
-/// Format unified diffs for files that would be changed.
-///
-/// This is only used in dry-run mode and never touches the filesystem.
-#[must_use]
-pub fn format_diffs(diff: &StateDiff) -> String {
-  if diff.files_to_sync.is_empty() {
-    return String::new();
-  }
-
-  let mut out = String::new();
-  let _ = writeln!(
-    out,
-    "\n{}",
-    "Unified diffs for planned changes:".bold().cyan()
-  );
-  let _ = writeln!(out, "{}", "=".repeat(60).cyan());
-
-  for file in &diff.files_to_sync {
-    let current = fs::read_to_string(&file.dest_path).unwrap_or_default();
-
-    let Ok(target) = fs::read_to_string(&file.repo_path) else {
-      let _ = writeln!(
-        out,
-        "\n{} {} (skipping diff: cannot read repo file)",
-        "⊘".yellow(),
-        file.repo_path.display()
-      );
-      continue;
-    };
-
-    let udiff = unified_diff(&file.dest_path, &current, &target);
-    if udiff.trim().is_empty() {
-      continue;
-    }
-
-    let _ = writeln!(out, "\n{} {}", "File:".bold(), file.dest_path.display());
-    let _ = writeln!(out, "{}", "-".repeat(60).cyan());
-    let _ = writeln!(out, "{udiff}");
-  }
-
-  out
-}
-
-/// Display unified diffs for files that would be changed.
-///
-/// This is only used in dry-run mode and never touches the filesystem.
-pub fn display_diffs(diff: &StateDiff) {
-  let output = format_diffs(diff);
-  if output.is_empty() {
-    return;
-  }
-  print!("{output}");
-}
-
 /// Apply configuration changes using atomic transactions
 ///
 /// # Errors
 ///
 /// Returns an error if the configuration cannot be applied.
-pub fn apply_config(options: &ApplyOptions<'_>) -> Result<()> {
-  if options.force {
-    println!(
-      "{} Force applying configuration (using repo version)...",
-      "→".cyan().bold()
-    );
-  } else {
-    println!("{} Applying configuration...", "→".cyan().bold());
-  }
-
+pub fn apply_config(
+  options: &ApplyOptions<'_>,
+  confirm: Option<&ConfirmCallback<'_>>,
+) -> Result<ApplyReport> {
   // Compare states
   let diff = compare_states(options.config, options.profile, options.force)?;
 
   if diff.is_empty() {
-    println!(
-      "{} System is already in sync with configuration",
-      "✓".green()
-    );
-    return Ok(());
+    return Ok(ApplyReport {
+      diff,
+      status: ApplyStatus::NoChanges,
+      transaction_id: None,
+    });
   }
-
-  // Display preview
-  display_preview(&diff);
 
   // Run pre-apply hooks (if not dry-run)
   run_pre_apply_hooks(options)?;
 
   // Confirm if not auto-yes
-  if !options.dry_run && !options.yes && !prompt_yes_no("Apply these changes?")? {
-    println!("{} Apply cancelled", "⊘".yellow());
-    return Ok(());
+  if !options.dry_run && !options.yes {
+    let Some(confirm) = confirm else {
+      return Err(DotfilesError::Config(
+        "apply_config requires an explicit confirmation callback".to_string(),
+      ));
+    };
+
+    if !confirm("Apply these changes?")? {
+      return Ok(ApplyReport {
+        diff,
+        status: ApplyStatus::Cancelled,
+        transaction_id: None,
+      });
+    }
   }
 
   if options.dry_run {
-    println!(
-      "\n{} DRY RUN MODE - No changes will be applied",
-      "⚠".yellow().bold()
-    );
-    return Ok(());
+    return Ok(ApplyReport {
+      diff,
+      status: ApplyStatus::DryRun,
+      transaction_id: None,
+    });
   }
 
   // Create and setup transaction
@@ -281,10 +227,11 @@ pub fn apply_config(options: &ApplyOptions<'_>) -> Result<()> {
     summary: Some(format!("Applied {} file(s)", diff.files_to_sync.len())),
   })?;
 
-  println!("\n{} Configuration applied successfully", "✓".green());
-  println!("  Transaction ID: {}", transaction.id);
-
-  Ok(())
+  Ok(ApplyReport {
+    diff,
+    status: ApplyStatus::Applied,
+    transaction_id: Some(transaction.id),
+  })
 }
 
 /// Run pre-apply hooks if configured.
@@ -294,7 +241,6 @@ fn run_pre_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
     && let Some(pre_hooks) = &hooks_config.pre_apply
   {
     use crate::services::hooks::execute_hooks;
-    println!("{} Running pre-apply hooks...", "→".cyan());
     let hook_results = execute_hooks(pre_hooks, options.config, None, true)?;
     for result in hook_results {
       if !result.success {
@@ -303,11 +249,27 @@ fn run_pre_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
           result.command, result.exit_code
         )));
       }
-      if !result.stdout.is_empty() {
-        print!("{}", result.stdout);
-      }
-      if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
-        eprint!("{}", result.stderr);
+
+      match (
+        result.stderr.is_empty(),
+        result.stderr.contains("Hook skipped"),
+        result.stdout.is_empty(),
+      ) {
+        (false, false, _) => {
+          // return an error if stderr is not empty and does not contain "Hook skipped"
+          return Err(DotfilesError::Config(format!(
+            "Pre-apply hook produced stderr: {}",
+            result.stderr
+          )));
+        }
+        (_, _, false) => {
+          // return an error if stdout is not empty
+          return Err(DotfilesError::Config(format!(
+            "Pre-apply hook produced stdout: {}",
+            result.stdout
+          )));
+        }
+        _ => {}
       }
     }
   }
@@ -352,22 +314,14 @@ fn run_post_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
     && let Some(post_hooks) = &hooks_config.post_apply
   {
     use crate::services::hooks::execute_hooks;
-    println!("{} Running post-apply hooks...", "→".cyan());
     let hook_results = execute_hooks(post_hooks, options.config, None, false)?; // Don't fail-fast on post hooks
     for result in hook_results {
       if !result.success {
-        eprintln!(
-          "{} Post-apply hook failed (non-fatal): {} (exit code: {:?})",
-          "⚠".yellow(),
+        log::warn!(
+          "Post-apply hook failed (non-fatal): {} (exit code: {:?})",
           result.command,
           result.exit_code
         );
-      }
-      if !result.stdout.is_empty() {
-        print!("{}", result.stdout);
-      }
-      if !result.stderr.is_empty() && !result.stderr.contains("Hook skipped") {
-        eprint!("{}", result.stderr);
       }
     }
   }

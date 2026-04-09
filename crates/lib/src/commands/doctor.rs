@@ -3,7 +3,6 @@ use crate::types::TrackedFile;
 use crate::utils::error::Result;
 use crate::utils::home_override;
 use crate::utils::path_utils::symlink_points_to_correct_target;
-use colored::Colorize;
 use std::fs;
 
 /// A health issue detected by the doctor command.
@@ -364,104 +363,6 @@ fn check_unsafe_permissions(
   }
 
   Ok(())
-}
-
-/// Display health report with categorized issues and suggested fixes.
-///
-/// # Parameters
-///
-/// * `report`: The health report to display
-pub fn display_health_report(report: &HealthReport) {
-  if report.is_healthy() {
-    println!("{} All health checks passed!", "✓".green().bold());
-    return;
-  }
-
-  println!("\n{} Health Check Report", "→".cyan().bold());
-  println!("{}", "=".repeat(60).cyan());
-
-  let by_category = report.by_category();
-  let categories: Vec<_> = by_category.keys().collect();
-  let mut sorted_categories = categories.clone();
-  sorted_categories.sort();
-
-  let empty_vec = Vec::new();
-  for category in sorted_categories {
-    let cat_issues = by_category.get(category).unwrap_or(&empty_vec);
-    println!(
-      "\n{} {} ({} issue(s))",
-      "Category:".bold(),
-      category.cyan(),
-      cat_issues.len()
-    );
-
-    for issue in cat_issues {
-      match issue {
-        HealthIssue::BrokenSymlink {
-          path,
-          target,
-          reason,
-        } => {
-          println!("  {} Broken symlink: {}", "⚠".yellow(), path.display());
-          println!("    Target: {}", target.display());
-          println!("    Reason: {reason}");
-          println!("    💡 Fix: Run `flux apply` to recreate symlink");
-        }
-        HealthIssue::MissingRepoFile { file } => {
-          println!(
-            "  {} Missing repo file: {}",
-            "✗".red(),
-            file.repo_path.display()
-          );
-          println!("    💡 Fix: Add file to repository or remove from config");
-        }
-        HealthIssue::ConfigDrift { file, summary } => {
-          println!(
-            "  {} Config drift: {}",
-            "↻".yellow(),
-            file.dest_path.display()
-          );
-          println!("    {summary}");
-          println!("    💡 Fix: Run `flux apply` to sync with repository");
-        }
-        HealthIssue::InvalidProfile { profile, reason } => {
-          println!("  {} Invalid profile: {}", "⚠".yellow(), profile);
-          println!("    Reason: {reason}");
-          println!("    💡 Fix: Create profile directory or switch to valid profile");
-        }
-        HealthIssue::BadGitRemote {
-          remote,
-          url,
-          reason,
-        } => {
-          println!("  {} Bad git remote: {} ({})", "⚠".yellow(), remote, url);
-          println!("    Reason: {reason}");
-          println!("    💡 Fix: Update remote URL with `flux remote set-url {remote} <new-url>`");
-        }
-        HealthIssue::UnsafePermissions {
-          path,
-          current_mode,
-          recommended_mode,
-        } => {
-          println!("  {} Unsafe permissions: {}", "⚠".yellow(), path.display());
-          println!("    Current: {current_mode}, Recommended: {recommended_mode}");
-          println!(
-            "    💡 Fix: Run `chmod {} {}`",
-            recommended_mode,
-            path.display()
-          );
-        }
-      }
-    }
-  }
-
-  println!("\n{}", "=".repeat(60).cyan());
-  println!(
-    "{} Found {} issue(s) across {} categories",
-    "Summary:".bold(),
-    report.issues.len().to_string().red(),
-    by_category.len()
-  );
 }
 
 #[cfg(test)]
