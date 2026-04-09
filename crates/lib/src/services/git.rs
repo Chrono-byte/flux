@@ -51,6 +51,19 @@ impl GitRepository {
     Ok(Self { repo, repo_path })
   }
 
+  /// Open an existing git repository at the given path.
+  ///
+  /// This does not create a repository if one does not already exist.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the repository cannot be opened.
+  pub fn open_existing(repo_path: &Path) -> Result<Self> {
+    let repo = Repository::open(repo_path)?;
+    let repo_path = repo_path.to_path_buf();
+    Ok(Self { repo, repo_path })
+  }
+
   /// Get the underlying git2 Repository
   #[must_use]
   pub fn inner(&self) -> &Repository {
@@ -347,6 +360,190 @@ where
     Err(_) => Err(DotfilesError::Config(format!(
       "Operation timed out after {timeout_seconds} seconds"
     ))),
+  }
+}
+
+/// Result of checking whether the local repository matches the remote branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteSyncCheck {
+  /// The local HEAD matches the remote HEAD.
+  UpToDate {
+    /// Remote name used for the check.
+    remote: String,
+    /// Branch name used for the check.
+    branch: String,
+  },
+  /// The local HEAD differs from the remote HEAD.
+  NotUpToDate {
+    /// Remote name used for the check.
+    remote: String,
+    /// Branch name used for the check.
+    branch: String,
+    /// Short local commit hash.
+    local_oid: String,
+    /// Short remote commit hash.
+    remote_oid: String,
+  },
+  /// The remote could not be checked.
+  Unknown,
+}
+
+/// Returns a short commit hash from the full OID.
+fn short_oid(oid: &str) -> String {
+  oid.chars().take(7).collect()
+}
+
+/// Parses a remote tracking reference into a (remote, branch) pair.
+fn parse_remote_tracking_ref(reference: &str) -> Option<(String, String)> {
+  let stripped = reference.strip_prefix("refs/remotes/")?;
+  let (remote, branch) = stripped.split_once('/')?;
+  Some((remote.to_string(), branch.to_string()))
+}
+
+/// Resolves the remote sync target based on the current branch and remote name.
+fn resolve_remote_sync_target(
+  git_repo: &GitRepository,
+  remote_name: Option<&str>,
+  branch_name: Option<&str>,
+) -> Option<(String, String)> {
+  if let (Some(remote), Some(branch)) = (remote_name, branch_name) {
+    return Some((remote.to_string(), branch.to_string()));
+  }
+
+  let current_branch = git_repo.get_current_branch().ok();
+  let current_branch = branch_name
+    .map(ToString::to_string)
+    .or(current_branch)?;
+
+  let local_branch = git_repo
+    .inner()
+    .find_branch(&current_branch, git2::BranchType::Local)
+    .ok();
+
+  let mut resolved_remote = remote_name.map(ToString::to_string);
+  let mut resolved_branch = branch_name.map(ToString::to_string);
+
+  if let Some(local_branch) = local_branch
+    && let Ok(upstream_branch) = local_branch.upstream()
+    && let Some(upstream_name) = upstream_branch.get().name()
+    && let Some((upstream_remote, upstream_branch_name)) = parse_remote_tracking_ref(upstream_name)
+  {
+    if resolved_remote.is_none() {
+      resolved_remote = Some(upstream_remote);
+    }
+    if resolved_branch.is_none() {
+      resolved_branch = Some(upstream_branch_name);
+    }
+  }
+
+  Some((resolved_remote?, resolved_branch?))
+}
+
+/// Looks up the OID of the remote head for the given branch.
+async fn lookup_remote_head_oid(
+  repo_path: &Path,
+  remote_name: &str,
+  branch_name: &str,
+  timeout_seconds: u64,
+) -> Result<Option<String>> {
+  let repo_path = repo_path.to_path_buf();
+  let remote_name = remote_name.to_string();
+  let branch_name = branch_name.to_string();
+
+  execute_with_timeout(
+    move || -> Result<Option<String>> {
+      let output = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .arg("ls-remote")
+        .arg("--heads")
+        .arg(&remote_name)
+        .arg(&branch_name)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "true")
+        .env("SSH_ASKPASS", "true")
+        .output();
+
+      let Ok(output) = output else {
+        return Ok(None);
+      };
+
+      if !output.status.success() {
+        return Ok(None);
+      }
+
+      let remote_oid = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.split_whitespace().next())
+        .map(ToString::to_string);
+
+      Ok(remote_oid)
+    },
+    timeout_seconds,
+  )
+  .await
+}
+
+/// Check whether the local branch matches the remote branch without updating refs.
+///
+/// This is designed for shell hooks: it stays silent when the remote cannot be
+/// reached and only reports when the local repository differs from the remote.
+///
+/// # Errors
+///
+/// Returns `RemoteSyncCheck::Unknown` if the remote cannot be reached or if the
+/// local and remote branches do not match.
+pub async fn check_remote_sync(
+  git_repo: &GitRepository,
+  remote_name: Option<&str>,
+  branch_name: Option<&str>,
+  timeout_seconds: u64,
+) -> Result<RemoteSyncCheck> {
+  let Some((resolved_remote, resolved_branch)) =
+    resolve_remote_sync_target(git_repo, remote_name, branch_name)
+  else {
+    return Ok(RemoteSyncCheck::Unknown);
+  };
+
+  let head_oid = match git_repo.inner().head() {
+    Ok(head) => match head.peel_to_commit() {
+      Ok(commit) => commit.id().to_string(),
+      Err(_) => return Ok(RemoteSyncCheck::Unknown),
+    },
+    Err(_) => return Ok(RemoteSyncCheck::Unknown),
+  };
+
+  let remote_oid = {
+    if let Ok(Some(oid)) = lookup_remote_head_oid(
+      &git_repo.repo_path,
+      &resolved_remote,
+      &resolved_branch,
+      timeout_seconds,
+    )
+    .await
+    {
+      oid
+    } else {
+      return Ok(RemoteSyncCheck::Unknown);
+    }
+  };
+
+  if remote_oid.is_empty() {
+    return Ok(RemoteSyncCheck::Unknown);
+  }
+
+  if head_oid == remote_oid {
+    Ok(RemoteSyncCheck::UpToDate {
+      remote: resolved_remote,
+      branch: resolved_branch,
+    })
+  } else {
+    Ok(RemoteSyncCheck::NotUpToDate {
+      remote: resolved_remote,
+      branch: resolved_branch,
+      local_oid: short_oid(&head_oid),
+      remote_oid: short_oid(&remote_oid),
+    })
   }
 }
 

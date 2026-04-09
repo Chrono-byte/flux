@@ -115,7 +115,20 @@ impl Config {
   pub fn load() -> Result<Self> {
     // Check for static override first, then fall back to environment variable
     let override_path = CONFIG_PATH_OVERRIDE.get().map(PathBuf::as_path);
-    Self::load_with_override(override_path)
+    Self::load_with_override_internal(override_path, true)
+  }
+
+  /// Load configuration without creating a missing root config file.
+  ///
+  /// This is intended for read-only commands and shell hooks that should not
+  /// create configuration files as a side effect.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the configuration file cannot be loaded.
+  pub fn load_existing() -> Result<Self> {
+    let override_path = CONFIG_PATH_OVERRIDE.get().map(PathBuf::as_path);
+    Self::load_with_override_internal(override_path, false)
   }
 
   /// Load configuration from default locations with optional path override.
@@ -131,6 +144,14 @@ impl Config {
   ///
   /// Returns an error if the configuration file cannot be loaded.
   pub fn load_with_override(config_path_override: Option<&Path>) -> Result<Self> {
+    Self::load_with_override_internal(config_path_override, true)
+  }
+
+  /// Load configuration with optional path override, with repo config as source of truth.
+  fn load_with_override_internal(
+    config_path_override: Option<&Path>,
+    create_missing_root: bool,
+  ) -> Result<Self> {
     // Check for custom config path from parameter or environment variable
     let config_path = if let Some(override_path) = config_path_override {
       override_path.to_path_buf()
@@ -141,7 +162,7 @@ impl Config {
       Self::get_config_path()?
     };
 
-    Self::load_from_path(&config_path, &mut Vec::new())
+    Self::load_from_path(&config_path, &mut Vec::new(), create_missing_root)
   }
 
   /// Load configuration from a specific path.
@@ -150,6 +171,7 @@ impl Config {
   fn load_from_path(
     config_path: &Path,
     visited: &mut Vec<PathBuf>,
+    create_missing_root: bool,
   ) -> Result<Self> {
     let config_path = config_path
       .canonicalize()
@@ -160,7 +182,7 @@ impl Config {
 
     let result = (|| -> Result<Self> {
       if !config_path.exists() {
-        return Self::handle_missing_config(visited.len(), &config_path);
+        return Self::handle_missing_config(visited.len(), &config_path, create_missing_root);
       }
 
       let mut current = Self::parse_config(&Self::read_config_file(&config_path)?, &config_path)?;
@@ -169,8 +191,12 @@ impl Config {
       let base_dir = config_path
         .parent()
         .map_or_else(|| PathBuf::from("."), PathBuf::from);
-      let merged_include =
-        Self::merge_included_configs(&base_dir, current.general.include.clone(), visited)?;
+      let merged_include = Self::merge_included_configs(
+        &base_dir,
+        current.general.include.clone(),
+        visited,
+        create_missing_root,
+      )?;
       current.general.include = None;
 
       let result = match merged_include {
@@ -211,11 +237,19 @@ impl Config {
   fn handle_missing_config(
     visited_len: usize,
     config_path: &Path,
+    create_missing_root: bool,
   ) -> Result<Self> {
     if visited_len == 1 {
-      let config = Self::default();
-      config.save(false)?;
-      Ok(config)
+      if create_missing_root {
+        let config = Self::default();
+        config.save(false)?;
+        Ok(config)
+      } else {
+        Err(DotfilesError::Config(format!(
+          "Configuration file not found: {}",
+          config_path.display()
+        )))
+      }
     } else {
       Err(DotfilesError::Config(format!(
         "Included config file does not exist: {}",
@@ -283,12 +317,13 @@ impl Config {
     base_dir: &Path,
     include_paths: Option<Vec<String>>,
     visited: &mut Vec<PathBuf>,
+    create_missing_root: bool,
   ) -> Result<Option<Self>> {
     if let Some(include_paths) = include_paths {
       let mut merged = None;
       for raw in include_paths {
         let include_path = Self::resolve_include_path(base_dir, &raw);
-        let included = Self::load_from_path(&include_path, visited)?;
+        let included = Self::load_from_path(&include_path, visited, create_missing_root)?;
         merged = Some(match merged {
           Some(base) => Self::merge_configs(base, included),
           None => included,

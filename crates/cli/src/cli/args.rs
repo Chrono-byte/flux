@@ -258,6 +258,16 @@ pub enum ProfileCommands {
 pub enum RemoteCommands {
   /// List all remotes
   List,
+  /// Check whether the current branch matches its remote counterpart.
+  ///
+  /// This is intended for shell startup hooks: it is silent when the remote
+  /// cannot be reached and only prints a message when the repository is out
+  /// of sync with its upstream.
+  Check {
+    /// Timeout in seconds for the remote lookup.
+    #[arg(long, default_value_t = 5)]
+    timeout: u64,
+  },
   /// Add a remote repository
   Add {
     /// Remote name (e.g., origin)

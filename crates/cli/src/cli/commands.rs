@@ -25,8 +25,9 @@ use flux_lib::{
   file_manager::{FileSystemManager, add_file, remove_file, sync_files},
   services::git,
   services::{
-    add_remote, commit_changes, detect_changes, init_repo, list_remotes, pull_from_remote,
-    push_to_remote, read_events, remove_remote, set_remote_url, show_git_status, stage_changes,
+    RemoteSyncCheck, add_remote, check_remote_sync, commit_changes, detect_changes, init_repo,
+    list_remotes, pull_from_remote, push_to_remote, read_events, remove_remote, set_remote_url,
+    show_git_status, stage_changes,
   },
   types::FileEntry,
   utils::home_override,
@@ -866,29 +867,77 @@ pub(super) fn handle_profile_command(command: ProfileCommands) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if the configuration cannot be loaded or if the remote cannot be added, set, or removed.
-pub(super) fn handle_remote_command(command: RemoteCommands) -> Result<()> {
-  let config = Config::load()?;
-  let repo_path = config.get_repo_path();
-  let repo = init_repo(&repo_path)?;
-  let mut dry_run_tracker = DryRun::default();
+fn display_remote_sync_notice(result: &RemoteSyncCheck) {
+  if let RemoteSyncCheck::NotUpToDate {
+    remote,
+    branch,
+    local_oid,
+    remote_oid,
+  } = result
+  {
+    println!(
+      "{} Flux repo is not up to date with {}/{} (local {}, remote {})",
+      "⚠".yellow(),
+      remote,
+      branch,
+      local_oid,
+      remote_oid
+    );
+  }
+}
 
+/// Handle the remote command.
+///
+/// Performs various remote-related operations (check, list, add, set-url, remove).
+/// If configuration or repository initialization is not available the check command
+/// will be silently skipped (returns Ok). Other subcommands will return errors
+/// encountered while loading config or interacting with the repository.
+pub(super) async fn handle_remote_command(command: RemoteCommands) -> Result<()> {
   match command {
+    RemoteCommands::Check { timeout } => {
+      let Ok(config) = Config::load_existing() else {
+        return Ok(());
+      };
+
+      let repo_path = config.get_repo_path();
+      let Ok(repo) = init_repo(&repo_path) else {
+        return Ok(());
+      };
+
+      let result = check_remote_sync(&repo, None, None, timeout).await?;
+      display_remote_sync_notice(&result);
+    }
     RemoteCommands::List => {
+      let config = Config::load()?;
+      let repo_path = config.get_repo_path();
+      let repo = init_repo(&repo_path)?;
       list_remotes(&repo)?;
     }
     RemoteCommands::Add { name, url, dry_run } => {
+      let config = Config::load()?;
+      let repo_path = config.get_repo_path();
+      let repo = init_repo(&repo_path)?;
+      let mut dry_run_tracker = DryRun::default();
       add_remote(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
       if dry_run {
         dry_run_tracker.display_summary();
       }
     }
     RemoteCommands::SetUrl { name, url, dry_run } => {
+      let config = Config::load()?;
+      let repo_path = config.get_repo_path();
+      let repo = init_repo(&repo_path)?;
+      let mut dry_run_tracker = DryRun::default();
       set_remote_url(&repo, &name, &url, &mut dry_run_tracker, dry_run)?;
       if dry_run {
         dry_run_tracker.display_summary();
       }
     }
     RemoteCommands::Remove { name, dry_run } => {
+      let config = Config::load()?;
+      let repo_path = config.get_repo_path();
+      let repo = init_repo(&repo_path)?;
+      let mut dry_run_tracker = DryRun::default();
       remove_remote(&repo, &name, &mut dry_run_tracker, dry_run)?;
       if dry_run {
         dry_run_tracker.display_summary();
@@ -1196,7 +1245,9 @@ fn execute_internal(cmd: Commands) -> Result<()> {
     apply @ Commands::Apply { .. } => run_apply_command(apply)?,
     history @ Commands::History { .. } => run_history_command(history)?,
     Commands::Profile { command } => handle_profile_command(command)?,
-    Commands::Remote { command } => handle_remote_command(command)?,
+    Commands::Remote { command } => {
+      tokio::runtime::Runtime::new()?.block_on(handle_remote_command(command))?;
+    }
     push @ Commands::Push { .. } => run_push_command(push)?,
     pull @ Commands::Pull { .. } => run_pull_command(pull)?,
     Commands::Status {
