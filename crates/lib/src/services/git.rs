@@ -4,9 +4,13 @@ use crate::utils::error::{DotfilesError, Result};
 use crate::utils::error_utils;
 use crate::utils::home_override;
 use git2::{CredentialType, RemoteCallbacks, Repository, Signature};
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::timeout as tokio_timeout;
 
 /// Encapsulates a git repository with common operations
@@ -426,7 +430,23 @@ fn trace_git_auth(args: std::fmt::Arguments<'_>) {
   }
 }
 
-/// Execute a git2 operation with a timeout using async/await
+/// Cached result for `remote check`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RemoteCheckCacheEntry {
+  /// Full local HEAD oid used when the cache entry was created.
+  head_oid: String,
+  /// Full remote HEAD oid, if it could be resolved.
+  remote_oid: Option<String>,
+  /// Unix timestamp in seconds.
+  checked_at_unix: u64,
+}
+
+/// Time-to-live for cached `remote check` results.
+const REMOTE_CHECK_CACHE_TTL_SECS: u64 = 60;
+/// Poll interval used while waiting on a child process that may need to be killed.
+const CHILD_WAIT_POLL_INTERVAL_MS: u64 = 50;
+
+/// Execute a git2 operation with a timeout using async/await.
 async fn execute_with_timeout<F, T>(
   operation: F,
   timeout_seconds: u64,
@@ -438,7 +458,6 @@ where
   let timeout_duration = Duration::from_secs(timeout_seconds);
 
   match tokio_timeout(timeout_duration, async {
-    // Run the blocking git2 operation in a thread
     tokio::task::spawn_blocking(operation)
       .await
       .map_err(|error| DotfilesError::Config(format!("Task join error: {error}")))?
@@ -450,6 +469,142 @@ where
       "Operation timed out after {timeout_seconds} seconds"
     ))),
   }
+}
+
+/// Run a command with a hard timeout and kill it if it exceeds the limit.
+fn run_command_with_timeout(
+  command: &mut Command,
+  timeout_seconds: u64,
+) -> Result<Option<std::process::Output>> {
+  let mut child = command
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .map_err(|error| DotfilesError::Config(format!("Failed to spawn command: {error}")))?;
+
+  let timeout = Duration::from_secs(timeout_seconds);
+  let started = Instant::now();
+
+  loop {
+    if let Some(_status) = child
+      .try_wait()
+      .map_err(|error| DotfilesError::Config(format!("Failed waiting on command: {error}")))?
+    {
+      let output = child.wait_with_output().map_err(|error| {
+        DotfilesError::Config(format!("Failed reading command output: {error}"))
+      })?;
+      return Ok(Some(output));
+    }
+
+    if started.elapsed() >= timeout {
+      let _ = child.kill();
+      let _ = child.wait();
+      return Ok(None);
+    }
+
+    std::thread::sleep(Duration::from_millis(CHILD_WAIT_POLL_INTERVAL_MS));
+  }
+}
+
+/// Returns the cache directory used for remote check results.
+fn remote_check_cache_dir() -> Option<PathBuf> {
+  let cache_dir = dirs::cache_dir()?;
+  Some(cache_dir.join("flux").join("remote-check"))
+}
+
+/// Returns the cache path for a repo/remote/branch combination.
+fn remote_check_cache_path(
+  repo_path: &Path,
+  remote_name: &str,
+  branch_name: &str,
+) -> Option<PathBuf> {
+  let mut hasher = DefaultHasher::new();
+  repo_path.hash(&mut hasher);
+  remote_name.hash(&mut hasher);
+  branch_name.hash(&mut hasher);
+  let cache_key = format!("{:016x}", hasher.finish());
+
+  Some(remote_check_cache_dir()?.join(format!("{cache_key}.json")))
+}
+
+/// Cached remote check state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CachedRemoteCheck {
+  /// No usable cache entry was found.
+  Miss,
+  /// A usable cache entry was found.
+  Hit(Option<String>),
+}
+
+/// Read a cached remote check entry if it is still valid for the current HEAD.
+fn read_remote_check_cache(
+  repo_path: &Path,
+  remote_name: &str,
+  branch_name: &str,
+  head_oid: &str,
+) -> CachedRemoteCheck {
+  let Some(cache_path) = remote_check_cache_path(repo_path, remote_name, branch_name) else {
+    return CachedRemoteCheck::Miss;
+  };
+  let Ok(content) = fs::read_to_string(cache_path) else {
+    return CachedRemoteCheck::Miss;
+  };
+  let Ok(cache_entry) = serde_json::from_str::<RemoteCheckCacheEntry>(&content) else {
+    return CachedRemoteCheck::Miss;
+  };
+
+  if cache_entry.head_oid != head_oid {
+    return CachedRemoteCheck::Miss;
+  }
+
+  let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+    return CachedRemoteCheck::Miss;
+  };
+  if now
+    .as_secs()
+    .saturating_sub(cache_entry.checked_at_unix)
+    > REMOTE_CHECK_CACHE_TTL_SECS
+  {
+    return CachedRemoteCheck::Miss;
+  }
+
+  CachedRemoteCheck::Hit(cache_entry.remote_oid)
+}
+
+/// Persist a remote check result in the cache.
+fn write_remote_check_cache(
+  repo_path: &Path,
+  remote_name: &str,
+  branch_name: &str,
+  head_oid: &str,
+  remote_oid: Option<&str>,
+) {
+  let Some(cache_path) = remote_check_cache_path(repo_path, remote_name, branch_name) else {
+    return;
+  };
+  let Some(cache_dir) = cache_path.parent() else {
+    return;
+  };
+
+  if fs::create_dir_all(cache_dir).is_err() {
+    return;
+  }
+
+  let checked_at_unix = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .ok()
+    .map_or(0, |duration| duration.as_secs());
+  let cache_entry = RemoteCheckCacheEntry {
+    head_oid: head_oid.to_string(),
+    remote_oid: remote_oid.map(ToString::to_string),
+    checked_at_unix,
+  };
+
+  let Ok(serialized) = serde_json::to_string(&cache_entry) else {
+    return;
+  };
+
+  let _ = fs::write(cache_path, serialized);
 }
 
 /// Result of checking whether the local repository matches the remote branch.
@@ -539,38 +694,46 @@ async fn lookup_remote_head_oid(
   let remote_name = remote_name.to_string();
   let branch_name = branch_name.to_string();
 
-  execute_with_timeout(
-    move || -> Result<Option<String>> {
-      let output = Command::new("git")
-        .arg("-C")
-        .arg(&repo_path)
-        .arg("ls-remote")
-        .arg("--heads")
-        .arg(&remote_name)
-        .arg(&branch_name)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "true")
-        .env("SSH_ASKPASS", "true")
-        .output();
+  tokio::task::spawn_blocking(move || -> Result<Option<String>> {
+    trace_git_auth(format_args!(
+      "lookup_remote_head_oid using system git for repo={} remote={} branch={}",
+      repo_path.display(),
+      remote_name,
+      branch_name
+    ));
 
-      let Ok(output) = output else {
-        return Ok(None);
-      };
+    let ssh_command =
+      format!("ssh -o BatchMode=yes -o ConnectTimeout={timeout_seconds} -o ConnectionAttempts=1");
+    let mut command = Command::new("git");
+    let _ = command
+      .arg("-C")
+      .arg(&repo_path)
+      .arg("ls-remote")
+      .arg("--heads")
+      .arg(&remote_name)
+      .arg(&branch_name)
+      .env("GIT_TERMINAL_PROMPT", "0")
+      .env("GIT_ASKPASS", "true")
+      .env("SSH_ASKPASS", "true")
+      .env("GIT_SSH_COMMAND", &ssh_command);
 
-      if !output.status.success() {
-        return Ok(None);
-      }
+    let Some(output) = run_command_with_timeout(&mut command, timeout_seconds)? else {
+      return Ok(None);
+    };
 
-      let remote_oid = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .find_map(|line| line.split_whitespace().next())
-        .map(ToString::to_string);
+    if !output.status.success() {
+      return Ok(None);
+    }
 
-      Ok(remote_oid)
-    },
-    timeout_seconds,
-  )
+    let remote_oid = String::from_utf8_lossy(&output.stdout)
+      .lines()
+      .find_map(|line| line.split_whitespace().next())
+      .map(ToString::to_string);
+
+    Ok(remote_oid)
+  })
   .await
+  .map_err(|error| DotfilesError::Config(format!("Task join error: {error}")))?
 }
 
 /// Check whether the local branch matches the remote branch without updating refs.
@@ -602,19 +765,38 @@ pub async fn check_remote_sync(
     Err(_) => return Ok(RemoteSyncCheck::Unknown),
   };
 
-  let remote_oid = {
-    if let Ok(Some(oid)) = lookup_remote_head_oid(
-      &git_repo.repo_path,
-      &resolved_remote,
-      &resolved_branch,
-      timeout_seconds,
-    )
-    .await
-    {
-      oid
-    } else {
-      return Ok(RemoteSyncCheck::Unknown);
+  let remote_oid = match read_remote_check_cache(
+    &git_repo.repo_path,
+    &resolved_remote,
+    &resolved_branch,
+    &head_oid,
+  ) {
+    CachedRemoteCheck::Hit(cached_remote_oid) => cached_remote_oid,
+    CachedRemoteCheck::Miss => {
+      let looked_up_remote_oid = lookup_remote_head_oid(
+        &git_repo.repo_path,
+        &resolved_remote,
+        &resolved_branch,
+        timeout_seconds,
+      )
+      .await
+      .ok()
+      .flatten();
+
+      write_remote_check_cache(
+        &git_repo.repo_path,
+        &resolved_remote,
+        &resolved_branch,
+        &head_oid,
+        looked_up_remote_oid.as_deref(),
+      );
+
+      looked_up_remote_oid
     }
+  };
+
+  let Some(remote_oid) = remote_oid else {
+    return Ok(RemoteSyncCheck::Unknown);
   };
 
   if remote_oid.is_empty() {
@@ -1012,7 +1194,7 @@ pub async fn push_to_remote(
     .ok()
     .and_then(|ref_| ref_.target());
 
-  let start_time = std::time::Instant::now();
+  let start_time = Instant::now();
   let push_result = execute_push_operation(
     &git_repo.repo_path,
     remote_name,
@@ -1427,7 +1609,7 @@ pub async fn pull_from_remote(
     .ok()
     .and_then(|head| head.peel_to_commit().ok());
 
-  let _start_time = std::time::Instant::now();
+  let _start_time = Instant::now();
   trace_git_auth(format_args!(
     "pull_from_remote start repo={} remote={} branch={}",
     git_repo.repo_path.display(),
