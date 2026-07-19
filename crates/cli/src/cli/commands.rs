@@ -1441,7 +1441,7 @@ mod add_command_tests {
     std::os::unix::fs::symlink(&repo_file, &link_path)?;
 
     let detected = detect_repo_symlink_target(&link_path, &repo_path)?;
-    assert_eq!(detected, Some(repo_file));
+    assert_eq!(detected, Some(repo_file.canonicalize()?));
     Ok(())
   }
 

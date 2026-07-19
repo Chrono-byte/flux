@@ -76,7 +76,7 @@ pub fn read_events(limit: Option<usize>) -> Result<Vec<HistoryEvent>> {
   }
 
   // Newest first
-  events.sort_by(|first, second| second.timestamp.cmp(&first.timestamp));
+  events.sort_by_key(|event| std::cmp::Reverse(event.timestamp));
 
   if let Some(max) = limit {
     events.truncate(max);

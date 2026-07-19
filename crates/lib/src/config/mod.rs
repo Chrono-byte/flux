@@ -285,7 +285,11 @@ impl Config {
   /// Update any stored condition specs to the latest schema.
   fn migrate_legacy_conditions(config: &mut Self) {
     for tool_config in config.tools.values_mut() {
-      for entry in &mut tool_config.files {
+      for entry in tool_config
+        .files
+        .iter_mut()
+        .chain(tool_config.folders.iter_mut())
+      {
         if let Some(ref mut conditions) = entry.conditions {
           conditions.migrate_legacy();
         }
@@ -1018,5 +1022,52 @@ impl Config {
       })?;
 
     Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::Config;
+  use crate::utils::system;
+
+  #[test]
+  fn legacy_conditions_are_migrated_for_files_and_folders() {
+    let excluded_os = if system::get_os() == "linux" {
+      "darwin"
+    } else {
+      "linux"
+    };
+    let source = format!(
+      r#"
+[general]
+repo_path = "/tmp/dotfiles"
+current_profile = "default"
+
+[tools.example]
+files = [
+  {{ repo = "file", dest = ".config/example/file", conditions = {{ os = ["{excluded_os}"] }} }},
+]
+folders = [
+  {{ repo = "folder", dest = ".config/example/folder", conditions = {{ os = ["{excluded_os}"] }} }},
+]
+"#,
+    );
+
+    let parsed = toml::from_str(&source);
+    assert!(parsed.is_ok(), "config should parse");
+    let Ok(mut config) = parsed else {
+      return;
+    };
+    Config::migrate_legacy_conditions(&mut config);
+
+    let tracked_result = config.get_tracked_files(None);
+    assert!(tracked_result.is_ok(), "tracked files should resolve");
+    let Ok(tracked) = tracked_result else {
+      return;
+    };
+    assert!(
+      tracked.is_empty(),
+      "legacy conditions should exclude both file and folder entries",
+    );
   }
 }

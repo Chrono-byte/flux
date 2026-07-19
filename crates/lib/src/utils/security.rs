@@ -84,24 +84,20 @@ pub fn validate_dest_path(
   } else {
     home.join(dest)
   };
-  let canonical_dest = match full_dest.canonicalize() {
-    Ok(path) => path,
-    Err(error) if error.kind() == ErrorKind::NotFound => normalize_nonexistent_path(&full_dest),
-    Err(_) => {
-      return Err(DotfilesError::Path(format!(
-        "What: Cannot resolve destination path\n  \
+  let Ok(canonical_dest) = canonicalize_with_missing_tail(&full_dest) else {
+    return Err(DotfilesError::Path(format!(
+      "What: Cannot resolve destination path\n  \
                  Destination: {}\n  \
                  Why: Path cannot be made absolute or does not exist\n  \
                  💡 Solution:\n    \
                  - Verify the parent directory exists: `ls -la {}`\n    \
                  - Check path does not contain invalid characters\n    \
                  - Ensure path is relative to home directory",
-        full_dest.display(),
-        full_dest
-          .parent()
-          .map_or_else(|| "N/A".to_string(), |parent| parent.display().to_string())
-      )));
-    }
+      full_dest.display(),
+      full_dest
+        .parent()
+        .map_or_else(|| "N/A".to_string(), |parent| parent.display().to_string())
+    )));
   };
 
   // Check if destination is within home directory
@@ -110,6 +106,37 @@ pub fn validate_dest_path(
   }
 
   Ok(())
+}
+
+/// Canonicalize the existing portion of a path and append any missing tail.
+///
+/// This resolves platform aliases and symlinked parent directories even when
+/// the final destination does not exist yet.
+fn canonicalize_with_missing_tail(path: &Path) -> std::io::Result<PathBuf> {
+  let mut candidate = path;
+  let mut missing = Vec::new();
+
+  loop {
+    match candidate.canonicalize() {
+      Ok(mut canonical) => {
+        for component in missing.iter().rev() {
+          canonical.push(component);
+        }
+        return Ok(normalize_nonexistent_path(&canonical));
+      }
+      Err(error) if error.kind() == ErrorKind::NotFound => {
+        let Some(name) = candidate.file_name() else {
+          return Err(error);
+        };
+        missing.push(name.to_os_string());
+        let Some(parent) = candidate.parent() else {
+          return Err(error);
+        };
+        candidate = parent;
+      }
+      Err(error) => return Err(error),
+    }
+  }
 }
 
 /// Normalize a path that may not exist, converting it to an absolute path.
