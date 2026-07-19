@@ -195,13 +195,22 @@ impl Transaction {
     }
 
     // Execute all operations
-    for op in self.operations.clone() {
+    for (operation_index, op) in self.operations.clone().into_iter().enumerate() {
       let result = match &op {
         FileOperation::CreateSymlink {
           source,
           target,
           resolution,
-        } => Self::execute_create_symlink(source, target, *resolution, config, fs_manager),
+        } => Self::execute_create_symlink(
+          source,
+          target,
+          *resolution,
+          &self
+            .temp_dir
+            .join(format!("operation-{operation_index}.backup")),
+          config,
+          fs_manager,
+        ),
         FileOperation::RemoveSymlink { target } => Self::execute_remove_symlink(target, fs_manager),
       };
 
@@ -300,13 +309,19 @@ impl Transaction {
     }
 
     // Rollback in reverse order
-    for result in self.results.iter().rev() {
+    for (operation_index, result) in self.results.iter().enumerate().rev() {
       if result.success {
         match &result.operation {
           FileOperation::CreateSymlink { target, .. } => {
             // Remove the symlink we created
             if target.exists() || target.is_symlink() {
               let _ = fs_manager.remove_file(target);
+            }
+            let backup_path = self
+              .temp_dir
+              .join(format!("operation-{operation_index}.backup"));
+            if backup_path.exists() || backup_path.is_symlink() {
+              let _ = fs_manager.rename(&backup_path, target);
             }
           }
           FileOperation::RemoveSymlink { .. } => {
@@ -338,6 +353,7 @@ impl Transaction {
     source: &Path,
     target: &Path,
     resolution: SymlinkResolution,
+    backup_path: &Path,
     _config: &Config,
     fs_manager: &mut FileSystemManager,
   ) -> OperationResult {
@@ -356,7 +372,15 @@ impl Transaction {
       };
     }
 
-    // Create symlink using atomic approach
+    // Create the replacement at a sibling path first so the final rename is
+    // atomic on the destination filesystem.
+    let ext_str = target
+      .extension()
+      .and_then(|ext| ext.to_str())
+      .unwrap_or_default();
+    let temp_path = target.with_extension(format!("{ext_str}.flux-temp"));
+    let _ = fs_manager.remove_file(&temp_path);
+
     let link_target = match resolution {
       SymlinkResolution::Auto | SymlinkResolution::Relative | SymlinkResolution::Follow => {
         target.parent().map_or_else(
@@ -367,7 +391,6 @@ impl Transaction {
       SymlinkResolution::Absolute => source.to_path_buf(),
       SymlinkResolution::Replace => {
         // For Replace, we copy instead of symlink
-        let temp_path = target.with_extension("flux-temp-copy");
         if let Err(error) = fs_manager.copy(source, &temp_path) {
           return OperationResult {
             operation: FileOperation::CreateSymlink {
@@ -379,40 +402,13 @@ impl Transaction {
             error: Some(format!("Failed to copy file: {error}")),
           };
         }
-        if let Err(error) = fs_manager.rename(&temp_path, target) {
-          return OperationResult {
-            operation: FileOperation::CreateSymlink {
-              source: source.to_path_buf(),
-              target: target.to_path_buf(),
-              resolution,
-            },
-            success: false,
-            error: Some(format!("Failed to rename temp file: {error}")),
-          };
-        }
-        return OperationResult {
-          operation: FileOperation::CreateSymlink {
-            source: source.to_path_buf(),
-            target: target.to_path_buf(),
-            resolution,
-          },
-          success: true,
-          error: None,
-        };
+        PathBuf::new()
       }
     };
 
-    // Create temp symlink first
-    let ext_str = target
-      .extension()
-      .and_then(|ext| ext.to_str())
-      .unwrap_or_default();
-    let temp_link_path = target.with_extension(format!("{ext_str}.flux-temp"));
-
-    // Remove old temp link if exists
-    let _ = fs_manager.remove_file(&temp_link_path);
-
-    if let Err(error) = fs_manager.symlink(&link_target, &temp_link_path) {
+    if resolution != SymlinkResolution::Replace
+      && let Err(error) = fs_manager.symlink(&link_target, &temp_path)
+    {
       return OperationResult {
         operation: FileOperation::CreateSymlink {
           source: source.to_path_buf(),
@@ -420,12 +416,18 @@ impl Transaction {
           resolution,
         },
         success: false,
-        error: Some(format!("Failed to create temp symlink: {error}")),
+        error: Some(format!(
+          "Failed to create staged symlink for {}: {error}",
+          target.display()
+        )),
       };
     }
 
-    // Atomically rename
-    if let Err(error) = fs_manager.rename(&temp_link_path, target) {
+    // Preserve the original until the whole transaction is verified. This
+    // supports files, directories, and symlinks and makes rollback lossless.
+    let had_original = target.exists() || target.is_symlink();
+    if had_original && let Err(error) = fs_manager.rename(target, backup_path) {
+      let _ = fs_manager.remove_file(&temp_path);
       return OperationResult {
         operation: FileOperation::CreateSymlink {
           source: source.to_path_buf(),
@@ -433,7 +435,28 @@ impl Transaction {
           resolution,
         },
         success: false,
-        error: Some(format!("Failed to rename temp symlink: {error}")),
+        error: Some(format!(
+          "Failed to back up existing destination {}: {error}",
+          target.display()
+        )),
+      };
+    }
+
+    if let Err(error) = fs_manager.rename(&temp_path, target) {
+      if had_original {
+        let _ = fs_manager.rename(backup_path, target);
+      }
+      return OperationResult {
+        operation: FileOperation::CreateSymlink {
+          source: source.to_path_buf(),
+          target: target.to_path_buf(),
+          resolution,
+        },
+        success: false,
+        error: Some(format!(
+          "Failed to install staged replacement for {}: {error}",
+          target.display()
+        )),
       };
     }
 
@@ -471,5 +494,52 @@ impl Transaction {
         error: None,
       }
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::utils::dry_run::DryRun;
+
+  #[test]
+  fn rollback_restores_destination_replaced_before_later_failure() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let transaction_dir = root.path().join("transaction");
+    let source = root.path().join("source");
+    let target = root.path().join("target");
+    let blocked_parent = root.path().join("blocked-parent");
+    let failing_target = blocked_parent.join("target");
+    fs::write(&source, "replacement")?;
+    fs::write(&target, "original")?;
+    fs::write(&blocked_parent, "not a directory")?;
+
+    let mut transaction = Transaction::begin(transaction_dir)?;
+    transaction.add_operation(FileOperation::CreateSymlink {
+      source: source.clone(),
+      target: target.clone(),
+      resolution: SymlinkResolution::Auto,
+    });
+    transaction.add_operation(FileOperation::CreateSymlink {
+      source,
+      target: failing_target,
+      resolution: SymlinkResolution::Auto,
+    });
+
+    let config = Config::default();
+    transaction.validate(&config)?;
+    transaction.prepare(&config)?;
+    let mut dry_run = DryRun::default();
+    let mut fs_manager = FileSystemManager::new(&mut dry_run, false);
+
+    assert!(
+      transaction
+        .commit(&config, &mut fs_manager)
+        .is_err()
+    );
+    assert_eq!(transaction.state, TransactionState::RolledBack);
+    assert!(!target.is_symlink());
+    assert_eq!(fs::read_to_string(target)?, "original");
+    Ok(())
   }
 }

@@ -6,7 +6,6 @@ use crate::utils::dry_run::DryRun;
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
 use std::fs;
-use tempfile::TempDir;
 
 /// Callback used by the CLI to confirm whether apply should proceed.
 type ConfirmCallback<'a> = dyn Fn(&str) -> Result<bool> + 'a;
@@ -281,7 +280,7 @@ fn create_and_setup_transaction(
   options: &ApplyOptions<'_>,
   diff: &StateDiff,
 ) -> Result<Transaction> {
-  let temp_dir = TempDir::new()?.path().to_path_buf();
+  let temp_dir = tempfile::tempdir()?.keep();
   let mut transaction = Transaction::begin(temp_dir)?;
 
   // Add metadata
@@ -328,17 +327,17 @@ fn run_post_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
   Ok(())
 }
 
-/// Add file operation to transaction based on force mode and file state.
+/// Add a file operation to the transaction.
+///
+/// Replacement is handled atomically by `Transaction`: it stages the new
+/// link before moving any existing destination into the transaction backup
+/// directory. Keeping removal out of the operation list also lets rollback
+/// restore the original destination if a later operation fails.
 fn add_file_operation_to_transaction(
   transaction: &mut Transaction,
   file: &TrackedFile,
   symlink_resolution: crate::types::SymlinkResolution,
 ) {
-  if file.dest_path.exists() || file.dest_path.is_symlink() {
-    transaction.add_operation(FileOperation::RemoveSymlink {
-      target: file.dest_path.clone(),
-    });
-  }
   transaction.add_operation(FileOperation::CreateSymlink {
     source: file.repo_path.clone(),
     target: file.dest_path.clone(),
