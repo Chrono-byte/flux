@@ -84,7 +84,7 @@ pub fn validate_dest_path(
   } else {
     home.join(dest)
   };
-  let Ok(canonical_dest) = canonicalize_with_missing_tail(&full_dest) else {
+  let Ok(canonical_dest) = canonicalize_destination_location(&full_dest) else {
     return Err(DotfilesError::Path(format!(
       "What: Cannot resolve destination path\n  \
                  Destination: {}\n  \
@@ -103,6 +103,48 @@ pub fn validate_dest_path(
   // Check if destination is within home directory
   if !canonical_dest.starts_with(&canonical_home) {
     return Err(error_utils::dest_outside_home(dest, home));
+  }
+
+  Ok(())
+}
+
+/// Resolve a destination's parent without following the destination itself.
+///
+/// Existing destinations are commonly symlinks into the repository. Following
+/// that final symlink would validate its target rather than the location Flux
+/// is about to manage.
+fn canonicalize_destination_location(path: &Path) -> std::io::Result<PathBuf> {
+  match (path.parent(), path.file_name()) {
+    (Some(parent), Some(name)) => {
+      let mut canonical = canonicalize_with_missing_tail(parent)?;
+      canonical.push(name);
+      Ok(normalize_nonexistent_path(&canonical))
+    }
+    _ => canonicalize_with_missing_tail(path),
+  }
+}
+
+/// Validate that a configured repository entry stays within the repository.
+///
+/// Unlike [`validate_symlink_target`], this also supports entries whose final
+/// path does not exist yet.
+///
+/// # Errors
+///
+/// Returns an error if either path cannot be resolved or the entry escapes the
+/// repository directory.
+pub fn validate_repo_entry_path(
+  repo: &Path,
+  entry: &Path,
+) -> Result<()> {
+  let canonical_repo = canonicalize_with_missing_tail(repo)?;
+  let canonical_entry = canonicalize_with_missing_tail(entry)?;
+
+  if !canonical_entry.starts_with(&canonical_repo) {
+    return Err(error_utils::symlink_target_outside_repo(
+      &canonical_entry,
+      &canonical_repo,
+    ));
   }
 
   Ok(())

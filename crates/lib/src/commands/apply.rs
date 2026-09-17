@@ -209,22 +209,30 @@ pub fn apply_config(
   // Verify
   transaction.verify()?;
 
-  // Cleanup
-  transaction.cleanup()?;
+  // The filesystem transaction is committed and verified at this point.
+  // Cleanup and bookkeeping failures must not report the apply itself as failed.
+  if let Err(error) = transaction.cleanup() {
+    log::warn!("Applied changes, but failed to clean up transaction files: {error}");
+  }
 
   // Run post-apply hooks
-  run_post_apply_hooks(options)?;
+  if let Err(error) = run_post_apply_hooks(options) {
+    log::warn!("Applied changes, but post-apply hooks could not be completed: {error}");
+  }
 
   // Record history event
   let profile_str = options.profile.map(ToString::to_string);
-  history::record_event(&history::HistoryEvent {
+  let history_event = history::HistoryEvent {
     timestamp: chrono::Utc::now(),
     command: "apply".to_string(),
     profile: profile_str,
     dry_run: false,
     transaction_id: Some(transaction.id.clone()),
     summary: Some(format!("Applied {} file(s)", diff.files_to_sync.len())),
-  })?;
+  };
+  if let Err(error) = history::record_event(&history_event) {
+    log::warn!("Applied changes, but failed to record history: {error}");
+  }
 
   Ok(ApplyReport {
     diff,

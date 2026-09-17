@@ -381,33 +381,7 @@ impl Transaction {
     let temp_path = target.with_extension(format!("{ext_str}.flux-temp"));
     let _ = fs_manager.remove_file(&temp_path);
 
-    let link_target = match resolution {
-      SymlinkResolution::Auto | SymlinkResolution::Relative | SymlinkResolution::Follow => {
-        target.parent().map_or_else(
-          || source.to_path_buf(),
-          |parent| pathdiff::diff_paths(source, parent).unwrap_or_else(|| source.to_path_buf()),
-        )
-      }
-      SymlinkResolution::Absolute => source.to_path_buf(),
-      SymlinkResolution::Replace => {
-        // For Replace, we copy instead of symlink
-        if let Err(error) = fs_manager.copy(source, &temp_path) {
-          return OperationResult {
-            operation: FileOperation::CreateSymlink {
-              source: source.to_path_buf(),
-              target: target.to_path_buf(),
-              resolution,
-            },
-            success: false,
-            error: Some(format!("Failed to copy file: {error}")),
-          };
-        }
-        PathBuf::new()
-      }
-    };
-
-    if resolution != SymlinkResolution::Replace
-      && let Err(error) = fs_manager.symlink(&link_target, &temp_path)
+    if let Err(error) = Self::stage_replacement(source, target, resolution, &temp_path, fs_manager)
     {
       return OperationResult {
         operation: FileOperation::CreateSymlink {
@@ -417,7 +391,7 @@ impl Transaction {
         },
         success: false,
         error: Some(format!(
-          "Failed to create staged symlink for {}: {error}",
+          "Failed to stage replacement for {}: {error}",
           target.display()
         )),
       };
@@ -469,6 +443,35 @@ impl Transaction {
       success: true,
       error: None,
     }
+  }
+
+  /// Stage a copied file, copied directory, or symlink beside its destination.
+  fn stage_replacement(
+    source: &Path,
+    target: &Path,
+    resolution: SymlinkResolution,
+    temp_path: &Path,
+    fs_manager: &mut FileSystemManager,
+  ) -> Result<()> {
+    if resolution == SymlinkResolution::Replace {
+      return if source.is_dir() {
+        fs_manager.copy_dir_all(source, temp_path)
+      } else {
+        fs_manager.copy(source, temp_path)
+      };
+    }
+
+    let link_target = match resolution {
+      SymlinkResolution::Auto | SymlinkResolution::Relative | SymlinkResolution::Follow => {
+        target.parent().map_or_else(
+          || source.to_path_buf(),
+          |parent| pathdiff::diff_paths(source, parent).unwrap_or_else(|| source.to_path_buf()),
+        )
+      }
+      SymlinkResolution::Absolute => source.to_path_buf(),
+      SymlinkResolution::Replace => unreachable!(),
+    };
+    fs_manager.symlink(&link_target, temp_path)
   }
 
   /// Execute removal of a symlink.
@@ -540,6 +543,35 @@ mod tests {
     assert_eq!(transaction.state, TransactionState::RolledBack);
     assert!(!target.is_symlink());
     assert_eq!(fs::read_to_string(target)?, "original");
+    Ok(())
+  }
+
+  #[test]
+  fn replace_resolution_copies_directories() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let source = root.path().join("source");
+    let target = root.path().join("target");
+    fs::create_dir_all(source.join("nested"))?;
+    fs::write(source.join("nested/file"), "replacement")?;
+
+    let mut transaction = Transaction::begin(root.path().join("transaction"))?;
+    transaction.add_operation(FileOperation::CreateSymlink {
+      source,
+      target: target.clone(),
+      resolution: SymlinkResolution::Replace,
+    });
+
+    let config = Config::default();
+    transaction.validate(&config)?;
+    transaction.prepare(&config)?;
+    let mut dry_run = DryRun::default();
+    let mut fs_manager = FileSystemManager::new(&mut dry_run, false);
+    transaction.commit(&config, &mut fs_manager)?;
+
+    assert_eq!(
+      fs::read_to_string(target.join("nested/file"))?,
+      "replacement"
+    );
     Ok(())
   }
 }

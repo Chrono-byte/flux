@@ -3,6 +3,7 @@ use crate::types::HookCommand;
 use crate::utils::error::{DotfilesError, Result};
 use log::debug;
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::Duration;
 
 /// Result of executing a hook.
@@ -61,8 +62,8 @@ pub fn execute_hook(
   let timeout_duration = Duration::from_secs(timeout);
 
   // Execute with timeout
-  let output = match cmd.output() {
-    Ok(output) => output,
+  let mut child = match cmd.spawn() {
+    Ok(child) => child,
     Err(error) => {
       return Err(DotfilesError::Config(format!(
         "Failed to execute hook '{}': {}",
@@ -71,13 +72,39 @@ pub fn execute_hook(
     }
   };
 
-  let duration = start.elapsed();
-  if duration > timeout_duration {
-    return Err(DotfilesError::Config(format!(
-      "Hook '{}' exceeded timeout of {}s",
-      hook.command, timeout
-    )));
+  loop {
+    match child.try_wait() {
+      Ok(Some(_)) => break,
+      Ok(None) if start.elapsed() < timeout_duration => {
+        thread::sleep(Duration::from_millis(10));
+      }
+      Ok(None) => {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(DotfilesError::Config(format!(
+          "Hook '{}' exceeded timeout of {}s",
+          hook.command, timeout
+        )));
+      }
+      Err(error) => {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(DotfilesError::Config(format!(
+          "Failed while waiting for hook '{}': {}",
+          hook.command, error
+        )));
+      }
+    }
   }
+
+  let output = child.wait_with_output().map_err(|error| {
+    DotfilesError::Config(format!(
+      "Failed to collect output from hook '{}': {}",
+      hook.command, error
+    ))
+  })?;
+
+  let duration = start.elapsed();
 
   let success = output.status.success();
   let exit_code = output.status.code();
@@ -124,4 +151,44 @@ pub fn execute_hooks(
   }
 
   Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[cfg(unix)]
+  #[test]
+  fn hook_timeout_stops_process_promptly() {
+    let hook = HookCommand {
+      command: "sleep 2".to_string(),
+      conditions: None,
+      timeout: Some(0),
+    };
+    let start = std::time::Instant::now();
+
+    let result = execute_hook(&hook, &Config::default(), None);
+
+    assert!(result.is_err(), "timed out hook must return an error");
+    assert!(
+      start.elapsed() < Duration::from_secs(1),
+      "timed out hook must be terminated without waiting for normal exit"
+    );
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn completed_hook_captures_output() -> Result<()> {
+    let hook = HookCommand {
+      command: "printf hook-output".to_string(),
+      conditions: None,
+      timeout: Some(1),
+    };
+
+    let result = execute_hook(&hook, &Config::default(), None)?;
+
+    assert!(result.success);
+    assert_eq!(result.stdout, "hook-output");
+    Ok(())
+  }
 }

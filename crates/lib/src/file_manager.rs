@@ -12,6 +12,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, warn};
 use std::fs;
 use std::path::Path;
+use uuid::Uuid;
 
 /// Callback used by the CLI to resolve file sync conflicts.
 type ConflictPromptCallback<'a> = dyn Fn(&Path) -> Result<ConflictChoice> + 'a;
@@ -213,12 +214,10 @@ pub fn remove_file(
     }
   };
 
-  let dest_path = home_override::home_dir()
-    .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?
-    .join(&file_entry.dest);
-
-  // Remove symlink or file from destination location
-  fs_manager.remove_file(&dest_path)?;
+  let home = home_override::home_dir()
+    .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
+  let dest_path = home.join(&file_entry.dest);
+  security::validate_dest_path(&dest_path, &home)?;
 
   // Remove file from repository
   let repo_path = config.get_repo_path();
@@ -230,6 +229,10 @@ pub fn remove_file(
     // File path doesn't include tool name (e.g., "config")
     repo_path.join(tool).join(file)
   };
+  security::validate_repo_entry_path(&repo_path, &repo_file)?;
+
+  // All paths are valid; filesystem mutations can now begin.
+  fs_manager.remove_file(&dest_path)?;
   fs_manager.remove_file(&repo_file)?;
 
   // Remove file entry from configuration (in-memory, will be saved later)
@@ -671,14 +674,9 @@ fn create_symlink_managed(
 
 /// Validates symlink security constraints.
 fn validate_symlink_security(file: &TrackedFile) -> Result<()> {
-  if let Err(error) = security::validate_symlink_target(&file.repo_path, &file.repo_path) {
-    warn!(
-      "Symlink validation failed for {}: {}",
-      file.repo_path.display(),
-      error
-    );
-    return Err(error);
-  }
+  let home = home_override::home_dir()
+    .ok_or_else(|| DotfilesError::Path("Could not find home directory".to_string()))?;
+  security::validate_dest_path(&file.dest_path, &home)?;
   Ok(())
 }
 
@@ -699,10 +697,33 @@ fn handle_replace_strategy(
   file: &TrackedFile,
   fs_manager: &mut FileSystemManager,
 ) -> Result<()> {
-  let temp_path = file.dest_path.with_extension("flux-temp-copy");
+  let operation_id = Uuid::new_v4();
+  let temp_path = file
+    .dest_path
+    .with_extension(format!("flux-temp-copy-{operation_id}"));
+  let backup_path = file
+    .dest_path
+    .with_extension(format!("flux-backup-{operation_id}"));
 
-  fs_manager.copy(&file.repo_path, &temp_path)?;
-  fs_manager.rename(&temp_path, &file.dest_path)?; // Atomic move
+  if file.repo_path.is_dir() {
+    fs_manager.copy_dir_all(&file.repo_path, &temp_path)?;
+  } else {
+    fs_manager.copy(&file.repo_path, &temp_path)?;
+  }
+
+  let had_original = file.dest_path.exists() || file.dest_path.is_symlink();
+  if had_original {
+    fs_manager.rename(&file.dest_path, &backup_path)?;
+  }
+  if let Err(error) = fs_manager.rename(&temp_path, &file.dest_path) {
+    if had_original {
+      let _ = fs_manager.rename(&backup_path, &file.dest_path);
+    }
+    return Err(error);
+  }
+  if had_original {
+    fs_manager.remove_file(&backup_path)?;
+  }
   Ok(())
 }
 

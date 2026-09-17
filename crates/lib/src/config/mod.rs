@@ -17,6 +17,7 @@ use crate::types::{
 };
 use crate::utils::error::{DotfilesError, Result};
 use crate::utils::home_override;
+use crate::utils::security;
 use crate::utils::system;
 
 /// General configuration settings.
@@ -713,6 +714,8 @@ impl Config {
     profile: Option<&str>,
   ) -> Result<Vec<crate::types::TrackedFile>> {
     let repo_path = self.get_repo_path();
+    let home = home_override::home_dir()
+      .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
     let current_profile = match profile {
       Some(path) => path,
       None => &self.general.current_profile,
@@ -772,9 +775,9 @@ impl Config {
           repo_path.join(tool).join(&rendered_repo)
         };
 
-        let dest_path = home_override::home_dir()
-          .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?
-          .join(&rendered_dest);
+        let dest_path = home.join(&rendered_dest);
+        security::validate_repo_entry_path(&repo_path, &repo_file_path)?;
+        security::validate_dest_path(&dest_path, &home)?;
 
         tracked_files.push(crate::types::TrackedFile {
           tool: tool.clone(),
@@ -1027,8 +1030,10 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-  use super::Config;
-  use crate::utils::system;
+  use super::{Config, ToolConfig};
+  use crate::types::FileEntry;
+  use crate::utils::error::Result;
+  use crate::utils::{home_override, system};
 
   #[test]
   fn legacy_conditions_are_migrated_for_files_and_folders() {
@@ -1069,5 +1074,61 @@ folders = [
       tracked.is_empty(),
       "legacy conditions should exclude both file and folder entries",
     );
+  }
+
+  #[test]
+  fn tracked_files_reject_destination_outside_home() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let repo = tempfile::tempdir()?;
+    home_override::set_override(home.path().to_path_buf());
+
+    let mut config = Config::default();
+    config.general.repo_path = repo.path().display().to_string();
+    let _ = config.tools.insert(
+      "example".to_string(),
+      ToolConfig {
+        files: vec![FileEntry {
+          repo: "file".to_string(),
+          dest: "../outside-home".to_string(),
+          profile: None,
+          conditions: None,
+        }],
+        folders: Vec::new(),
+      },
+    );
+
+    let result = config.get_tracked_files(None);
+    home_override::clear_override();
+
+    assert!(result.is_err(), "destination traversal must be rejected");
+    Ok(())
+  }
+
+  #[test]
+  fn tracked_files_reject_source_outside_repository() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let repo = tempfile::tempdir()?;
+    home_override::set_override(home.path().to_path_buf());
+
+    let mut config = Config::default();
+    config.general.repo_path = repo.path().display().to_string();
+    let _ = config.tools.insert(
+      "example".to_string(),
+      ToolConfig {
+        files: vec![FileEntry {
+          repo: "../../outside-repository".to_string(),
+          dest: ".config/example".to_string(),
+          profile: None,
+          conditions: None,
+        }],
+        folders: Vec::new(),
+      },
+    );
+
+    let result = config.get_tracked_files(None);
+    home_override::clear_override();
+
+    assert!(result.is_err(), "repository traversal must be rejected");
+    Ok(())
   }
 }
