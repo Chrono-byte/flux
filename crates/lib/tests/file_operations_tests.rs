@@ -1,5 +1,3 @@
-//! Tests for file operations.
-
 use flux_lib::{
   config::Config,
   file_manager::{FileSystemManager, add_file, remove_file, sync_files},

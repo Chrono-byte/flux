@@ -219,7 +219,6 @@ pub struct ConditionSpec {
 impl ConditionSpec {
   /// Migrate legacy condition fields to the new groups structure
   pub fn migrate_legacy(&mut self) {
-    // Don't migrate if we already have groups
     if !self.groups.is_empty() {
       self.os.clear();
       self.host.clear();
@@ -228,7 +227,6 @@ impl ConditionSpec {
       return;
     }
 
-    // Convert legacy conditions to new format
     let mut conditions = Vec::new();
 
     for os_val in self.os.drain(..) {

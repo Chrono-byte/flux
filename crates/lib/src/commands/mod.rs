@@ -1,18 +1,8 @@
-/// Commands for the Flux CLI.
-///
-/// # Commands
-/// Modules for the Flux CLI commands.
-/// Apply command module.
 pub mod apply;
-/// Doctor command module.
 pub mod doctor;
-/// Migrate command module.
 pub mod migrate;
-/// Status command module.
 pub mod status;
-/// Uncheck command module.
 pub mod untracked;
-/// Validate command module.
 pub mod validate;
 
 pub use apply::{ApplyOptions, ApplyReport, ApplyStatus, apply_config, compare_states};

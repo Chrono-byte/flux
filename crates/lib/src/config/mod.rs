@@ -1,11 +1,8 @@
-/// Command-line interface configuration.
 pub mod cli;
-/// Profile management functionality.
 pub mod profile;
 
 pub use cli::EnvironmentConfig;
 
-// The config module itself is in this file
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -44,7 +41,6 @@ pub struct GeneralConfig {
   pub include: Option<Vec<String>>,
 }
 
-/// Returns the default symlink resolution strategy.
 const fn default_symlink_resolution() -> SymlinkResolution {
   SymlinkResolution::Auto
 }
@@ -74,9 +70,7 @@ pub struct ToolConfig {
   pub folders: Vec<FileEntry>,
 }
 
-/// Iterate over each entry (files followed by folders).
 impl ToolConfig {
-  /// Iterate over each entry (files followed by folders).
   fn entries(&self) -> impl Iterator<Item = &FileEntry> {
     self.files.iter().chain(self.folders.iter())
   }
@@ -96,7 +90,6 @@ pub struct Config {
   pub hooks: Option<crate::types::HooksConfig>,
 }
 
-/// Static storage for config path override from CLI
 static CONFIG_PATH_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 impl Config {
@@ -113,7 +106,6 @@ impl Config {
   ///
   /// Returns an error if the configuration file cannot be loaded.
   pub fn load() -> Result<Self> {
-    // Check for static override first, then fall back to environment variable
     let override_path = CONFIG_PATH_OVERRIDE.get().map(PathBuf::as_path);
     Self::load_with_override_internal(override_path, true)
   }
@@ -147,27 +139,21 @@ impl Config {
     Self::load_with_override_internal(config_path_override, true)
   }
 
-  /// Load configuration with optional path override, with repo config as source of truth.
   fn load_with_override_internal(
     config_path_override: Option<&Path>,
     create_missing_root: bool,
   ) -> Result<Self> {
-    // Check for custom config path from parameter or environment variable
     let config_path = if let Some(override_path) = config_path_override {
       override_path.to_path_buf()
     } else if let Ok(config_path_str) = std::env::var(cli::env_keys::CONFIG_FILE) {
       PathBuf::from(&config_path_str)
     } else {
-      // Use repo config as source of truth, fall back to XDG
       Self::get_config_path()?
     };
 
     Self::load_from_path(&config_path, &mut Vec::new(), create_missing_root)
   }
 
-  /// Load configuration from a specific path.
-  ///
-  /// Supports includes with cycle-safe merging. Later configs override earlier ones.
   fn load_from_path(
     config_path: &Path,
     visited: &mut Vec<PathBuf>,
@@ -213,7 +199,6 @@ impl Config {
     result
   }
 
-  /// Return an error if the path has already been loaded in this recursion.
   fn ensure_no_cycle(
     config_path: &Path,
     visited: &[PathBuf],
@@ -233,7 +218,6 @@ impl Config {
     }
   }
 
-  /// Create the root config if missing or error for included files.
   fn handle_missing_config(
     visited_len: usize,
     config_path: &Path,
@@ -258,7 +242,6 @@ impl Config {
     }
   }
 
-  /// Read the config file contents or map any I/O errors.
   fn read_config_file(config_path: &Path) -> Result<String> {
     fs::read_to_string(config_path).map_err(|error| {
       DotfilesError::Config(format!(
@@ -269,7 +252,6 @@ impl Config {
     })
   }
 
-  /// Parse TOML content into a `Config`, wrapping parsing errors.
   fn parse_config(
     content: &str,
     config_path: &Path,
@@ -283,7 +265,6 @@ impl Config {
     })
   }
 
-  /// Update any stored condition specs to the latest schema.
   fn migrate_legacy_conditions(config: &mut Self) {
     for tool_config in config.tools.values_mut() {
       for entry in tool_config
@@ -305,7 +286,6 @@ impl Config {
     }
   }
 
-  /// Migrate any per-hook condition specs.
   fn migrate_hook_group(group: &mut Option<Vec<HookCommand>>) {
     if let Some(hooks) = group {
       for hook in hooks {
@@ -316,7 +296,6 @@ impl Config {
     }
   }
 
-  /// Load and merge any included configs listed in `general.include`.
   fn merge_included_configs(
     base_dir: &Path,
     include_paths: Option<Vec<String>>,
@@ -353,16 +332,13 @@ impl Config {
       self.validate()?;
     }
 
-    // Always save to repo config as the source of truth
     let config_path = Self::get_repo_config_path()?;
 
     if let Some(parent) = config_path.parent() {
       fs::create_dir_all(parent)?;
     }
 
-    // Use toml_edit to preserve comments and formatting
     let mut doc = if config_path.exists() {
-      // Read existing file to preserve comments
       let content = fs::read_to_string(&config_path).map_err(|error| {
         DotfilesError::Config(format!(
           "Failed to read config {}: {}",
@@ -376,11 +352,9 @@ impl Config {
           DotfilesError::Config(format!("Failed to parse existing config: {error}"))
         })?
     } else {
-      // Create new document
       toml_edit::DocumentMut::new()
     };
 
-    // Serialize current config to TOML and merge into existing document
     let new_toml = toml::to_string_pretty(self)
       .map_err(|error| DotfilesError::Config(format!("Failed to serialize config: {error}")))?;
     let mut new_doc = new_toml
@@ -389,23 +363,16 @@ impl Config {
         DotfilesError::Config(format!("Failed to parse serialized config: {error}"))
       })?;
 
-    // Manually format tools section to use per-tool format [tools.X] files = [...]
-    // instead of array-of-tables [[tools.X.files]]
     Self::format_tools_section(&mut new_doc, &self.tools);
 
-    // Remove old array-of-tables format from existing document if present
     Self::remove_old_tools_format(&mut doc);
 
-    // Merge new values into existing document, preserving comments
-    // Recursively merge nested tables to preserve comments in sub-sections
     Self::merge_toml_documents(&mut doc, &new_doc);
 
-    // Write back
     fs::write(&config_path, doc.to_string())?;
     Ok(())
   }
 
-  /// Format tools section to use per-tool format `[tools.X]` tables.
   fn format_tools_section(
     doc: &mut toml_edit::DocumentMut,
     tools: &HashMap<String, ToolConfig>,
@@ -489,15 +456,10 @@ impl Config {
     let _ = doc.insert("tools", Item::Table(tools_table));
   }
 
-  /// Remove old array-of-tables format `[[tools.X.files]]` from document.
   fn remove_old_tools_format(doc: &mut toml_edit::DocumentMut) {
-    // Array-of-tables like [[tools.cursor.files]] are represented as arrays
-    // in the parsed document. We need to find and remove these.
-    // Get all keys that match the pattern tools.*.files
     let keys_to_remove: Vec<String> = doc
       .iter()
       .filter_map(|(key, _)| {
-        // Check for keys like "tools.cursor.files" (array-of-tables format)
         if key.starts_with("tools.")
           && Path::new(key).extension().is_some_and(|ext| {
             ext.eq_ignore_ascii_case("files") || ext.eq_ignore_ascii_case("folders")
@@ -515,7 +477,6 @@ impl Config {
     }
   }
 
-  /// Recursively merge two TOML documents, preserving comments from the original.
   fn merge_toml_documents(
     target: &mut toml_edit::DocumentMut,
     source: &toml_edit::DocumentMut,
@@ -524,7 +485,6 @@ impl Config {
       let target_item = target.get_mut(key);
       match (target_item, source_item) {
         (Some(target_item), toml_edit::Item::Table(_)) => {
-          // Both are tables, merge recursively
           if let Some(target_table) = target_item.as_table_mut()
             && let toml_edit::Item::Table(source_table) = source_item
           {
@@ -532,18 +492,15 @@ impl Config {
           }
         }
         (Some(_), _) => {
-          // Target exists but source is not a table, replace it
           target[key] = source_item.clone();
         }
         (None, _) => {
-          // Key doesn't exist in target, add it
           target[key] = source_item.clone();
         }
       }
     }
   }
 
-  /// Recursively merge two TOML tables.
   fn merge_toml_tables(
     target: &mut toml_edit::Table,
     source: &toml_edit::Table,
@@ -552,7 +509,6 @@ impl Config {
       let target_item = target.get_mut(key);
       match (target_item, source_item) {
         (Some(target_item), toml_edit::Item::Table(_)) => {
-          // Both are tables, merge recursively
           if let Some(target_table) = target_item.as_table_mut()
             && let toml_edit::Item::Table(source_table) = source_item
           {
@@ -560,11 +516,9 @@ impl Config {
           }
         }
         (Some(_), _) => {
-          // Target exists, replace it with source value
           let _ = target.insert(key, source_item.clone());
         }
         (None, _) => {
-          // Key doesn't exist in target, add it
           let _ = target.insert(key, source_item.clone());
         }
       }
@@ -580,13 +534,11 @@ impl Config {
   ///
   /// Returns an error if the config directory or home directory cannot be found.
   pub fn get_config_path() -> Result<PathBuf> {
-    // Repo config is the source of truth - always use it if it exists
     let repo_config = Self::get_repo_config_path()?;
     if repo_config.exists() {
       return Ok(repo_config);
     }
 
-    // Fall back to XDG config if repo config doesn't exist (new user scenario)
     let config_dir = dirs::config_dir()
       .ok_or_else(|| DotfilesError::Config("Could not find config directory".to_string()))?;
     let xdg_config = config_dir.join("flux/config.toml");
@@ -604,7 +556,6 @@ impl Config {
     Ok(config_dir.join("flux/config.toml"))
   }
 
-  /// Get the repo config path
   fn get_repo_config_path() -> Result<PathBuf> {
     let home = home_override::home_dir()
       .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
@@ -637,7 +588,6 @@ impl Config {
       ));
     }
 
-    // Validate profile name (alphanumeric, underscore, hyphen)
     if !self
       .general
       .current_profile
@@ -653,7 +603,6 @@ impl Config {
     Ok(())
   }
 
-  /// Builds a [`FileEntry`] for a tool configuration.
   fn build_tool_entry(
     repo_file: &str,
     dest_path: &Path,
@@ -721,14 +670,12 @@ impl Config {
       None => &self.general.current_profile,
     };
 
-    // Build template context once per call for deterministic rendering.
     let template_context = Self::build_template_context(current_profile);
 
     let mut tracked_files = Vec::new();
 
     for (tool, tool_config) in &self.tools {
       for file in tool_config.entries() {
-        // Include if no profile specified, or if profile matches current_profile or is None
         let profile_matches =
           file.profile.is_none() || file.profile.as_deref() == Some(current_profile);
 
@@ -736,14 +683,12 @@ impl Config {
           continue;
         }
 
-        // Evaluate optional conditions
         if let Some(conditions) = &file.conditions
           && !Self::conditions_match(conditions)
         {
           continue;
         }
 
-        // Render templates in repo and dest paths, if any
         let rendered_repo =
           Self::render_template(&file.repo, &template_context).map_err(|error| {
             DotfilesError::Config(format!(
@@ -759,19 +704,13 @@ impl Config {
             ))
           })?;
 
-        // Handle both cases: repo may or may not include the tool name prefix
         let repo_file_path = if let Some(stripped) = rendered_repo.strip_prefix("./") {
-          // repo starts with ./ - treat as repo root relative (e.g., "./config.toml")
           repo_path.join(stripped)
         } else if rendered_repo == *tool {
-          // repo equals tool name (e.g., "nvim"); track the tool directory directly
           repo_path.join(tool)
         } else if rendered_repo.starts_with(&format!("{tool}/")) {
-          // repo already includes tool name (e.g., "cursor/settings.json")
-          // Use it as-is, don't strip the tool prefix
           repo_path.join(&rendered_repo)
         } else {
-          // repo doesn't include tool name (e.g., "config")
           repo_path.join(tool).join(&rendered_repo)
         };
 
@@ -791,13 +730,11 @@ impl Config {
     Ok(tracked_files)
   }
 
-  /// Build the template context used for rendering repo/dest paths.
   fn build_template_context(current_profile: &str) -> HashMap<String, String> {
     use std::collections::HashMap;
 
     let mut values: HashMap<String, String> = HashMap::new();
 
-    // Built-in values
     if let Some(home) = home_override::home_dir() {
       let _ = values.insert("home".to_string(), home.display().to_string());
     }
@@ -807,7 +744,6 @@ impl Config {
       let _ = values.insert("username".to_string(), user);
     }
 
-    // Hostname (best-effort)
     let hostname = system::get_hostname();
     if hostname != "unknown" {
       let _ = values.insert("host".to_string(), hostname);
@@ -819,7 +755,6 @@ impl Config {
     values
   }
 
-  /// Very small, deterministic template renderer supporting `{{ var }}` placeholders.
   fn render_template(
     input: &str,
     values: &HashMap<String, String>,
@@ -860,14 +795,12 @@ impl Config {
   /// Determine if a set of conditions matches the current runtime environment.
   #[must_use]
   pub fn conditions_match(conditions: &ConditionSpec) -> bool {
-    // If no groups defined, always match
     if conditions.groups.is_empty() {
       return true;
     }
 
     log::debug!("Evaluating {} condition group(s)", conditions.groups.len());
 
-    // All groups must match (AND logic between groups)
     for (group_idx, group) in conditions.groups.iter().enumerate() {
       log::debug!(
         "Evaluating group {} with {} condition(s)",
@@ -887,9 +820,7 @@ impl Config {
     true
   }
 
-  /// Evaluate a single condition group (all conditions must match)
   fn evaluate_condition_group(group: &ConditionGroup) -> bool {
-    // All conditions in the group must match (AND logic)
     for condition in &group.conditions {
       let result = Self::evaluate_condition(condition);
       log::debug!(
@@ -904,19 +835,16 @@ impl Config {
     true
   }
 
-  /// Evaluate a single condition
   fn evaluate_condition(condition: &Condition) -> bool {
     match condition {
       Condition::Os { value } => {
         let current_os = system::get_os();
-        // Support case-insensitive matching
         if value
           .to_string()
           .eq_ignore_ascii_case(&current_os)
         {
           return true;
         }
-        // Support "darwin" alias for macOS
         if current_os == "macos" && value.to_string().eq_ignore_ascii_case("darwin") {
           return true;
         }
@@ -948,14 +876,12 @@ impl Config {
     }
   }
 
-  /// Resolve an include path relative to a base directory, supporting `~` expansion.
   fn resolve_include_path(
     base_dir: &Path,
     raw: &str,
   ) -> PathBuf {
     use shellexpand::tilde;
 
-    // Expand leading ~
     let expanded = if raw.starts_with('~') {
       tilde(raw).to_string()
     } else {
@@ -970,15 +896,12 @@ impl Config {
     }
   }
 
-  /// Merge two configs, with `overlay` taking precedence over `base`.
   fn merge_configs(
     mut base: Self,
     overlay: Self,
   ) -> Self {
-    // General settings: overlay wins entirely.
     base.general = overlay.general;
 
-    // Tools: merge tool tables, appending file entries.
     for (tool, tool_cfg) in overlay.tools {
       let entry = base.tools.entry(tool).or_default();
       entry.files.extend(tool_cfg.files);
@@ -1010,14 +933,12 @@ impl Config {
       return Ok(());
     }
 
-    // Create parent directory if needed
     if let Some(parent) = xdg_config.parent() {
       fs::create_dir_all(parent).map_err(|error| {
         DotfilesError::Config(format!("Failed to create XDG config directory: {error}"))
       })?;
     }
 
-    // Copy repo config to XDG
     fs::copy(&repo_config, &xdg_config)
       .map(|_| ())
       .map_err(|error| {

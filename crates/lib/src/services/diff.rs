@@ -16,7 +16,6 @@ pub fn unified_diff(
   old: &str,
   new: &str,
 ) -> String {
-  // Fast-path: no changes
   if old == new {
     return String::new();
   }
@@ -34,7 +33,6 @@ pub fn unified_diff(
 
   let mut out = String::new();
 
-  // Header similar to `diff -u`
   let _ = writeln!(out, "--- {}", path.display());
   let _ = writeln!(out, "+++ {}", path.display());
   let _ = writeln!(out, "@@ -1,{} +1,{} @@", old_lines.len(), new_lines.len());

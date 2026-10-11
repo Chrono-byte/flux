@@ -15,9 +15,7 @@ use tokio::time::timeout as tokio_timeout;
 
 /// Encapsulates a git repository with common operations
 pub struct GitRepository {
-  /// The underlying git2 Repository
   repo: Repository,
-  /// The path to the repository
   repo_path: PathBuf,
 }
 
@@ -135,7 +133,6 @@ impl GitRepository {
       Repository::init(repo_path)?
     };
 
-    // Ensure the repository has a valid initial setup
     if repo.head().is_err() {
       repo.set_head("refs/heads/main")?;
     }
@@ -249,7 +246,7 @@ impl GitRepository {
         () if status.is_index_deleted() || status.is_wt_deleted() => {
           changes.push(FileChange::Deleted(repo_path));
         }
-        () => {} // No change detected
+        () => {}
       }
     }
 
@@ -257,8 +254,6 @@ impl GitRepository {
   }
 }
 
-/// Get the user's git signature from their git config
-/// This reads from the repository's config, which includes global git config
 fn get_user_signature(repo: &Repository) -> Result<Signature<'_>> {
   let config = repo.config()?;
 
@@ -338,9 +333,6 @@ fn get_user_signature(repo: &Repository) -> Result<Signature<'_>> {
     .map_err(|err| DotfilesError::Config(format!("Failed to create git signature: {err}")))
 }
 
-/// Set up credential callbacks for git2 operations.
-/// Handles SSH via username negotiation plus SSH agent, and HTTPS via
-/// explicit environment variables or the configured git credential helper.
 fn setup_credential_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
   let config = repo.config().ok();
   let mut callbacks = RemoteCallbacks::new();
@@ -398,7 +390,6 @@ fn setup_credential_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
   callbacks
 }
 
-/// Tries to load default SSH keys for the given username.
 fn try_default_ssh_keys(username: &str) -> Option<git2::Cred> {
   let mut private_keys = Vec::new();
 
@@ -423,30 +414,22 @@ fn try_default_ssh_keys(username: &str) -> Option<git2::Cred> {
   })
 }
 
-/// Traces git authentication attempts if the `FLUX_GIT_TRACE_AUTH` environment variable is set.
 fn trace_git_auth(args: std::fmt::Arguments<'_>) {
   if std::env::var_os("FLUX_GIT_TRACE_AUTH").is_some() {
     log::debug!("[flux git auth] {args}");
   }
 }
 
-/// Cached result for `remote check`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct RemoteCheckCacheEntry {
-  /// Full local HEAD oid used when the cache entry was created.
   head_oid: String,
-  /// Full remote HEAD oid, if it could be resolved.
   remote_oid: Option<String>,
-  /// Unix timestamp in seconds.
   checked_at_unix: u64,
 }
 
-/// Time-to-live for cached `remote check` results.
 const REMOTE_CHECK_CACHE_TTL_SECS: u64 = 60;
-/// Poll interval used while waiting on a child process that may need to be killed.
 const CHILD_WAIT_POLL_INTERVAL_MS: u64 = 50;
 
-/// Execute a git2 operation with a timeout using async/await.
 async fn execute_with_timeout<F, T>(
   operation: F,
   timeout_seconds: u64,
@@ -471,7 +454,6 @@ where
   }
 }
 
-/// Run a command with a hard timeout and kill it if it exceeds the limit.
 fn run_command_with_timeout(
   command: &mut Command,
   timeout_seconds: u64,
@@ -506,13 +488,11 @@ fn run_command_with_timeout(
   }
 }
 
-/// Returns the cache directory used for remote check results.
 fn remote_check_cache_dir() -> Option<PathBuf> {
   let cache_dir = dirs::cache_dir()?;
   Some(cache_dir.join("flux").join("remote-check"))
 }
 
-/// Returns the cache path for a repo/remote/branch combination.
 fn remote_check_cache_path(
   repo_path: &Path,
   remote_name: &str,
@@ -527,16 +507,12 @@ fn remote_check_cache_path(
   Some(remote_check_cache_dir()?.join(format!("{cache_key}.json")))
 }
 
-/// Cached remote check state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CachedRemoteCheck {
-  /// No usable cache entry was found.
   Miss,
-  /// A usable cache entry was found.
   Hit(Option<String>),
 }
 
-/// Read a cached remote check entry if it is still valid for the current HEAD.
 fn read_remote_check_cache(
   repo_path: &Path,
   remote_name: &str,
@@ -571,7 +547,6 @@ fn read_remote_check_cache(
   CachedRemoteCheck::Hit(cache_entry.remote_oid)
 }
 
-/// Persist a remote check result in the cache.
 fn write_remote_check_cache(
   repo_path: &Path,
   remote_name: &str,
@@ -632,19 +607,16 @@ pub enum RemoteSyncCheck {
   Unknown,
 }
 
-/// Returns a short commit hash from the full OID.
 fn short_oid(oid: &str) -> String {
   oid.chars().take(7).collect()
 }
 
-/// Parses a remote tracking reference into a (remote, branch) pair.
 fn parse_remote_tracking_ref(reference: &str) -> Option<(String, String)> {
   let stripped = reference.strip_prefix("refs/remotes/")?;
   let (remote, branch) = stripped.split_once('/')?;
   Some((remote.to_string(), branch.to_string()))
 }
 
-/// Resolves the remote sync target based on the current branch and remote name.
 fn resolve_remote_sync_target(
   git_repo: &GitRepository,
   remote_name: Option<&str>,
@@ -683,7 +655,6 @@ fn resolve_remote_sync_target(
   Some((resolved_remote?, resolved_branch?))
 }
 
-/// Looks up the OID of the remote head for the given branch.
 async fn lookup_remote_head_oid(
   repo_path: &Path,
   remote_name: &str,
@@ -857,7 +828,6 @@ pub fn stage_changes(
   for change in changes {
     match change {
       FileChange::Added(path) | FileChange::Modified(path) => {
-        // If it's a directory, recursively add all files in it
         if path.is_dir() {
           for entry in walkdir::WalkDir::new(path)
             .into_iter()
@@ -874,7 +844,6 @@ pub fn stage_changes(
         }
       }
       FileChange::Deleted(path) => {
-        // If it's a directory, recursively remove all files in it
         if path.is_dir() {
           for entry in walkdir::WalkDir::new(path)
             .into_iter()
@@ -893,7 +862,6 @@ pub fn stage_changes(
     }
   }
 
-  // Write the index to disk to make sure staged changes are persisted
   index.write()?;
 
   Ok(())
@@ -921,12 +889,10 @@ pub fn commit_changes(
     });
   }
 
-  // Get the current index (which has been staged by stage_changes)
   let mut index = git_repo.inner().index()?;
   let tree_id = index.write_tree()?;
   let tree = git_repo.inner().find_tree(tree_id)?;
 
-  // Use the user's git config for commit signature
   let signature = git_repo.get_user_signature()?;
 
   let head = git_repo.inner().head();
@@ -1085,7 +1051,6 @@ pub fn list_remotes(git_repo: &GitRepository) -> Result<RemoteListReport> {
   Ok(report)
 }
 
-/// Execute a git push operation with timeout.
 async fn execute_push_operation(
   repo_path: &Path,
   remote_name: &str,
@@ -1112,7 +1077,6 @@ async fn execute_push_operation(
   .await
 }
 
-/// Check if push was up-to-date by comparing refs.
 fn is_push_up_to_date(
   repo: &Repository,
   remote_name: &str,
@@ -1133,7 +1097,6 @@ fn is_push_up_to_date(
   }
 }
 
-/// Set upstream branch configuration.
 fn set_upstream_branch(
   repo: &Repository,
   remote_name: &str,
@@ -1250,7 +1213,6 @@ pub async fn push_to_remote(
   }
 }
 
-/// Execute a git fetch operation with timeout.
 async fn execute_fetch_operation(
   repo_path: &Path,
   remote_name: &str,
@@ -1305,8 +1267,6 @@ async fn execute_fetch_operation(
   .await
 }
 
-/// Perform merge after fetch (fast-forward or regular merge).
-/// Returns whether the merge was a fast-forward.
 fn perform_merge(
   repo: &Repository,
   remote_name: &str,
@@ -1349,7 +1309,6 @@ fn perform_merge(
   }
 }
 
-/// Calculate file statistics for a commit range.
 fn calculate_file_stats(
   repo: &Repository,
   old_commit: &git2::Commit,
@@ -1373,34 +1332,22 @@ fn calculate_file_stats(
   (stats.files_changed(), stats.insertions(), stats.deletions())
 }
 
-/// Shorten an optional commit id for reporting.
 fn short_commit_id(commit: Option<&git2::Commit>) -> Option<String> {
   commit.map(|commit| short_oid(&commit.id().to_string()))
 }
 
-/// Inputs used to construct a [`PullReport`].
 struct PullReportParts {
-  /// Remote name used.
   remote_name: String,
-  /// Branch name used.
   branch_name: String,
-  /// Whether the pull was already up to date.
   up_to_date: bool,
-  /// Whether the merge was fast-forward.
   was_fast_forward: bool,
-  /// Short HEAD before the pull.
   head_before: Option<String>,
-  /// Short HEAD after the pull.
   head_after: Option<String>,
-  /// Files changed by the merge.
   files_changed: usize,
-  /// Insertions in the merge.
   insertions: usize,
-  /// Deletions in the merge.
   deletions: usize,
 }
 
-/// Build a [`PullReport`] from precomputed fields.
 fn build_pull_report(parts: PullReportParts) -> PullReport {
   PullReport {
     remote: parts.remote_name,
@@ -1415,14 +1362,12 @@ fn build_pull_report(parts: PullReportParts) -> PullReport {
   }
 }
 
-/// Convert a pull timeout into a user-facing config error.
 fn pull_timeout_error(timeout_seconds: u64) -> DotfilesError {
   DotfilesError::Config(format!(
     "Pull operation timed out after {timeout_seconds} seconds"
   ))
 }
 
-/// Map a fetch failure into a git operation failure while preserving timeouts.
 fn pull_fetch_error(
   git_repo: &GitRepository,
   err: &DotfilesError,
@@ -1436,7 +1381,6 @@ fn pull_fetch_error(
   }
 }
 
-/// Finish pull reporting after the fetch step succeeds.
 fn complete_pull_after_fetch(
   git_repo: &GitRepository,
   remote_name: &str,
@@ -1521,7 +1465,6 @@ fn complete_pull_after_fetch(
   }))
 }
 
-/// Check for merge conflicts and blocking untracked files.
 fn check_merge_conflicts(repo: &Repository) -> Result<()> {
   let index = repo.index()?;
   if index.has_conflicts() {
@@ -1638,7 +1581,6 @@ pub async fn pull_from_remote(
 pub fn show_git_status(git_repo: &GitRepository) -> Result<GitStatusReport> {
   use git2::BranchType;
 
-  // Get current branch
   let Ok(branch_name) = get_current_branch(git_repo) else {
     return Ok(GitStatusReport {
       branch_name: None,
@@ -1651,19 +1593,16 @@ pub fn show_git_status(git_repo: &GitRepository) -> Result<GitStatusReport> {
     });
   };
 
-  // Get branch reference
   let branch = git_repo
     .inner()
     .find_branch(&branch_name, BranchType::Local)?;
   let upstream = branch.upstream();
 
-  // Get HEAD commit
   let head = git_repo.inner().head()?;
   let head_commit = head.peel_to_commit()?;
   let head_oid = head_commit.id();
   let short_id = head_oid.to_string()[..7].to_string();
 
-  // Check for uncommitted changes
   let changes = detect_changes(git_repo)?;
 
   let (ahead, behind, upstream_name) = calculate_upstream_status(git_repo, head_oid, upstream)?;
@@ -1687,7 +1626,6 @@ pub fn show_git_status(git_repo: &GitRepository) -> Result<GitStatusReport> {
   })
 }
 
-/// Compute ahead/behind counts and upstream name for the current branch.
 fn calculate_upstream_status(
   git_repo: &GitRepository,
   head_oid: git2::Oid,

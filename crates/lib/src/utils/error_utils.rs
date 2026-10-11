@@ -1,5 +1,3 @@
-/// Error message utilities - provides helpers for creating consistent, helpful error messages
-/// following best practices: specific context, explanation of impact, and solution guidance
 use crate::utils::error::DotfilesError;
 use std::path::Path;
 
@@ -137,6 +135,5 @@ pub fn git_operation_failed(
     repo_path.display(),
     repo_path.display()
   );
-  // Use a generic IO error as a wrapper since git2::Error requires different construction
   DotfilesError::Io(std::io::Error::other(error_msg))
 }

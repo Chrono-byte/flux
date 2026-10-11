@@ -21,12 +21,10 @@ pub fn files_differ(
   use std::fs;
 
   if !path1.exists() || !path2.exists() {
-    return Ok(true); // One or both don't exist, so they are "different"
+    return Ok(true);
   }
 
-  // If either is a directory, we can't compare contents directly
   if path1.is_dir() || path2.is_dir() {
-    // For directories, we consider them different if one is dir and other isn't
     return Ok(path1.is_dir() != path2.is_dir());
   }
 
@@ -77,14 +75,12 @@ pub fn find_symlinked_parent(file_path: &Path) -> Option<(PathBuf, PathBuf)> {
   let mut current = file_path.parent()?;
 
   loop {
-    // Check if current directory is a symlink
     if let Ok(link_target) = std::fs::read_link(current) {
       let resolved_target = resolve_symlink_target(current, &link_target);
       let normalized_target = normalize_path(&resolved_target);
       return Some((current.to_path_buf(), normalized_target));
     }
 
-    // Move up to parent directory
     match current.parent() {
       Some(parent) => current = parent,
       None => break,

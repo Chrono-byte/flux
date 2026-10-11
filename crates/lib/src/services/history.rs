@@ -22,7 +22,6 @@ pub struct HistoryEvent {
   pub summary: Option<String>,
 }
 
-/// Get the path to the history file, creating the directory if needed.
 fn history_file() -> Result<PathBuf> {
   let data_dir = dirs::data_local_dir()
     .ok_or_else(|| DotfilesError::Config("Could not find data directory".to_string()))?;
@@ -75,7 +74,6 @@ pub fn read_events(limit: Option<usize>) -> Result<Vec<HistoryEvent>> {
     }
   }
 
-  // Newest first
   events.sort_by_key(|event| std::cmp::Reverse(event.timestamp));
 
   if let Some(max) = limit {

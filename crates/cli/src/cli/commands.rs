@@ -1,5 +1,3 @@
-//! CLI command handling for the Flux dotfiles manager.
-
 use atty::{Stream, is};
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
 use clap::CommandFactory;
@@ -38,7 +36,6 @@ use flux_lib::{
   utils::{DotfilesError, DryRun, Result},
 };
 
-/// Handle the maintain command.
 pub(super) fn handle_maintain_command(command: MaintainCommands) -> Result<()> {
   match command {
     MaintainCommands::Migrate { profile, dry_run } => {
@@ -108,19 +105,6 @@ desktop.ini
   Ok(())
 }
 
-/// Handle the init command.
-///
-/// # Parameters
-///
-/// * `repo_path`: Optional repository path to initialize.
-///
-/// # Returns
-///
-/// Returns the result of the init command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the repository cannot be initialized.
 pub(super) fn handle_init_command(repo_path: Option<String>) -> Result<()> {
   let mut config = Config::load()?;
   if let Some(path) = repo_path {
@@ -148,24 +132,6 @@ pub(super) fn handle_init_command(repo_path: Option<String>) -> Result<()> {
   Ok(())
 }
 
-/// Handle the add command.
-///
-/// # Parameters
-///
-/// * `tool`: The tool name.
-/// * `file`: The source file path.
-/// * `dest`: Optional destination path.
-/// * `profile`: Optional profile name.
-/// * `dry_run`: Whether to perform a dry run.
-/// * `from_repo`: Whether the file already exists in the repository.
-///
-/// # Returns
-///
-/// Returns the result of the add command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the file cannot be added.
 pub(super) fn handle_add_command(
   tool: &str,
   file: &str,
@@ -204,7 +170,6 @@ pub(super) fn handle_add_command(
       dry_run,
     )?;
   } else {
-    // Standard flow: copy source file to repository
     let source_path = Path::new(file);
     if !source_path.exists() {
       return Err(DotfilesError::Path(format!(
@@ -215,7 +180,6 @@ pub(super) fn handle_add_command(
     let dest_path = if let Some(dest) = dest {
       Path::new(dest).to_path_buf()
     } else {
-      // Use source path relative to home directory
       let home = home_override::home_dir()
         .ok_or_else(|| DotfilesError::Config("Could not find home directory".to_string()))?;
       source_path
@@ -251,22 +215,6 @@ pub(super) fn handle_add_command(
   Ok(())
 }
 
-/// Handle the commit command.
-///
-/// # Parameters
-///
-/// * `profile`: Optional profile name.
-/// * `message`: Optional commit message.
-/// * `dry_run`: Whether to perform a dry run.
-/// * `verbose`: Whether to show verbose output.
-///
-/// # Returns
-///
-/// Returns the result of the commit command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the commit cannot be performed.
 pub(super) fn handle_commit_command(
   profile: Option<&str>,
   message: Option<&str>,
@@ -276,7 +224,6 @@ pub(super) fn handle_commit_command(
   let config = Config::load()?;
   let mut dry_run_tracker = DryRun::default();
 
-  // Run pre-commit hooks (if not dry-run)
   if !dry_run
     && let Some(hooks_config) = &config.hooks
     && let Some(pre_hooks) = &hooks_config.pre_commit
@@ -300,7 +247,6 @@ pub(super) fn handle_commit_command(
     }
   }
 
-  // Sync files first (quietly unless verbose)
   let sync_report = sync_files(
     &config,
     profile,
@@ -313,7 +259,6 @@ pub(super) fn handle_commit_command(
     display_dry_run_summary(&dry_run_tracker);
   } else {
     display_sync_report(&sync_report);
-    // Automatically commit any changes to the repository
     let repo_path = config.get_repo_path();
     let repo = init_repo(&repo_path)?;
     let changes = detect_changes(&repo)?;
@@ -328,13 +273,12 @@ pub(super) fn handle_commit_command(
       let commit_report = commit_changes(&repo, &commit_message, &mut dry_run_tracker, dry_run)?;
       display_commit_report(&commit_report);
 
-      // Run post-commit hooks
       if let Some(hooks_config) = &config.hooks
         && let Some(post_hooks) = &hooks_config.post_commit
       {
         use flux_lib::services::hooks::execute_hooks;
         println!("{} Running post-commit hooks...", "→".cyan());
-        let hook_results = execute_hooks(post_hooks, &config, None, false)?; // Don't fail-fast on post hooks
+        let hook_results = execute_hooks(post_hooks, &config, None, false)?;
         for result in hook_results {
           if !result.success {
             eprintln!(
@@ -357,21 +301,6 @@ pub(super) fn handle_commit_command(
   Ok(())
 }
 
-/// Handle the remove command.
-///
-/// # Parameters
-///
-/// * `tool`: The tool name.
-/// * `file`: The file name to remove.
-/// * `dry_run`: Whether to perform a dry run.
-///
-/// # Returns
-///
-/// Returns the result of the remove command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the file cannot be removed.
 pub(super) fn handle_rm_command(
   tool: &str,
   file: &str,
@@ -388,31 +317,15 @@ pub(super) fn handle_rm_command(
   Ok(())
 }
 
-/// Handle the list files command.
-///
-/// # Parameters
-///
-/// * `profile`: Optional profile name.
-///
-/// # Returns
-///
-/// Returns the result of the list files command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the files cannot be listed.
 pub(super) fn handle_ls_files_command(profile: Option<&str>) -> Result<()> {
   let config = Config::load()?;
   let files = config.get_tracked_files(profile)?;
 
-  // Git-like output: one file per line, no header, just paths
   for file in files {
-    // Show repo-relative path (like git ls-files shows paths relative to repo root)
     let repo_path = config.get_repo_path();
     if let Ok(rel_path) = file.repo_path.strip_prefix(&repo_path) {
       println!("{}", rel_path.display());
     } else {
-      // Fallback to full path if we can't compute relative
       println!("{}", file.repo_path.display());
     }
   }
@@ -420,29 +333,18 @@ pub(super) fn handle_ls_files_command(profile: Option<&str>) -> Result<()> {
 }
 
 #[derive(Debug, Clone, Copy)]
-/// Represents a toggleable boolean value
 pub enum Toggle {
-  /// Represents a disabled state
   Disabled,
-  /// Represents an enabled state
   Enabled,
 }
 
 impl Toggle {
   #[must_use]
-  /// Converts the toggle value to a boolean.
-  ///
-  /// # Returns
-  ///
-  /// `true` if the toggle is `Enabled`, `false` if it is `Disabled`.
   pub const fn as_bool(self) -> bool {
     matches!(self, Toggle::Enabled)
   }
 
   #[must_use]
-  /// Create a `Toggle` from a `bool`.
-  ///
-  /// `true` -> `Toggle::Enabled`, `false` -> `Toggle::Disabled`.
   pub const fn from_bool(bool: bool) -> Self {
     if bool {
       Toggle::Enabled
@@ -452,7 +354,6 @@ impl Toggle {
   }
 }
 
-/// Detects whether the source path is a symlink pointing into the repository.
 fn detect_repo_symlink_target(
   source_path: &Path,
   repo_path: &Path,
@@ -477,7 +378,6 @@ fn detect_repo_symlink_target(
   Ok(Some(normalized_target))
 }
 
-/// Register a repo file directly in the configuration without copying.
 fn register_repo_file(
   config: &mut Config,
   tool: &str,
@@ -529,7 +429,6 @@ fn register_repo_file(
   Ok(())
 }
 
-/// Check if an entry is already tracked in the config.
 fn already_tracked_entry(
   config: &Config,
   tool: &str,
@@ -552,7 +451,6 @@ fn already_tracked_entry(
   false
 }
 
-/// Resolve the destination path for a file entry.
 fn resolve_entry_dest(entry: &FileEntry) -> PathBuf {
   let entry_dest = Path::new(&entry.dest);
   if entry_dest.is_absolute() {
@@ -564,11 +462,6 @@ fn resolve_entry_dest(entry: &FileEntry) -> PathBuf {
   }
 }
 
-/// Handle the apply command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be applied or if the configuration cannot be loaded.
 pub(super) fn handle_apply_command(
   profile: Option<&str>,
   dry_run: Toggle,
@@ -579,9 +472,7 @@ pub(super) fn handle_apply_command(
 ) -> Result<()> {
   let config = Config::load()?;
 
-  // Normal apply command
   if dry_run.as_bool() {
-    // In dry-run mode, only show preview without applying changes
     let state_diff = compare_states(&config, profile, force.as_bool())?;
     display_preview(&state_diff);
     if diff.as_bool() && !state_diff.files_to_sync.is_empty() {
@@ -590,7 +481,6 @@ pub(super) fn handle_apply_command(
     report_discrepancies(&config, profile)?;
   } else {
     use flux_lib::commands::ApplyOptions;
-    // apply_config now handles history recording internally
     let report = apply_config(
       &ApplyOptions {
         config: &config,
@@ -613,7 +503,6 @@ pub(super) fn handle_apply_command(
   Ok(())
 }
 
-/// Handle the diff command.
 pub(super) fn handle_diff_command(
   profile: Option<&str>,
   force: bool,
@@ -651,7 +540,6 @@ pub(super) fn handle_diff_command(
   Ok(())
 }
 
-/// Print the relative paths of changed files without a pager.
 fn print_changed_files(
   config: &Config,
   state_diff: &StateDiff,
@@ -666,12 +554,10 @@ fn print_changed_files(
   }
 }
 
-/// Determine whether to use a pager for diff output.
 fn should_use_pager() -> bool {
   is(Stream::Stdout)
 }
 
-/// Open a pager for the given diff output.
 fn open_diff_pager(output: &str) -> Result<()> {
   let pager_cmd = env::var("PAGER").unwrap_or_else(|_| "less -R".to_string());
   let mut child = Command::new("sh")
@@ -692,15 +578,6 @@ fn open_diff_pager(output: &str) -> Result<()> {
   Ok(())
 }
 
-/// Parse a since time string into a `DateTime`.
-///
-/// # Parameters
-///
-/// * `since_str`: The since time string to parse.
-///
-/// # Returns
-///
-/// Returns the parsed `DateTime`.
 fn parse_since_time(since_str: &str) -> Result<DateTime<Utc>> {
   since_str.parse::<i64>().map_or_else(
     |_| {
@@ -708,7 +585,6 @@ fn parse_since_time(since_str: &str) -> Result<DateTime<Utc>> {
         |_| {
           NaiveDateTime::parse_from_str(since_str, "%Y-%m-%d %H:%M:%S").map_or_else(
             |_| {
-              // Try just date
               NaiveDate::parse_from_str(since_str, "%Y-%m-%d").map_or_else(
                 |_| {
                   Err(DotfilesError::Config(format!(
@@ -734,29 +610,11 @@ fn parse_since_time(since_str: &str) -> Result<DateTime<Utc>> {
       )
     },
     |hours| {
-      // Interpret as hours ago
       Ok(Utc::now() - Duration::hours(hours))
     },
   )
 }
 
-/// Handle the history command.
-///
-/// # Parameters
-///
-/// * `limit`: Optional limit on number of events to show.
-/// * `profile`: Optional profile name to filter by.
-/// * `kind`: Optional event kind to filter by.
-/// * `since`: Optional time string to filter events since.
-/// * `json`: Whether to output as JSON.
-///
-/// # Returns
-///
-/// Returns the result of the history command.
-///
-/// # Errors
-///
-/// Returns an error if the history cannot be read or if the filters cannot be applied.
 pub(super) fn handle_history_command(
   limit: Option<usize>,
   profile: Option<&str>,
@@ -764,9 +622,8 @@ pub(super) fn handle_history_command(
   since: Option<&str>,
   json: bool,
 ) -> Result<()> {
-  let mut events = read_events(None)?; // Read all, filter manually
+  let mut events = read_events(None)?;
 
-  // Apply filters
   if let Some(profile_filter) = &profile {
     events.retain(|event| event.profile.as_deref() == Some(profile_filter));
   }
@@ -780,7 +637,6 @@ pub(super) fn handle_history_command(
     events.retain(|event| event.timestamp >= since_time);
   }
 
-  // Apply limit after filtering
   if let Some(max_events) = limit {
     events.truncate(max_events);
   }
@@ -795,7 +651,6 @@ pub(super) fn handle_history_command(
   }
 
   if json {
-    // Output as JSON
     let json_str = serde_json::to_string_pretty(&events).map_err(|err| {
       DotfilesError::Config(format!("Failed to serialize history to JSON: {err}"))
     })?;
@@ -827,19 +682,6 @@ pub(super) fn handle_history_command(
   Ok(())
 }
 
-/// Handle the profile command.
-///
-/// # Parameters
-///
-/// * `command`: The profile command to handle.
-///
-/// # Returns
-///
-/// Returns the result of the profile command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the profile cannot be created or switched.
 pub(super) fn handle_profile_command(command: ProfileCommands) -> Result<()> {
   let mut config = Config::load()?;
   match command {
@@ -878,19 +720,6 @@ pub(super) fn handle_profile_command(command: ProfileCommands) -> Result<()> {
   Ok(())
 }
 
-/// Handle the remote command.
-///
-/// # Parameters
-///
-/// * `command`: The remote command to handle.
-///
-/// # Returns
-///
-/// Returns the result of the remote command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the remote cannot be added, set, or removed.
 fn display_remote_sync_notice(result: &RemoteSyncCheck) {
   if let RemoteSyncCheck::NotUpToDate {
     remote,
@@ -910,12 +739,6 @@ fn display_remote_sync_notice(result: &RemoteSyncCheck) {
   }
 }
 
-/// Handle the remote command.
-///
-/// Performs various remote-related operations (check, list, add, set-url, remove).
-/// If configuration or repository initialization is not available the check command
-/// will be silently skipped (returns Ok). Other subcommands will return errors
-/// encountered while loading config or interacting with the repository.
 pub(super) async fn handle_remote_command(command: RemoteCommands) -> Result<()> {
   match command {
     RemoteCommands::Check { timeout } => {
@@ -978,23 +801,6 @@ pub(super) async fn handle_remote_command(command: RemoteCommands) -> Result<()>
   Ok(())
 }
 
-/// Handle the push command.
-///
-/// # Parameters
-///
-/// * `remote`: The remote name to push to.
-/// * `branch`: The branch to push to.
-/// * `set_upstream`: Whether to set the upstream after pushing.
-/// * `dry_run`: Whether to perform a dry run.
-/// * `timeout`: The timeout in seconds.
-///
-/// # Returns
-///
-/// Returns the result of the push command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the push cannot be performed.
 pub(super) async fn handle_push_command(
   remote: Option<String>,
   branch: Option<String>,
@@ -1007,18 +813,15 @@ pub(super) async fn handle_push_command(
   let repo = init_repo(&repo_path)?;
   let mut dry_run_tracker = DryRun::default();
 
-  // Resolve remote with precedence: CLI flag > config default_remote > "origin"
   let resolved_remote = remote
     .or_else(|| config.general.default_remote.clone())
     .unwrap_or_else(|| "origin".to_string());
 
-  // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
   let resolved_branch = branch
     .or_else(|| git::get_current_branch(&repo).ok())
     .or_else(|| config.general.default_branch.clone())
     .unwrap_or_else(|| "main".to_string());
 
-  // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
   let resolved_timeout = timeout
     .or(config.general.push_timeout)
     .unwrap_or(60);
@@ -1043,22 +846,6 @@ pub(super) async fn handle_push_command(
   Ok(())
 }
 
-/// Handle the pull command.
-///
-/// # Parameters
-///
-/// * `remote`: The remote name to pull from.
-/// * `branch`: The branch to pull from.
-/// * `dry_run`: Whether to perform a dry run.
-/// * `timeout`: The timeout in seconds.
-///
-/// # Returns
-///
-/// Returns the result of the pull command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the pull cannot be performed.
 pub(super) async fn handle_pull_command(
   remote: Option<String>,
   branch: Option<String>,
@@ -1070,18 +857,15 @@ pub(super) async fn handle_pull_command(
   let repo = init_repo(&repo_path)?;
   let mut dry_run_tracker = DryRun::default();
 
-  // Resolve remote with precedence: CLI flag > config default_remote > "origin"
   let resolved_remote = remote
     .or_else(|| config.general.default_remote.clone())
     .unwrap_or_else(|| "origin".to_string());
 
-  // Resolve branch with precedence: CLI flag > current HEAD > config default_branch > "main"
   let resolved_branch = branch
     .or_else(|| git::get_current_branch(&repo).ok())
     .or_else(|| config.general.default_branch.clone())
     .unwrap_or_else(|| "main".to_string());
 
-  // Resolve timeout with precedence: CLI flag > config push_timeout > 60 seconds
   let resolved_timeout = timeout
     .or(config.general.push_timeout)
     .unwrap_or(60);
@@ -1104,21 +888,6 @@ pub(super) async fn handle_pull_command(
   Ok(())
 }
 
-/// Handle the status command.
-///
-/// # Parameters
-///
-/// * `profile`: Optional profile name.
-/// * `conflicts`: Whether to show only conflicted files.
-/// * `json`: Whether to output as JSON.
-///
-/// # Returns
-///
-/// Returns the result of the status command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if the status cannot be checked.
 pub(super) fn handle_status_command(
   profile: Option<&str>,
   conflicts: bool,
@@ -1128,7 +897,6 @@ pub(super) fn handle_status_command(
   let repo_path = config.get_repo_path();
 
   if conflicts {
-    // Show only conflicted files
     use flux_lib::commands::status::check_conflicts;
     let conflicted = check_conflicts(&config, profile)?;
 
@@ -1150,19 +918,16 @@ pub(super) fn handle_status_command(
       );
     }
   } else if json {
-    // JSON output - skip git status, just show file status
     use flux_lib::commands::status::JsonStatusReport;
     let reports = check_status(&config, profile)?;
     let json_reports: Vec<JsonStatusReport> = reports.iter().map(Into::into).collect();
     println!("{}", serde_json::to_string_pretty(&json_reports)?);
   } else {
-    // Display git repository status
     if let Ok(repo) = init_repo(&repo_path) {
       let git_status = show_git_status(&repo)?;
       display_git_status(&git_status);
     }
 
-    // Display file synchronization status
     let reports = check_status(&config, profile)?;
     display_status(&reports);
   }
@@ -1174,27 +939,12 @@ pub(super) fn handle_status_command(
   Ok(())
 }
 
-/// Handle the doctor command.
-///
-/// # Parameters
-///
-/// * `profile`: Optional profile name for state comparison.
-///
-/// # Returns
-///
-/// Returns the result of the doctor command.
-///
-/// # Errors
-///
-/// Returns an error if the configuration cannot be loaded or if any checks fail.
 pub(super) fn handle_doctor_command(profile: Option<&str>) -> Result<()> {
   let config = Config::load()?;
 
-  // Validation + state diff (formerly `flux check`)
   let report = validate_config(&config)?;
   let diff = compare_states(&config, profile, false)?;
 
-  // Health checks
   let health_report = run_health_checks(&config)?;
 
   display_doctor_report(&report, &diff, &health_report);
@@ -1218,7 +968,6 @@ pub(super) fn handle_doctor_command(profile: Option<&str>) -> Result<()> {
   Ok(())
 }
 
-/// Report any discrepancies between the configuration and the system state.
 fn report_discrepancies(
   config: &Config,
   profile: Option<&str>,
@@ -1231,12 +980,6 @@ fn report_discrepancies(
   Ok(())
 }
 
-/// Execute the command internally.
-/// Internal command dispatcher: forward a `Commands` variant to its respective handler.
-///
-/// This helper centralizes the match for `Commands` but is intentionally private
-/// (not part of the public API) so it does not require top-level documentation
-/// for every lint. It also uses `Toggle::from_bool` to keep the match arms concise.
 fn execute_internal(cmd: Commands) -> Result<()> {
   match cmd {
     Commands::Init { repo_path } => handle_init_command(repo_path)?,
@@ -1274,7 +1017,6 @@ fn execute_internal(cmd: Commands) -> Result<()> {
   Ok(())
 }
 
-/// Extract arguments from `Commands::Add` and run the add handler.
 fn run_add_command(cmd: Commands) -> Result<()> {
   if let Commands::Add {
     tool,
@@ -1298,7 +1040,6 @@ fn run_add_command(cmd: Commands) -> Result<()> {
   }
 }
 
-/// Extract arguments from `Commands::Commit` and run the commit handler.
 fn run_commit_command(cmd: Commands) -> Result<()> {
   if let Commands::Commit {
     profile,
@@ -1313,7 +1054,6 @@ fn run_commit_command(cmd: Commands) -> Result<()> {
   }
 }
 
-/// Extract arguments from `Commands::Apply` and run the apply handler.
 fn run_apply_command(cmd: Commands) -> Result<()> {
   if let Commands::Apply {
     profile,
@@ -1337,7 +1077,6 @@ fn run_apply_command(cmd: Commands) -> Result<()> {
   }
 }
 
-/// Extract arguments from `Commands::History` and run the history handler.
 fn run_history_command(cmd: Commands) -> Result<()> {
   if let Commands::History {
     limit,
@@ -1359,7 +1098,6 @@ fn run_history_command(cmd: Commands) -> Result<()> {
   }
 }
 
-/// Extract arguments from `Commands::Push` and run the push handler.
 fn run_push_command(cmd: Commands) -> Result<()> {
   if let Commands::Push {
     remote,
@@ -1381,7 +1119,6 @@ fn run_push_command(cmd: Commands) -> Result<()> {
   }
 }
 
-/// Extract arguments from `Commands::Pull` and run the pull handler.
 fn run_pull_command(cmd: Commands) -> Result<()> {
   if let Commands::Pull {
     remote,
@@ -1397,13 +1134,11 @@ fn run_pull_command(cmd: Commands) -> Result<()> {
 }
 
 impl Commands {
-  /// Execute the command.
   pub fn execute(self) -> Result<()> {
     execute_internal(self)
   }
 }
 
-/// Handle the completion command.
 pub(super) fn handle_completion_command(shell: &str) {
   use clap_complete::{generate, shells::Zsh};
   let mut cmd = Cli::command();

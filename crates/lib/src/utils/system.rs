@@ -1,5 +1,3 @@
-//! System detection utilities for condition evaluation
-
 use std::env;
 use std::path::Path;
 
@@ -45,7 +43,6 @@ pub fn command_exists(command: &str) -> bool {
 /// Check if a file or directory exists
 #[must_use]
 pub fn path_exists(path: &str) -> bool {
-  // Expand tilde and environment variables
   let expanded = shellexpand::full(path).unwrap_or(std::borrow::Cow::Borrowed(path));
   Path::new(expanded.as_ref()).exists()
 }
@@ -92,7 +89,6 @@ pub fn get_username() -> String {
 pub fn user_in_group(groupname: &str) -> bool {
   #[cfg(unix)]
   {
-    // Use the `groups` command as a safe alternative to libc calls
     use std::process::Command;
 
     let output = Command::new("groups").output();
@@ -110,7 +106,6 @@ pub fn user_in_group(groupname: &str) -> bool {
 
   #[cfg(not(unix))]
   {
-    // Group checking not supported on non-Unix systems
     let _ = groupname;
     false
   }
@@ -124,7 +119,6 @@ mod tests {
   fn test_get_os() {
     let os = get_os();
     assert!(!os.is_empty());
-    // Should be one of the known OS values
     assert!(["linux", "macos", "windows", "freebsd", "openbsd", "netbsd"].contains(&os.as_str()));
   }
 
@@ -138,36 +132,29 @@ mod tests {
   fn test_get_architecture() {
     let arch = get_architecture();
     assert!(!arch.is_empty());
-    // Should be one of the known architectures
     assert!(["x86_64", "aarch64", "arm", "x86", "powerpc64", "riscv64"].contains(&arch.as_str()));
   }
 
   #[test]
   fn test_env_var() {
-    // Test with PATH which should always exist
     assert!(has_env_var("PATH"));
     assert!(get_env_var("PATH").is_some());
 
-    // Test with a variable that definitely doesn't exist
     assert!(!has_env_var("DEFINITELY_NOT_A_REAL_VAR_12345"));
     assert_eq!(get_env_var("DEFINITELY_NOT_A_REAL_VAR_12345"), None);
   }
 
   #[test]
   fn test_command_exists() {
-    // Test with a command that should exist on all systems
-    assert!(command_exists("ls") || command_exists("dir")); // ls on Unix, dir on Windows
+    assert!(command_exists("ls") || command_exists("dir"));
 
-    // Test with a command that definitely doesn't exist
     assert!(!command_exists("definitely_not_a_real_command_12345"));
   }
 
   #[test]
   fn test_path_exists() {
-    // Test with current directory (should always exist)
     assert!(path_exists("."));
 
-    // Test with a path that doesn't exist
     assert!(!path_exists("/path/that/definitely/does/not/exist/12345"));
   }
 

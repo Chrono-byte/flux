@@ -3,10 +3,6 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::thread::ThreadId;
 
-/// Lazy static storing overridden home directories per thread.
-///
-/// This keeps overrides scoped to the thread setting them so concurrent tests
-/// do not interfere with each other.
 static HOME_OVERRIDE: std::sync::LazyLock<Mutex<HashMap<ThreadId, Vec<PathBuf>>>> =
   std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -15,7 +11,6 @@ static HOME_OVERRIDE: std::sync::LazyLock<Mutex<HashMap<ThreadId, Vec<PathBuf>>>
 /// This function never panics: if the internal mutex has been poisoned it will
 /// recover the inner value and continue using it.
 pub fn home_dir() -> Option<PathBuf> {
-  // Recover from a poisoned mutex instead of panicking.
   let override_guard = match HOME_OVERRIDE.lock() {
     Ok(guard) => guard,
     Err(poisoned) => poisoned.into_inner(),

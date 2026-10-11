@@ -1,8 +1,3 @@
-//! Unit tests for core library modules
-//!
-//! This file contains unit tests for all core modules.
-//! Integration tests are in other files in the tests/ directory.
-
 mod config_tests {
   use flux_lib::config::Config;
   use flux_lib::types::SymlinkResolution;
@@ -33,7 +28,6 @@ mod config_tests {
 mod path_tests {
   #[test]
   fn test_path_expansion() {
-    // Test path handling utilities
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home/user"));
     assert!(home.exists());
   }
@@ -76,42 +70,18 @@ mod error_tests {
   }
 }
 
-mod symlink_tests {
-  // These tests verify symlink creation and validation
-  // Use tempdir for safe isolated filesystem testing
-
-  #[test]
-  fn test_relative_symlink_creation() {
-    // Test would verify relative symlink creation works correctly
-    // Implementation depends on file_manager module
-  }
-
-  #[test]
-  fn test_absolute_symlink_creation() {
-    // Test would verify absolute symlink creation works correctly
-    // Implementation depends on file_manager module
-  }
-}
-
-// ============================================================================
-// Configuration Module - Extended Tests
-// ============================================================================
-
 mod config_validation_tests {
   use flux_lib::config::Config;
   use flux_lib::types::SymlinkResolution;
   use std::path::{Path, PathBuf};
 
-  /// Test primary config validation functionality
   #[test]
   fn test_config_validation_primary() {
     let config = Config::default();
     let result = config.validate();
 
-    // Primary: default config should validate successfully
     assert!(result.is_ok(), "Default config should validate");
 
-    // Analogous: manually created config should also validate
     let mut manual_config = Config::default();
     manual_config.general.repo_path = "~/.dotfiles".to_string();
     manual_config.general.current_profile = "default".to_string();
@@ -122,7 +92,6 @@ mod config_validation_tests {
       "Manually created config should validate"
     );
 
-    // Backwards compatibility: old configs without optional fields should work
     manual_config.general.default_remote = None;
     manual_config.general.default_branch = None;
 
@@ -133,7 +102,6 @@ mod config_validation_tests {
     );
   }
 
-  /// Test symlink resolution validation - valid modes
   #[test]
   fn test_symlink_resolution_valid() {
     let valid_modes = vec![
@@ -155,12 +123,10 @@ mod config_validation_tests {
     }
   }
 
-  /// Test symlink resolution TOML deserialization
   #[test]
   fn test_symlink_resolution_toml_deserialization() {
     use flux_lib::types::SymlinkResolution;
 
-    // Test that serde can deserialize valid lowercase strings from TOML
     let test_cases = vec![
       ("auto", SymlinkResolution::Auto),
       ("relative", SymlinkResolution::Relative),
@@ -170,7 +136,6 @@ mod config_validation_tests {
     ];
 
     for (input_str, expected) in test_cases {
-      // Create a TOML string and deserialize it
       let toml_str = format!(
         r#"
 [general]
@@ -194,21 +159,17 @@ symlink_resolution = "{input_str}"
     }
   }
 
-  /// Test empty path validation failures
   #[test]
   fn test_empty_paths_fail_validation() {
-    // Test empty repo_path
     let mut config = Config::default();
     config.general.repo_path = String::new();
     assert!(config.validate().is_err(), "Empty repo_path should fail");
 
-    // Test empty profile
     let mut config = Config::default();
     config.general.current_profile = String::new();
     assert!(config.validate().is_err(), "Empty profile should fail");
   }
 
-  /// Test profile name validation - valid names
   #[test]
   fn test_profile_names_valid() {
     let valid_names = vec!["default", "work", "home", "laptop-1", "profile_test"];
@@ -224,7 +185,6 @@ symlink_resolution = "{input_str}"
     }
   }
 
-  /// Test profile name validation - invalid special characters
   #[test]
   fn test_profile_names_invalid_chars() {
     let invalid_names = vec![
@@ -245,12 +205,10 @@ symlink_resolution = "{input_str}"
     }
   }
 
-  /// Test adding files to config
   #[test]
   fn test_add_file_to_config() {
     let mut config = Config::default();
 
-    // Primary: add single file
     config.add_file_to_tool("sway", "config", Path::new(".config/sway/config"), None);
 
     assert!(config.tools.contains_key("sway"));
@@ -260,7 +218,6 @@ symlink_resolution = "{input_str}"
     };
     assert_eq!(sway_tool.files.len(), 1);
 
-    // Analogous: add to same tool creates multiple entries
     config.add_file_to_tool("sway", "config.d", Path::new(".config/sway/config.d"), None);
 
     let Some(sway_tool) = config.tools.get("sway") else {
@@ -269,7 +226,6 @@ symlink_resolution = "{input_str}"
     };
     assert_eq!(sway_tool.files.len(), 2);
 
-    // Backwards compatible: profile-specific entries
     config.add_file_to_tool(
       "sway",
       "work",
@@ -328,15 +284,10 @@ symlink_resolution = "{input_str}"
   }
 }
 
-// ============================================================================
-// SymlinkResolution Type - Extended Tests
-// ============================================================================
-
 mod symlink_resolution_extended_tests {
   use flux_lib::types::SymlinkResolution;
   use std::str::FromStr;
 
-  /// Test all symlink resolution modes can be created
   #[test]
   fn test_all_symlink_modes_creatable() {
     let modes = vec![
@@ -349,11 +300,9 @@ mod symlink_resolution_extended_tests {
 
     for mode in modes {
       let _formatted = format!("{mode:?}");
-      // All operations succeed
     }
   }
 
-  /// Test symlink resolution parsing all modes
   #[test]
   fn test_parse_all_symlink_modes() {
     let test_cases = vec![
@@ -376,7 +325,6 @@ mod symlink_resolution_extended_tests {
     }
   }
 
-  /// Test invalid symlink resolutions fail to parse
   #[test]
   fn test_invalid_symlink_modes_fail() {
     let invalid = vec!["invalid", "copy", "hard", "sym", ""];
@@ -390,30 +338,21 @@ mod symlink_resolution_extended_tests {
   }
 }
 
-// ============================================================================
-// Error Handling - Extended Tests
-// ============================================================================
-
 mod error_handling_extended_tests {
   use flux_lib::utils::error::DotfilesError;
   use flux_lib::utils::error::Result;
 
-  /// Test error creation and context addition
   #[test]
   fn test_error_creation_and_context() {
-    // Primary: create error
     let error = DotfilesError::Path("File not found".to_string());
 
-    // Analogous: add context
     let contextualized = error.with_context("during sync");
     let msg = contextualized.to_string();
 
-    // Backwards compatible: message contains original and context
     assert!(msg.contains("File not found"));
     assert!(msg.contains("during sync"));
   }
 
-  /// Test all error variants can be created
   #[test]
   fn test_all_error_variants() {
     let errors: Vec<DotfilesError> = vec![
@@ -430,24 +369,20 @@ mod error_handling_extended_tests {
     }
   }
 
-  /// Test Result type operations
   #[test]
   fn test_result_operations() {
     let ok_result: Result<String> = Ok("success".to_string());
     let err_result: Result<String> = Err(DotfilesError::Cancelled);
 
-    // Test is_ok/is_err
     assert!(ok_result.is_ok());
     assert!(err_result.is_err());
 
-    // Test extracting Ok value using if let
     if let Ok(ok_value) = ok_result {
       assert_eq!(ok_value, "success");
     } else {
       unreachable!("Expected Ok variant");
     }
 
-    // Test error handling - use pattern matching to handle Err case
     let err_value = match err_result {
       Err(_) => "default".to_string(),
       Ok(value) => value,
@@ -455,7 +390,6 @@ mod error_handling_extended_tests {
     assert_eq!(err_value, "default");
   }
 
-  /// Test error context stacking
   #[test]
   fn test_error_context_stacking() {
     let error = DotfilesError::Path("Initial".to_string());
@@ -469,20 +403,14 @@ mod error_handling_extended_tests {
   }
 }
 
-// ============================================================================
-// Dry-Run Module - Extended Tests
-// ============================================================================
-
 mod dry_run_extended_tests {
   use flux_lib::utils::dry_run::{DryRun, Operation};
   use std::path::PathBuf;
 
-  /// Test dry-run operation logging
   #[test]
   fn test_dry_run_operations() {
     let mut dry_run = DryRun::default();
 
-    // Log various operations
     dry_run.log_operation(Operation::CreateDirectory {
       path: PathBuf::from("/test"),
     });
@@ -499,7 +427,6 @@ mod dry_run_extended_tests {
     assert_eq!(dry_run.operations().len(), 3);
   }
 
-  /// Test git remote operations
   #[test]
   fn test_git_remote_operations() {
     let mut dry_run = DryRun::default();
@@ -521,7 +448,6 @@ mod dry_run_extended_tests {
     assert_eq!(dry_run.operations().len(), 3);
   }
 
-  /// Test git push operation
   #[test]
   fn test_git_push_operation() {
     let mut dry_run = DryRun::default();
@@ -561,14 +487,9 @@ mod filesystem_manager_dry_run_tests {
   }
 }
 
-// ============================================================================
-// File Entry Type - Extended Tests
-// ============================================================================
-
 mod file_entry_extended_tests {
   use flux_lib::types::FileEntry;
 
-  /// Test file entry creation without profile
   #[test]
   fn test_file_entry_no_profile() {
     let entry = FileEntry {
@@ -583,7 +504,6 @@ mod file_entry_extended_tests {
     assert!(entry.profile.is_none());
   }
 
-  /// Test file entry creation with profile
   #[test]
   fn test_file_entry_with_profile() {
     let entry = FileEntry {
@@ -596,7 +516,6 @@ mod file_entry_extended_tests {
     assert_eq!(entry.profile, Some("work".to_string()));
   }
 
-  /// Test file entry cloning
   #[test]
   fn test_file_entry_clone_and_compare() {
     let entry1 = FileEntry {
@@ -614,14 +533,9 @@ mod file_entry_extended_tests {
   }
 }
 
-// ============================================================================
-// Path Handling - Extended Tests
-// ============================================================================
-
 mod path_handling_tests {
   use std::path::PathBuf;
 
-  /// Test path operations
   #[test]
   fn test_basic_path_operations() {
     let path = PathBuf::from("/home/user/.config");
@@ -640,7 +554,6 @@ mod path_handling_tests {
     assert_eq!(parent, PathBuf::from("/home/user"));
   }
 
-  /// Test relative paths
   #[test]
   fn test_relative_paths() {
     let rel_path = PathBuf::from(".config/app/config");
@@ -653,7 +566,6 @@ mod path_handling_tests {
     assert_eq!(file_name, "config");
   }
 
-  /// Test path joining
   #[test]
   fn test_path_joining() {
     let base = PathBuf::from("/home/user");
@@ -662,4 +574,23 @@ mod path_handling_tests {
 
     assert_eq!(joined, PathBuf::from("/home/user/.config"));
   }
+}
+
+#[test]
+fn dry_run_rename_records_a_move_without_changing_files() -> Result<(), Box<dyn std::error::Error>>
+{
+  use flux_lib::file_manager::FileSystemManager;
+  use flux_lib::utils::dry_run::{DryRun, Operation};
+  let root = tempfile::tempdir()?;
+  let from = root.path().join("from");
+  let to = root.path().join("to");
+  std::fs::write(&from, "original")?;
+  let mut dry_run = DryRun::new();
+  FileSystemManager::new(&mut dry_run, true).rename(&from, &to)?;
+  assert!(
+    matches!(dry_run.operations(), [Operation::Rename { from: actual_from, to: actual_to }] if actual_from == &from && actual_to == &to)
+  );
+  assert_eq!(std::fs::read_to_string(from)?, "original");
+  assert!(!to.exists());
+  Ok(())
 }

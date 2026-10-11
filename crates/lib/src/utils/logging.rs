@@ -6,7 +6,6 @@ use std::io::Write;
 pub fn init_logging(log_level: Option<&str>) {
   let mut builder = env_logger::Builder::new();
 
-  // Set log level with precedence: CLI flag > environment variable > default
   let level = log_level
     .and_then(|level_str| level_str.parse::<LevelFilter>().ok())
     .or_else(|| {
@@ -18,7 +17,6 @@ pub fn init_logging(log_level: Option<&str>) {
 
   let _ = builder.filter_level(level);
 
-  // Custom format: [LEVEL] message
   let _ = builder.format(|buf, record| {
     let level_string = match record.level() {
       Level::Error => record
@@ -53,7 +51,6 @@ pub fn init_logging(log_level: Option<&str>) {
   builder.init();
 }
 
-/// Log operation with context
 #[macro_export]
 macro_rules! log_op {
     ($msg:expr) => {
@@ -64,7 +61,6 @@ macro_rules! log_op {
     };
 }
 
-/// Log a file operation
 #[macro_export]
 macro_rules! log_file_op {
   ($op:expr, $file:expr) => {
@@ -72,7 +68,6 @@ macro_rules! log_file_op {
   };
 }
 
-/// Log a sync operation
 #[macro_export]
 macro_rules! log_sync {
   ($from:expr, $to:expr) => {

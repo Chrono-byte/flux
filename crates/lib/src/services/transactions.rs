@@ -91,7 +91,6 @@ impl Transaction {
   ///
   /// Returns an error if the temporary directory cannot be created.
   pub fn begin(temp_dir: PathBuf) -> Result<Self> {
-    // Create temp directory if it doesn't exist
     if !temp_dir.exists() {
       fs::create_dir_all(&temp_dir)?;
     }
@@ -125,31 +124,17 @@ impl Transaction {
       ));
     }
 
-    // Validate each operation
     for op in &self.operations {
       match op {
-        FileOperation::CreateSymlink { source, target, .. } => {
-          // Check source exists
+        FileOperation::CreateSymlink { source, .. } => {
           if !source.exists() {
             return Err(DotfilesError::Path(format!(
               "Source file does not exist: {}",
               source.display()
             )));
           }
-          // Check target parent directory exists or can be created
-          if let Some(parent) = target.parent()
-            && !parent.exists()
-          {
-            // Will be created during prepare
-          }
         }
-        FileOperation::RemoveSymlink { target } => {
-          // Check target exists or is a symlink
-          if !target.exists() && !target.is_symlink() {
-            // Target doesn't exist, which is fine for removal
-            // (idempotent operation)
-          }
-        }
+        FileOperation::RemoveSymlink { .. } => {}
       }
     }
 
@@ -162,19 +147,13 @@ impl Transaction {
   /// # Errors
   ///
   /// Returns an error if the transaction is not in the correct state or if preparation fails.
-  pub fn prepare(
-    &self,
-    _config: &Config,
-  ) -> Result<()> {
-    // Note: config parameter kept for future use
+  pub fn prepare(&self) -> Result<()> {
     if self.state != TransactionState::Prepared {
       return Err(DotfilesError::Config(
         "Transaction must be in Prepared state to prepare".to_string(),
       ));
     }
 
-    // For file operations, we'll stage them during commit
-    // This phase is mainly for validation and setup
     Ok(())
   }
 
@@ -194,7 +173,6 @@ impl Transaction {
       ));
     }
 
-    // Execute all operations
     for (operation_index, op) in self.operations.clone().into_iter().enumerate() {
       let result = match &op {
         FileOperation::CreateSymlink {
@@ -211,12 +189,17 @@ impl Transaction {
           config,
           fs_manager,
         ),
-        FileOperation::RemoveSymlink { target } => Self::execute_remove_symlink(target, fs_manager),
+        FileOperation::RemoveSymlink { target } => Self::execute_remove_symlink(
+          target,
+          &self
+            .temp_dir
+            .join(format!("operation-{operation_index}.backup")),
+          fs_manager,
+        ),
       };
 
       self.results.push(result.clone());
 
-      // If any operation fails, rollback
       if !result.success {
         self.rollback(config, fs_manager);
         let error_message = result.error.as_deref().unwrap_or("Unknown error");
@@ -243,12 +226,9 @@ impl Transaction {
       ));
     }
 
-    // Build a set of targets that are created after being removed
-    // (to skip verification for RemoveSymlink operations that are immediately followed by CreateSymlink)
     let mut targets_created_after_removal = std::collections::HashSet::new();
     for (i, result) in self.results.iter().enumerate() {
       if let FileOperation::RemoveSymlink { target } = &result.operation {
-        // Check if the next operation creates a symlink at the same target
         if let Some(next_result) = self.results.get(i + 1)
           && let FileOperation::CreateSymlink {
             target: create_target,
@@ -261,7 +241,6 @@ impl Transaction {
       }
     }
 
-    // Verify each operation succeeded
     for result in &self.results {
       if !result.success {
         let error_message = result.error.as_deref().unwrap_or("Unknown error");
@@ -270,7 +249,6 @@ impl Transaction {
         )));
       }
 
-      // Additional verification for file and package operations
       match &result.operation {
         FileOperation::CreateSymlink { target, .. } => {
           if !target.exists() && !target.is_symlink() {
@@ -281,7 +259,6 @@ impl Transaction {
           }
         }
         FileOperation::RemoveSymlink { target } => {
-          // Skip verification if this target is immediately recreated
           if !targets_created_after_removal.contains(target)
             && (target.exists() || target.is_symlink())
           {
@@ -305,15 +282,13 @@ impl Transaction {
     fs_manager: &mut FileSystemManager,
   ) {
     if self.state == TransactionState::RolledBack {
-      return; // Already rolled back
+      return;
     }
 
-    // Rollback in reverse order
     for (operation_index, result) in self.results.iter().enumerate().rev() {
       if result.success {
         match &result.operation {
-          FileOperation::CreateSymlink { target, .. } => {
-            // Remove the symlink we created
+          FileOperation::CreateSymlink { target, .. } | FileOperation::RemoveSymlink { target } => {
             if target.exists() || target.is_symlink() {
               let _ = fs_manager.remove_file(target);
             }
@@ -323,9 +298,6 @@ impl Transaction {
             if backup_path.exists() || backup_path.is_symlink() {
               let _ = fs_manager.rename(&backup_path, target);
             }
-          }
-          FileOperation::RemoveSymlink { .. } => {
-            // Removing existing content is destructive and cannot be reverted here.
           }
         }
       }
@@ -346,9 +318,6 @@ impl Transaction {
     Ok(())
   }
 
-  // Private helper methods for executing operations
-
-  /// Execute creation of a symlink.
   fn execute_create_symlink(
     source: &Path,
     target: &Path,
@@ -357,7 +326,6 @@ impl Transaction {
     _config: &Config,
     fs_manager: &mut FileSystemManager,
   ) -> OperationResult {
-    // Create parent directory if needed
     if let Some(parent) = target.parent()
       && let Err(error) = fs_manager.create_dir_all(parent)
     {
@@ -397,8 +365,6 @@ impl Transaction {
       };
     }
 
-    // Preserve the original until the whole transaction is verified. This
-    // supports files, directories, and symlinks and makes rollback lossless.
     let had_original = target.exists() || target.is_symlink();
     if had_original && let Err(error) = fs_manager.rename(target, backup_path) {
       let _ = fs_manager.remove_file(&temp_path);
@@ -445,7 +411,6 @@ impl Transaction {
     }
   }
 
-  /// Stage a copied file, copied directory, or symlink beside its destination.
   fn stage_replacement(
     source: &Path,
     target: &Path,
@@ -474,13 +439,15 @@ impl Transaction {
     fs_manager.symlink(&link_target, temp_path)
   }
 
-  /// Execute removal of a symlink.
   fn execute_remove_symlink(
     target: &Path,
+    backup_path: &Path,
     fs_manager: &mut FileSystemManager,
   ) -> OperationResult {
     let target_path = target.to_path_buf();
-    if let Err(error) = fs_manager.remove_file(&target_path) {
+    if (target.exists() || target.is_symlink())
+      && let Err(error) = fs_manager.rename(&target_path, backup_path)
+    {
       OperationResult {
         operation: FileOperation::RemoveSymlink {
           target: target_path,
@@ -531,7 +498,7 @@ mod tests {
 
     let config = Config::default();
     transaction.validate(&config)?;
-    transaction.prepare(&config)?;
+    transaction.prepare()?;
     let mut dry_run = DryRun::default();
     let mut fs_manager = FileSystemManager::new(&mut dry_run, false);
 
@@ -563,7 +530,7 @@ mod tests {
 
     let config = Config::default();
     transaction.validate(&config)?;
-    transaction.prepare(&config)?;
+    transaction.prepare()?;
     let mut dry_run = DryRun::default();
     let mut fs_manager = FileSystemManager::new(&mut dry_run, false);
     transaction.commit(&config, &mut fs_manager)?;
@@ -572,6 +539,87 @@ mod tests {
       fs::read_to_string(target.join("nested/file"))?,
       "replacement"
     );
+    Ok(())
+  }
+  #[cfg(unix)]
+  #[test]
+  fn rollback_restores_removed_symlink_after_later_failure() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let target = root.path().join("link");
+    let original = root.path().join("missing-original");
+    std::os::unix::fs::symlink(&original, &target)?;
+    let source = root.path().join("source");
+    let blocker = root.path().join("blocker");
+    fs::write(&source, "replacement")?;
+    fs::write(&blocker, "not a directory")?;
+    let mut transaction = Transaction::begin(root.path().join("transaction"))?;
+    transaction.add_operation(FileOperation::RemoveSymlink {
+      target: target.clone(),
+    });
+    transaction.add_operation(FileOperation::CreateSymlink {
+      source,
+      target: blocker.join("link"),
+      resolution: SymlinkResolution::Auto,
+    });
+    let config = Config::default();
+    transaction.validate(&config)?;
+    transaction.prepare()?;
+    let mut dry_run = DryRun::default();
+    let mut fs_manager = FileSystemManager::new(&mut dry_run, false);
+    assert!(
+      transaction
+        .commit(&config, &mut fs_manager)
+        .is_err()
+    );
+    assert_eq!(transaction.state, TransactionState::RolledBack);
+    assert_eq!(fs::read_link(&target)?, original);
+    transaction.rollback(&config, &mut fs_manager);
+    assert!(target.is_symlink());
+    Ok(())
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn committed_symlink_removal_preserves_the_referent() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let source = root.path().join("source");
+    let target = root.path().join("link");
+    fs::write(&source, "original")?;
+    std::os::unix::fs::symlink(&source, &target)?;
+    let mut transaction = Transaction::begin(root.path().join("transaction"))?;
+    transaction.add_operation(FileOperation::RemoveSymlink {
+      target: target.clone(),
+    });
+    let config = Config::default();
+    transaction.validate(&config)?;
+    transaction.prepare()?;
+    let mut dry_run = DryRun::default();
+    let mut fs_manager = FileSystemManager::new(&mut dry_run, false);
+    transaction.commit(&config, &mut fs_manager)?;
+    transaction.verify()?;
+    transaction.cleanup()?;
+    assert!(!target.is_symlink());
+    assert_eq!(fs::read_to_string(source)?, "original");
+    Ok(())
+  }
+  #[test]
+  fn removing_an_absent_symlink_is_idempotent() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let target = root.path().join("absent");
+    let mut transaction = Transaction::begin(root.path().join("transaction"))?;
+    transaction.add_operation(FileOperation::RemoveSymlink {
+      target: target.clone(),
+    });
+    let config = Config::default();
+    transaction.validate(&config)?;
+    transaction.prepare()?;
+    let mut dry_run = DryRun::default();
+    let mut fs_manager = FileSystemManager::new(&mut dry_run, false);
+    transaction.commit(&config, &mut fs_manager)?;
+    transaction.verify()?;
+    transaction.rollback(&config, &mut fs_manager);
+    assert!(!target.exists());
+    assert_eq!(transaction.state, TransactionState::RolledBack);
     Ok(())
   }
 }

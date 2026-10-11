@@ -52,7 +52,6 @@ pub fn find_discrepancies(
     }
   }
 
-  // Sort by tool, then by path
   discrepancies.sort_by(|first, second| {
     first
       .file
@@ -64,13 +63,7 @@ pub fn find_discrepancies(
   Ok(discrepancies)
 }
 
-/// Check if a file has a discrepancy with the tracked file.
-///
-/// # Errors
-///
-/// Returns an error if there are issues reading files or the configuration.
 fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
-  // First check: repo file exists
   if !file.repo_path.exists() {
     return Ok(Some(Discrepancy {
       file: file.clone(),
@@ -79,7 +72,6 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
     }));
   }
 
-  // Second check: destination file exists
   if !file.dest_path.exists() {
     return Ok(Some(Discrepancy {
       file: file.clone(),
@@ -88,16 +80,13 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
     }));
   }
 
-  // Third check: is it a symlink?
   let is_symlink = file.dest_path.is_symlink();
 
   if is_symlink {
-    // Check symlink target
     match fs::read_link(&file.dest_path) {
       Ok(link_target) => {
         let resolved_target = resolve_symlink_target(&file.dest_path, &link_target);
 
-        // Check if symlink is broken (target doesn't exist)
         if !resolved_target.exists() {
           return Ok(Some(Discrepancy {
             file: file.clone(),
@@ -110,7 +99,6 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
           }));
         }
 
-        // Check if symlink points to correct location
         if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
           return Ok(Some(Discrepancy {
             file: file.clone(),
@@ -124,24 +112,19 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
           }));
         }
 
-        // For symlinks, we consider them correct if they point to the right place
         Ok(None)
       }
-      Err(error) => {
-        // Can't read symlink - treat as broken
-        Ok(Some(Discrepancy {
-          file: file.clone(),
-          issue: IssueType::BrokenSymlink,
-          message: format!(
-            "Cannot read symlink: {} ({})",
-            file.dest_path.display(),
-            error
-          ),
-        }))
-      }
+      Err(error) => Ok(Some(Discrepancy {
+        file: file.clone(),
+        issue: IssueType::BrokenSymlink,
+        message: format!(
+          "Cannot read symlink: {} ({})",
+          file.dest_path.display(),
+          error
+        ),
+      })),
     }
   } else {
-    // Not a symlink - check if content differs
     if files_differ(&file.repo_path, &file.dest_path)? {
       Ok(Some(Discrepancy {
         file: file.clone(),
@@ -152,9 +135,6 @@ fn check_file_discrepancy(file: &TrackedFile) -> Result<Option<Discrepancy>> {
         ),
       }))
     } else {
-      // File exists, content matches, but it's not a symlink
-      // This might be intentional (e.g., if symlink_resolution is "replace")
-      // But typically we expect symlinks, so we'll flag it
       Ok(Some(Discrepancy {
         file: file.clone(),
         issue: IssueType::NotSymlink,

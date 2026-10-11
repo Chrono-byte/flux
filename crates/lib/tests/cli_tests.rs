@@ -1,5 +1,3 @@
-//! Tests for CLI configuration module
-
 use flux_lib::config::cli::{EnvironmentConfig, LogFormat, LogLevel};
 
 #[test]

@@ -1,5 +1,3 @@
-//! Tests for error utility functions
-
 use flux_lib::utils::error_utils::home_dir_not_found;
 
 #[test]

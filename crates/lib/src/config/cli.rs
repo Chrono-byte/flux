@@ -1,15 +1,8 @@
-//! Type-safe CLI and environment configuration handling
-//!
-//! This module provides centralized, type-safe configuration management
-//! for environment variables and CLI arguments, reducing hardcoding and
-//! improving maintainability through validation at startup.
-
 use crate::utils::error::{DotfilesError, Result};
 use log::{debug, warn};
 use std::env;
 use std::path::PathBuf;
 
-/// Environment configuration keys
 pub mod env_keys {
   /// Configuration file environment variable
   pub const CONFIG_FILE: &str = "DOTFILES_CONFIG";
@@ -147,7 +140,6 @@ impl EnvironmentConfig {
   pub fn load() -> Result<Self> {
     let mut config = Self::default();
 
-    // Load config file path from environment
     if let Ok(config_path_str) = env::var(env_keys::CONFIG_FILE) {
       let config_path = PathBuf::from(&config_path_str);
       if !config_path.exists() {
@@ -165,7 +157,6 @@ impl EnvironmentConfig {
       );
     }
 
-    // Load log level from environment
     if let Ok(log_level_str) = env::var(env_keys::LOG_LEVEL) {
       config.log_level = LogLevel::from_env(&log_level_str)?;
       debug!(
@@ -175,7 +166,6 @@ impl EnvironmentConfig {
       );
     }
 
-    // Load log format from environment
     if let Ok(log_format_str) = env::var(env_keys::LOG_FORMAT) {
       config.log_format = LogFormat::from_env(&log_format_str)?;
       debug!(

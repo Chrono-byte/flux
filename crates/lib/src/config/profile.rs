@@ -28,7 +28,6 @@ pub fn switch_profile(
   config: &mut Config,
   name: &str,
 ) -> Result<()> {
-  // Verify profile exists
   let repo_path = config.get_repo_path();
   let profile_dir = repo_path.join("profiles").join(name);
 
@@ -87,7 +86,6 @@ pub fn get_profile_files(
 
   let mut profile_files = Vec::new();
 
-  // Walk through profile directory structure
   if profile_dir.is_dir() {
     for tool_entry in std::fs::read_dir(&profile_dir)? {
       let tool_entry = tool_entry?;

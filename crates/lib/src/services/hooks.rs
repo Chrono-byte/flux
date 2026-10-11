@@ -34,34 +34,28 @@ pub fn execute_hook(
 ) -> Result<HookResult> {
   let start = std::time::Instant::now();
 
-  // Evaluate conditions if present
   if let Some(conditions) = &hook.conditions
     && !Config::conditions_match(conditions)
   {
     return Ok(HookResult {
       command: hook.command.clone(),
-      success: true, // Skipped due to conditions, not a failure
+      success: true,
       exit_code: None,
       stdout: String::new(),
       stderr: "Hook skipped: conditions not met".to_string(),
     });
   }
 
-  // Determine shell to use
-  // HooksConfig doesn't currently have a shell field, default to /bin/sh
   let shell_cmd = shell.unwrap_or("/bin/sh");
 
-  // Build command: shell -c "hook.command"
   let mut cmd = Command::new(shell_cmd);
   let _ = cmd.arg("-c").arg(&hook.command);
   let _ = cmd.stdout(Stdio::piped());
   let _ = cmd.stderr(Stdio::piped());
 
-  // Set timeout if specified
   let timeout = hook.timeout.unwrap_or(30);
   let timeout_duration = Duration::from_secs(timeout);
 
-  // Execute with timeout
   let mut child = match cmd.spawn() {
     Ok(child) => child,
     Err(error) => {
@@ -109,8 +103,6 @@ pub fn execute_hook(
   let success = output.status.success();
   let exit_code = output.status.code();
 
-  // Log duration if slow (for monitoring/debugging)
-  // This ensures the duration field is actually read/used
   let duration_secs = duration.as_secs();
   if duration_secs > 5 {
     debug!("Hook '{}' took {}s", hook.command, duration_secs);

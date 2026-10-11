@@ -22,6 +22,13 @@ pub enum Operation {
     /// Destination file path.
     to: PathBuf,
   },
+  /// Rename or move a file or directory.
+  Rename {
+    /// Source path.
+    from: PathBuf,
+    /// Destination path.
+    to: PathBuf,
+  },
   /// Remove a file
   RemoveFile {
     /// Path of the file to remove.
@@ -77,7 +84,6 @@ pub enum Operation {
 /// Tracks operations for dry-run mode.
 #[derive(Debug)]
 pub struct DryRun {
-  /// Operations to perform.
   operations: Vec<Operation>,
 }
 

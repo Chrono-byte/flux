@@ -1,5 +1,3 @@
-//! CLI argument parsing for the Flux dotfiles manager.
-
 use clap::{Parser, Subcommand};
 
 /// Command line interface for the Flux dotfiles manager.

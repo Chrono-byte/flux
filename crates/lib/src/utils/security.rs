@@ -13,7 +13,6 @@ pub fn validate_symlink_target(
   repo_path: &Path,
   target: &Path,
 ) -> Result<()> {
-  // Canonicalize both paths for comparison
   let canonical_repo = repo_path.canonicalize().map_err(|_| {
     DotfilesError::Path(format!(
       "What: Cannot validate repository path\n  \
@@ -43,7 +42,6 @@ pub fn validate_symlink_target(
     ))
   })?;
 
-  // Check if target is within repository
   if !canonical_target.starts_with(&canonical_repo) {
     return Err(error_utils::symlink_target_outside_repo(
       &canonical_target,
@@ -100,7 +98,6 @@ pub fn validate_dest_path(
     )));
   };
 
-  // Check if destination is within home directory
   if !canonical_dest.starts_with(&canonical_home) {
     return Err(error_utils::dest_outside_home(dest, home));
   }
@@ -108,11 +105,6 @@ pub fn validate_dest_path(
   Ok(())
 }
 
-/// Resolve a destination's parent without following the destination itself.
-///
-/// Existing destinations are commonly symlinks into the repository. Following
-/// that final symlink would validate its target rather than the location Flux
-/// is about to manage.
 fn canonicalize_destination_location(path: &Path) -> std::io::Result<PathBuf> {
   match (path.parent(), path.file_name()) {
     (Some(parent), Some(name)) => {
@@ -150,10 +142,6 @@ pub fn validate_repo_entry_path(
   Ok(())
 }
 
-/// Canonicalize the existing portion of a path and append any missing tail.
-///
-/// This resolves platform aliases and symlinked parent directories even when
-/// the final destination does not exist yet.
 fn canonicalize_with_missing_tail(path: &Path) -> std::io::Result<PathBuf> {
   let mut candidate = path;
   let mut missing = Vec::new();
@@ -181,7 +169,6 @@ fn canonicalize_with_missing_tail(path: &Path) -> std::io::Result<PathBuf> {
   }
 }
 
-/// Normalize a path that may not exist, converting it to an absolute path.
 fn normalize_nonexistent_path(path: &Path) -> PathBuf {
   let mut normalized = PathBuf::new();
 
@@ -215,7 +202,6 @@ pub fn set_secure_permissions(path: &Path) -> Result<()> {
 
   #[cfg(not(unix))]
   {
-    // On non-Unix systems, just log a warning
     log::warn!("Cannot set secure file permissions on non-Unix system");
   }
 
@@ -233,21 +219,14 @@ pub fn is_file_locked(path: &Path) -> Result<bool> {
     use nix::fcntl::{Flock, FlockArg};
 
     match std::fs::OpenOptions::new().read(true).open(path) {
-      Ok(file) => {
-        // Try to acquire a non-blocking exclusive lock
-        match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-          Ok(_lock) => {
-            // Successfully locked, lock will be automatically released when _lock is dropped
-            Ok(false) // File was not locked
-          }
-          Err((_, nix::Error::EAGAIN)) => Ok(true), // File is locked
-          Err((_, error)) => Err(DotfilesError::Path(format!(
-            "Error checking file lock: {error}"
-          ))),
-        }
-      }
+      Ok(file) => match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
+        Ok(_lock) => Ok(false),
+        Err((_, nix::Error::EAGAIN)) => Ok(true),
+        Err((_, error)) => Err(DotfilesError::Path(format!(
+          "Error checking file lock: {error}"
+        ))),
+      },
       Err(error) => {
-        // If we can't open the file, assume it's locked
         log::warn!(
           "Could not open file '{}' to check lock status: {}",
           path.display(),
@@ -260,7 +239,6 @@ pub fn is_file_locked(path: &Path) -> Result<bool> {
 
   #[cfg(not(unix))]
   {
-    // On non-Unix systems, we can't check locks this way
     log::warn!("File locking detection not available on this platform");
     Ok(false)
   }

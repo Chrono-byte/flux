@@ -109,32 +109,21 @@ impl HealthReport {
 pub fn run_health_checks(config: &Config) -> Result<HealthReport> {
   let mut issues = Vec::new();
 
-  // Check symlink health
   check_symlinks(config, &mut issues)?;
 
-  // Check missing repo files
   check_missing_repo_files(config, &mut issues)?;
 
-  // Check config drift
   check_config_drift(config, &mut issues)?;
 
-  // Check invalid profiles
   check_invalid_profiles(config, &mut issues);
 
-  // Check git remotes
   check_git_remotes(config, &mut issues)?;
 
-  // Check unsafe permissions
   check_unsafe_permissions(config, &mut issues)?;
 
   Ok(HealthReport { issues })
 }
 
-/// Check the symlinks of the tracked files.
-///
-/// # Errors
-///
-/// Returns an error if there are issues reading files or the configuration.
 fn check_symlinks(
   config: &Config,
   issues: &mut Vec<HealthIssue>,
@@ -143,7 +132,7 @@ fn check_symlinks(
 
   for file in tracked_files {
     if !file.dest_path.exists() {
-      continue; // Not a symlink issue if it doesn't exist
+      continue;
     }
 
     if let Ok(link_target) = fs::read_link(&file.dest_path) {
@@ -173,11 +162,6 @@ fn check_symlinks(
   Ok(())
 }
 
-/// Check the missing repository files of the tracked files.
-///
-/// # Errors
-///
-/// Returns an error if there are issues reading files or the configuration.
 fn check_missing_repo_files(
   config: &Config,
   issues: &mut Vec<HealthIssue>,
@@ -193,11 +177,6 @@ fn check_missing_repo_files(
   Ok(())
 }
 
-/// Check the config drift of the tracked files.
-///
-/// # Errors
-///
-/// Returns an error if there are issues reading files or the configuration.
 fn check_config_drift(
   config: &Config,
   issues: &mut Vec<HealthIssue>,
@@ -211,7 +190,6 @@ fn check_config_drift(
       continue;
     }
 
-    // Skip if it's a correctly linked symlink
     if file.dest_path.is_symlink()
       && let Ok(link_target) = fs::read_link(&file.dest_path)
       && symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path)
@@ -219,7 +197,6 @@ fn check_config_drift(
       continue;
     }
 
-    // Check if content differs
     if let Ok(differ) = files_differ(&file.repo_path, &file.dest_path)
       && differ
     {
@@ -233,10 +210,6 @@ fn check_config_drift(
   Ok(())
 }
 
-/// Check the invalid profiles of the tracked files.
-///
-/// # Errors
-///
 fn check_invalid_profiles(
   config: &Config,
   issues: &mut Vec<HealthIssue>,
@@ -244,7 +217,6 @@ fn check_invalid_profiles(
   let repo_path = config.get_repo_path();
   let profiles_dir = repo_path.join("profiles");
 
-  // Check if current profile directory exists
   if config.general.current_profile != "default" {
     let current_profile_dir = profiles_dir.join(&config.general.current_profile);
     if !current_profile_dir.exists() {
@@ -256,11 +228,6 @@ fn check_invalid_profiles(
   }
 }
 
-/// Check the git remotes of the tracked files.
-///
-/// # Errors
-///
-/// Returns an error if there are issues reading files or the configuration.
 fn check_git_remotes(
   config: &Config,
   issues: &mut Vec<HealthIssue>,
@@ -269,9 +236,7 @@ fn check_git_remotes(
 
   let repo_path = config.get_repo_path();
 
-  // Try to open repository
   let Ok(repo) = Repository::open(&repo_path) else {
-    // Not a git repo, skip remote checks
     return Ok(());
   };
 
@@ -282,7 +247,6 @@ fn check_git_remotes(
       && let Ok(remote) = repo.find_remote(name)
       && let Some(url) = remote.url()
     {
-      // Basic validation: check if URL looks valid
       let reason = if url.is_empty() {
         Some("Remote URL is empty")
       } else if !is_supported_remote_url(url) {
@@ -304,7 +268,6 @@ fn check_git_remotes(
   Ok(())
 }
 
-/// Returns `true` if the remote URL has one of the supported prefixes.
 fn is_supported_remote_url(url: &str) -> bool {
   const PREFIXES: &[&str] = &["http://", "https://", "git@", "ssh://", "file://"];
   PREFIXES
@@ -312,11 +275,6 @@ fn is_supported_remote_url(url: &str) -> bool {
     .any(|prefix| url.starts_with(prefix))
 }
 
-/// Check the unsafe permissions of the tracked files.
-///
-/// # Errors
-///
-/// Returns an error if there are issues reading files or the configuration.
 fn check_unsafe_permissions(
   config: &Config,
   issues: &mut Vec<HealthIssue>,
@@ -329,7 +287,6 @@ fn check_unsafe_permissions(
   })?;
 
   for file in tracked_files {
-    // Check sensitive directories
     let sensitive_dirs = [".ssh", ".gnupg", ".aws"];
     let is_sensitive = sensitive_dirs
       .iter()
@@ -343,10 +300,7 @@ fn check_unsafe_permissions(
       let mode = perms.mode();
       let file_mode = mode & 0o777;
 
-      // Files in .ssh should be 600, directories 700
-      // Files in .gnupg should be 600, directories 700
       if file.dest_path.is_file() && file_mode & 0o077 != 0 {
-        // World or group readable/writable
         issues.push(HealthIssue::UnsafePermissions {
           path: file.dest_path.clone(),
           current_mode: format!("{file_mode:o}"),

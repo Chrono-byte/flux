@@ -13,7 +13,7 @@ pub enum ValidationIssue {
   /// Symlink is invalid or broken
   InvalidSymlink(TrackedFile),
   /// File exists in repo but not tracked in config
-  OrphanedEntry(String, String), // tool, file
+  OrphanedEntry(String, String),
   /// Profile directory is missing
   MissingProfileDir(String),
   /// Configuration has invalid values
@@ -38,7 +38,6 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
   let mut issues = Vec::new();
   let repo_path = config.get_repo_path();
 
-  // Check if repo exists
   if !repo_path.exists() {
     issues.push(ValidationIssue::InvalidConfig(format!(
       "Repository path does not exist: {}",
@@ -46,47 +45,39 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
     )));
   }
 
-  // Validate all tracked files
   let tracked_files = config.get_tracked_files(None)?;
 
   for file in &tracked_files {
-    // Check if repo file exists
     if !file.repo_path.exists() {
       issues.push(ValidationIssue::MissingRepoFile(file.clone()));
       continue;
     }
 
-    // Check if destination is a symlink
     if file.dest_path.exists() && file.dest_path.is_symlink() {
       if let Ok(link_target) = fs::read_link(&file.dest_path) {
         if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
           issues.push(ValidationIssue::InvalidSymlink(file.clone()));
         }
       } else {
-        // It's a symlink but we can't read it (broken)
         issues.push(ValidationIssue::InvalidSymlink(file.clone()));
       }
     }
   }
 
-  // Check for orphaned entries (files in repo but not in config)
   if repo_path.exists() {
     check_orphaned_entries(&repo_path, config, &mut issues)?;
   }
 
-  // Validate profiles
   let profiles_dir = repo_path.join("profiles");
   if profiles_dir.exists() {
     for entry in fs::read_dir(&profiles_dir)? {
       let entry = entry?;
       if entry.path().is_dir() {
         let _profile_name = entry.file_name().to_string_lossy().to_string();
-        // Profile directory exists, which is good
       }
     }
   }
 
-  // Check if current profile directory exists
   let current_profile_dir = repo_path
     .join("profiles")
     .join(&config.general.current_profile);
@@ -102,27 +93,11 @@ pub fn validate_config(config: &Config) -> Result<ValidationReport> {
   })
 }
 
-/// Check for orphaned entries in the repository.
-///
-/// # Parameters
-///
-/// * `repo_path`: The path to the repository.
-/// * `config`: The configuration.
-/// * `issues`: The issues to check for.
-///
-/// # Returns
-///
-/// Returns the orphaned entries.
-///
-/// # Errors
-///
-/// Returns an error if there are issues reading files or the configuration.
 fn check_orphaned_entries(
   repo_path: &Path,
   config: &Config,
   issues: &mut Vec<ValidationIssue>,
 ) -> Result<()> {
-  // Check each tool directory
   for (tool, tool_config) in &config.tools {
     let tool_dir = repo_path.join(tool);
 
@@ -130,19 +105,15 @@ fn check_orphaned_entries(
       continue;
     }
 
-    // Get all files in tool directory
     let mut repo_files = std::collections::HashSet::new();
     collect_files(&tool_dir, &tool_dir, &mut repo_files)?;
 
-    // Get files tracked in config
-    // Normalize repo paths: remove tool name prefix if present
     let mut tracked_files = std::collections::HashSet::new();
     for file_entry in &tool_config.files {
       let normalized_repo = normalize_repo_path(tool, &file_entry.repo);
       let _ = tracked_files.insert(normalized_repo);
     }
 
-    // Collect folder coverage data
     let mut folder_paths = Vec::new();
     let mut root_folder_covered = false;
     for folder_entry in &tool_config.folders {
@@ -155,11 +126,9 @@ fn check_orphaned_entries(
     }
 
     if root_folder_covered {
-      // Entire tool directory is covered by a folder entry, so skip orphan checks.
       continue;
     }
 
-    // Find orphaned files
     for repo_file in repo_files {
       let repo_path = Path::new(&repo_file);
 
@@ -179,7 +148,6 @@ fn check_orphaned_entries(
   Ok(())
 }
 
-/// Normalize a repo path relative to its tool directory.
 fn normalize_repo_path(
   tool: &str,
   repo: &str,
@@ -198,17 +166,6 @@ fn normalize_repo_path(
   repo.to_string()
 }
 
-/// Collect files from a directory.
-///
-/// # Parameters
-///
-/// * `base`: The base path.
-/// * `dir`: The directory to collect files from.
-/// * `files`: The files to collect.
-///
-/// # Returns
-///
-/// Returns the collected files.
 fn collect_files(
   base: &Path,
   dir: &Path,

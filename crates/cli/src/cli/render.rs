@@ -1,9 +1,3 @@
-//! Render functions for the CLI.
-//!
-//! This module provides functions for rendering output to the console during CLI operations.
-//!
-//! Implemented post migration from lib => cli for rendering.
-
 use colored::Colorize;
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -23,7 +17,6 @@ use flux_lib::services::git::{
 use flux_lib::types::FileChange;
 use flux_lib::utils::dry_run::{DryRun, Operation};
 
-/// Display a preview of changes that would be applied
 pub(super) fn display_preview(diff: &StateDiff) {
   println!("\n{} Preview of changes:", "→".cyan().bold());
 
@@ -49,7 +42,6 @@ pub(super) fn display_preview(diff: &StateDiff) {
   println!("\n  {} Total changes: {}", "→".cyan(), diff.total_changes());
 }
 
-/// Display a summary of the dry run operations.
 pub(super) fn display_dry_run_summary(dry_run: &DryRun) {
   if dry_run.operations().is_empty() {
     println!("{}", "No operations to perform.".yellow());
@@ -85,6 +77,9 @@ pub(super) fn display_dry_run_summary(dry_run: &DryRun) {
           from.display(),
           to.display()
         );
+      }
+      Operation::Rename { from, to } => {
+        println!("  Rename {} → {}", from.display(), to.display());
       }
       Operation::RemoveFile { path } => {
         println!("   {} {}", "Remove file:".red(), path.display());
@@ -156,7 +151,6 @@ pub(super) fn display_dry_run_summary(dry_run: &DryRun) {
   );
 }
 
-/// Display the result of an apply command.
 pub(super) fn display_apply_report(report: &ApplyReport) {
   match report.status {
     ApplyStatus::NoChanges => {
@@ -185,7 +179,6 @@ pub(super) fn display_apply_report(report: &ApplyReport) {
   }
 }
 
-/// Display the result of a migrate command.
 pub(super) fn display_migrate_report(report: &MigrateReport) {
   if report.discrepancies == 0 {
     println!(
@@ -207,7 +200,6 @@ pub(super) fn display_migrate_report(report: &MigrateReport) {
   );
 }
 
-/// Display the result of a sync operation.
 pub(super) fn display_sync_report(report: &SyncReport) {
   if report.synced == 0 && report.skipped == 0 {
     println!("{}", "⊘ No files to sync".yellow());
@@ -222,7 +214,6 @@ pub(super) fn display_sync_report(report: &SyncReport) {
   );
 }
 
-/// Display the result of a commit operation.
 pub(super) fn display_commit_report(report: &CommitReport) {
   if let Some(branch_name) = &report.branch_name {
     println!(
@@ -236,7 +227,6 @@ pub(super) fn display_commit_report(report: &CommitReport) {
   }
 }
 
-/// Display a list of remotes.
 pub(super) fn display_remote_list(report: &RemoteListReport) {
   if report.remotes.is_empty() {
     println!("{}", "⊘ No remotes configured.".yellow());
@@ -251,7 +241,6 @@ pub(super) fn display_remote_list(report: &RemoteListReport) {
   println!();
 }
 
-/// Display the result of a push operation.
 pub(super) fn display_push_report(report: &PushReport) {
   if report.up_to_date {
     println!("Everything up-to-date");
@@ -291,7 +280,6 @@ pub(super) fn display_push_report(report: &PushReport) {
   }
 }
 
-/// Display the result of a pull operation.
 pub(super) fn display_pull_report(report: &PullReport) {
   if report.up_to_date {
     println!("Already up-to-date.");
@@ -336,7 +324,6 @@ pub(super) fn display_pull_report(report: &PullReport) {
   }
 }
 
-/// Display the result of a git status operation.
 pub(super) fn display_git_status(report: &GitStatusReport) {
   let Some(branch_name) = &report.branch_name else {
     println!("{}", "⊘ Not on any branch".yellow());
@@ -399,7 +386,6 @@ pub(super) fn display_git_status(report: &GitStatusReport) {
   println!();
 }
 
-/// Format the diffs for display.
 pub(super) fn format_diffs(diff: &StateDiff) -> String {
   if diff.files_to_sync.is_empty() {
     return String::new();
@@ -439,7 +425,6 @@ pub(super) fn format_diffs(diff: &StateDiff) -> String {
   out
 }
 
-/// Display the diffs for the given state diff.
 pub(super) fn display_diffs(diff: &StateDiff) {
   let output = format_diffs(diff);
   if output.is_empty() {
@@ -448,7 +433,6 @@ pub(super) fn display_diffs(diff: &StateDiff) {
   print!("{output}");
 }
 
-/// Display the validation report for the given validation report.
 pub(super) fn display_validation(report: &ValidationReport) {
   if report.is_valid {
     println!("{}", "✓ Configuration is valid!".green().bold());
@@ -494,7 +478,6 @@ pub(super) fn display_validation(report: &ValidationReport) {
   );
 }
 
-/// Display the status reports for the given status reports.
 pub(super) fn display_status(reports: &[StatusReport]) {
   if reports.is_empty() {
     println!("{}", "No tracked files found.".yellow());
@@ -574,7 +557,6 @@ pub(super) fn display_status(reports: &[StatusReport]) {
   }
 }
 
-/// Display the health report for the given health report.
 pub(super) fn display_health_report(report: &HealthReport) {
   if report.is_healthy() {
     println!("{} All health checks passed!", "✓".green().bold());
@@ -668,7 +650,6 @@ pub(super) fn display_health_report(report: &HealthReport) {
   );
 }
 
-/// Display the report for the given validation: state diff, and health report.
 pub(super) fn display_doctor_report(
   report: &ValidationReport,
   diff: &StateDiff,
@@ -699,7 +680,6 @@ pub(super) fn display_doctor_report(
   display_health_report(health_report);
 }
 
-/// Display the given discrepancies.
 pub(super) fn display_discrepancies(discrepancies: &[Discrepancy]) {
   if discrepancies.is_empty() {
     println!(
@@ -784,9 +764,6 @@ pub(super) fn display_discrepancies(discrepancies: &[Discrepancy]) {
   );
 }
 
-/// Format a file path as a string.
-///
-/// TODO: This really should do more than just display the path raw
 fn format_file_path(path: &std::path::Path) -> String {
   path.display().to_string()
 }

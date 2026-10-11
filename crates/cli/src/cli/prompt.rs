@@ -1,7 +1,3 @@
-//! Prompt functions for the CLI.
-//!
-//! This module provides functions for prompting the user for input during CLI operations.
-
 use colored::Colorize;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
 use flux_lib::types::FileChange;
@@ -9,9 +5,6 @@ use flux_lib::utils::error::{DotfilesError, Result};
 use flux_lib::utils::prompt::{ConflictChoice, YesNoChoice};
 use std::path::Path;
 
-/// Prompt the user for a conflict resolution choice.
-///
-/// This function displays a conflict prompt to the user and waits for their selection.
 pub(super) fn prompt_conflict_choice(file_path: &Path) -> Result<ConflictChoice> {
   let options = vec![
     "Keep local version",
@@ -39,9 +32,6 @@ pub(super) fn prompt_conflict_choice(file_path: &Path) -> Result<ConflictChoice>
   }
 }
 
-/// Prompt the user for a yes/no question.
-///
-/// This function displays a yes/no prompt to the user and waits for their selection.
 pub(super) fn prompt_yes_no(question: &str) -> Result<bool> {
   let options = vec!["Yes", "No"];
 
@@ -61,9 +51,6 @@ pub(super) fn prompt_yes_no(question: &str) -> Result<bool> {
   Ok(bool::from(choice))
 }
 
-/// Prompt the user for a commit message.
-///
-/// This function displays a commit prompt to the user and waits for their input.
 pub(super) fn prompt_commit_message(changes: &[FileChange]) -> Result<String> {
   if changes.is_empty() {
     return Ok("Update dotfiles".to_string());

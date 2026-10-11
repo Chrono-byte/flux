@@ -7,7 +7,6 @@ use crate::utils::error::{DotfilesError, Result};
 use crate::utils::path_utils::{files_differ, symlink_points_to_correct_target};
 use std::fs;
 
-/// Callback used by the CLI to confirm whether apply should proceed.
 type ConfirmCallback<'a> = dyn Fn(&str) -> Result<bool> + 'a;
 
 /// Options for applying configuration
@@ -88,7 +87,6 @@ pub fn compare_states(
 ) -> Result<StateDiff> {
   let mut diff = StateDiff::default();
 
-  // Compare files
   let tracked_files = config.get_tracked_files(profile)?;
   for file in tracked_files {
     if needs_sync(&file, force)? {
@@ -99,46 +97,39 @@ pub fn compare_states(
   Ok(diff)
 }
 
-/// Check if a file needs to be synced
 fn needs_sync(
   file: &TrackedFile,
   force: bool,
 ) -> Result<bool> {
   if !file.repo_path.exists() {
-    return Ok(false); // Skip if repo file doesn't exist
+    return Ok(false);
   }
 
   if !file.dest_path.exists() && !file.dest_path.is_symlink() {
-    return Ok(true); // Destination doesn't exist, needs sync
+    return Ok(true);
   }
 
-  // Check if it's a symlink and correctly linked
   if file.dest_path.is_symlink()
     && let Ok(link_target) = fs::read_link(&file.dest_path)
   {
     if !symlink_points_to_correct_target(&file.dest_path, &link_target, &file.repo_path) {
-      return Ok(true); // Symlink points to wrong location
+      return Ok(true);
     }
 
-    // In force mode, we still sync if it's not a symlink, but if it's correctly linked, we're done
     if !force {
-      return Ok(false); // Already correctly linked
+      return Ok(false);
     }
-    // In force mode, if it's correctly linked, no need to sync
     return Ok(false);
   }
 
-  // If force mode, always sync if it's not a correct symlink (don't check content)
   if force {
-    return Ok(true); // Not a symlink or wrong symlink, force replace
+    return Ok(true);
   }
 
-  // Check if files differ
   if files_differ(&file.repo_path, &file.dest_path)? {
     return Ok(true);
   }
 
-  // Files are identical but dest is not a symlink, should convert
   Ok(true)
 }
 
@@ -151,7 +142,6 @@ pub fn apply_config(
   options: &ApplyOptions<'_>,
   confirm: Option<&ConfirmCallback<'_>>,
 ) -> Result<ApplyReport> {
-  // Compare states
   let diff = compare_states(options.config, options.profile, options.force)?;
 
   if diff.is_empty() {
@@ -162,10 +152,8 @@ pub fn apply_config(
     });
   }
 
-  // Run pre-apply hooks (if not dry-run)
   run_pre_apply_hooks(options)?;
 
-  // Confirm if not auto-yes
   if !options.dry_run && !options.yes {
     let Some(confirm) = confirm else {
       return Err(DotfilesError::Config(
@@ -190,37 +178,27 @@ pub fn apply_config(
     });
   }
 
-  // Create and setup transaction
   let mut transaction = create_and_setup_transaction(options, &diff)?;
 
-  // Execute transaction
   let mut dry_run_tracker = DryRun::default();
   let mut fs_manager = FileSystemManager::new(&mut dry_run_tracker, false);
 
-  // Validate
   transaction.validate(options.config)?;
 
-  // Prepare
-  transaction.prepare(options.config)?;
+  transaction.prepare()?;
 
-  // Commit
   transaction.commit(options.config, &mut fs_manager)?;
 
-  // Verify
   transaction.verify()?;
 
-  // The filesystem transaction is committed and verified at this point.
-  // Cleanup and bookkeeping failures must not report the apply itself as failed.
   if let Err(error) = transaction.cleanup() {
     log::warn!("Applied changes, but failed to clean up transaction files: {error}");
   }
 
-  // Run post-apply hooks
   if let Err(error) = run_post_apply_hooks(options) {
     log::warn!("Applied changes, but post-apply hooks could not be completed: {error}");
   }
 
-  // Record history event
   let profile_str = options.profile.map(ToString::to_string);
   let history_event = history::HistoryEvent {
     timestamp: chrono::Utc::now(),
@@ -241,7 +219,6 @@ pub fn apply_config(
   })
 }
 
-/// Run pre-apply hooks if configured.
 fn run_pre_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
   if !options.dry_run
     && let Some(hooks_config) = &options.config.hooks
@@ -263,14 +240,12 @@ fn run_pre_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
         result.stdout.is_empty(),
       ) {
         (false, false, _) => {
-          // return an error if stderr is not empty and does not contain "Hook skipped"
           return Err(DotfilesError::Config(format!(
             "Pre-apply hook produced stderr: {}",
             result.stderr
           )));
         }
         (_, _, false) => {
-          // return an error if stdout is not empty
           return Err(DotfilesError::Config(format!(
             "Pre-apply hook produced stdout: {}",
             result.stdout
@@ -283,7 +258,6 @@ fn run_pre_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
   Ok(())
 }
 
-/// Create and setup transaction with all file operations.
 fn create_and_setup_transaction(
   options: &ApplyOptions<'_>,
   diff: &StateDiff,
@@ -291,7 +265,6 @@ fn create_and_setup_transaction(
   let temp_dir = tempfile::tempdir()?.keep();
   let mut transaction = Transaction::begin(temp_dir)?;
 
-  // Add metadata
   if let Some(desc) = options.description {
     let _ = transaction
       .metadata
@@ -306,7 +279,6 @@ fn create_and_setup_transaction(
     .metadata
     .insert("timestamp".to_string(), chrono::Utc::now().to_rfc3339());
 
-  // Add file operations
   let symlink_resolution = options.config.general.symlink_resolution;
   for file in &diff.files_to_sync {
     add_file_operation_to_transaction(&mut transaction, file, symlink_resolution);
@@ -315,13 +287,12 @@ fn create_and_setup_transaction(
   Ok(transaction)
 }
 
-/// Run post-apply hooks if configured.
 fn run_post_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
   if let Some(hooks_config) = &options.config.hooks
     && let Some(post_hooks) = &hooks_config.post_apply
   {
     use crate::services::hooks::execute_hooks;
-    let hook_results = execute_hooks(post_hooks, options.config, None, false)?; // Don't fail-fast on post hooks
+    let hook_results = execute_hooks(post_hooks, options.config, None, false)?;
     for result in hook_results {
       if !result.success {
         log::warn!(
@@ -335,12 +306,6 @@ fn run_post_apply_hooks(options: &ApplyOptions<'_>) -> Result<()> {
   Ok(())
 }
 
-/// Add a file operation to the transaction.
-///
-/// Replacement is handled atomically by `Transaction`: it stages the new
-/// link before moving any existing destination into the transaction backup
-/// directory. Keeping removal out of the operation list also lets rollback
-/// restore the original destination if a later operation fails.
 fn add_file_operation_to_transaction(
   transaction: &mut Transaction,
   file: &TrackedFile,
